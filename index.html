@@ -1349,5 +1349,413 @@ function clearAllData() {
 // ── 初始化 ────────────────────────────────────────────────
 checkSession();
 </script>
+<script>
+/**
+ * ════════════════════════════════════════════════════════════════════
+ *  太平新光分校 管理後台 — Google Sheets 同步模組
+ *  檔案：admin-sheets-sync.js
+ *
+ *  用途：
+ *    將此腳本貼入 xinguang-admin/index.html 的 <script> 區塊，
+ *    並在頁面適當位置加入同步按鈕：
+ *
+ *    <button onclick="syncFromSheets()" id="btnSheetsSync"
+ *      style="background:#2B7A4B;color:#fff;border:none;border-radius:8px;
+ *             padding:10px 20px;font-size:0.95rem;cursor:pointer;font-weight:700;">
+ *      📊 從 Google Sheets 同步
+ *    </button>
+ *
+ *  資料來源（以公開 CSV 匯出端點讀取，無需 OAuth，僅限公開試算表）：
+ *    Google Sheets ID: 1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w
+ *    工作表：問課諮詢 / 預約紀錄 / 夏令營報名 / 正式註冊
+ *
+ *  對應欄位：
+ *    問課諮詢  → _DB.inquiries
+ *    預約紀錄  → _DB.bookings
+ *    夏令營報名 → _DB.camp
+ *    正式註冊  → _DB.registrations
+ * ════════════════════════════════════════════════════════════════════
+ */
+
+(function () {
+
+  // ──────────────────────────────────────────────────────────────────
+  // 設定常數
+  // ──────────────────────────────────────────────────────────────────
+
+  /** Google Sheets 試算表 ID */
+  var SHEET_ID = '1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w';
+
+  /**
+   * 以 gviz/tq CSV 端點讀取各工作表。
+   * 試算表須設為「任何人可以查看」才能公開存取。
+   */
+  var SHEETS = {
+    inquiries:     '問課諮詢',
+    bookings:      '預約紀錄',
+    camp:          '夏令營報名',
+    registrations: '正式註冊'
+  };
+
+  /**
+   * 組合 CSV 匯出 URL
+   * @param {string} sheetName - 工作表名稱（中文亦支援，會自動 encode）
+   * @returns {string} 完整 URL
+   */
+  function csvUrl(sheetName) {
+    return (
+      'https://docs.google.com/spreadsheets/d/' +
+      SHEET_ID +
+      '/gviz/tq?tqx=out:csv&sheet=' +
+      encodeURIComponent(sheetName)
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // CSV 解析工具
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * 簡易 CSV 解析器，支援帶引號的欄位與換行。
+   * @param {string} text - 原始 CSV 字串
+   * @returns {string[][]} 二維陣列（列 × 欄）
+   */
+  function parseCsv(text) {
+    var rows = [];
+    var row  = [];
+    var cell = '';
+    var inQ  = false; // 是否在引號內
+
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      var next = text[i + 1];
+
+      if (inQ) {
+        if (ch === '"' && next === '"') {
+          // 跳脫引號 ""
+          cell += '"';
+          i++;
+        } else if (ch === '"') {
+          inQ = false;
+        } else {
+          cell += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQ = true;
+        } else if (ch === ',') {
+          row.push(cell.trim());
+          cell = '';
+        } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+          row.push(cell.trim());
+          rows.push(row);
+          row  = [];
+          cell = '';
+          if (ch === '\r') i++; // 跳過 \n（CR+LF）
+        } else {
+          cell += ch;
+        }
+      }
+    }
+
+    // 最後一格 / 最後一列
+    row.push(cell.trim());
+    if (row.some(function (c) { return c !== ''; })) {
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  /**
+   * 將二維陣列（第一列為標頭）轉為物件陣列。
+   * @param {string[][]} rows
+   * @returns {Object[]}
+   */
+  function rowsToObjects(rows) {
+    if (!rows || rows.length < 2) return [];
+    var headers = rows[0];
+    return rows.slice(1).map(function (row) {
+      var obj = {};
+      headers.forEach(function (h, i) {
+        obj[h] = row[i] !== undefined ? row[i] : '';
+      });
+      return obj;
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // 欄位對應（Sheets 欄位名稱 → _DB 欄位名稱）
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * 問課諮詢 → _DB.inquiries
+   * 欄位：時間戳記、家長姓名、電話、Email、LINE ID、孩子姓名（可能多筆）、班型、問題、狀態
+   */
+  function mapInquiry(row) {
+    // 孩子姓名可能存在「孩子姓名」或「孩子1」等欄位；彈性處理
+    var childrenNames = [];
+    ['孩子姓名', '孩子1', '孩子2', '孩子3'].forEach(function (k) {
+      if (row[k] && row[k].trim()) childrenNames.push({ name: row[k].trim() });
+    });
+
+    return {
+      ts:       row['時間戳記'] || row['時間'] || row['Timestamp'] || '',
+      parent:   row['家長姓名'] || row['家長'] || row['姓名'] || '',
+      phone:    row['電話'] || row['手機'] || '',
+      email:    row['Email'] || row['電子郵件'] || '',
+      line:     row['LINE ID'] || row['LINE'] || '',
+      children: childrenNames,
+      classes:  row['班型'] || row['有興趣的課程'] || '',
+      question: row['問題'] || row['想詢問的問題'] || '',
+      status:   row['狀態'] || 'new'
+    };
+  }
+
+  /**
+   * 預約紀錄 → _DB.bookings
+   * 欄位：時間戳記、家長姓名、電話、孩子姓名、類型、日期、時段、狀態
+   */
+  function mapBooking(row) {
+    return {
+      ts:          row['時間戳記'] || row['時間'] || row['Timestamp'] || '',
+      parent:      row['家長姓名'] || row['家長'] || row['姓名'] || '',
+      phone:       row['電話'] || row['手機'] || '',
+      child:       row['孩子姓名'] || row['孩子'] || '',
+      bookingType: row['類型'] || row['預約類型'] || '',
+      date:        row['日期'] || '',
+      slot:        row['時段'] || '',
+      status:      row['狀態'] || 'pending'
+    };
+  }
+
+  /**
+   * 夏令營報名 → _DB.camp
+   * 欄位：時間戳記、家長、電話、LINE ID、孩子、課程、飲食需求、狀態
+   */
+  function mapCamp(row) {
+    return {
+      ts:      row['時間戳記'] || row['時間'] || row['Timestamp'] || '',
+      pname:   row['家長'] || row['家長姓名'] || row['姓名'] || '',
+      phone:   row['電話'] || row['手機'] || '',
+      line:    row['LINE ID'] || row['LINE'] || '',
+      sname:   row['孩子'] || row['孩子姓名'] || '',
+      courses: row['課程'] || row['報名課程'] || '',
+      diet:    row['飲食'] || row['飲食需求'] || row['飲食限制'] || '',
+      status:  row['狀態'] || 'new'
+    };
+  }
+
+  /**
+   * 正式註冊 → _DB.registrations
+   * 欄位：時間、家長、電話、Email、學生、年級、班型、分班、附加服務、狀態
+   */
+  function mapRegistration(row) {
+    return {
+      ts:           row['時間'] || row['時間戳記'] || row['Timestamp'] || '',
+      parent:       row['家長'] || row['家長姓名'] || row['姓名'] || '',
+      phone:        row['電話'] || row['手機'] || '',
+      email:        row['Email'] || row['電子郵件'] || '',
+      studentName:  row['學生'] || row['學生姓名'] || '',
+      grade:        row['年級'] || '',
+      classType:    row['班型'] || '',
+      assessResult: row['分班'] || row['分班結果'] || '',
+      addons:       row['附加服務'] || '',
+      status:       row['狀態'] || 'active'
+    };
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // 主要同步函式（公開至全域）
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * syncFromSheets()
+   * 從 Google Sheets 讀取四個工作表，更新 _DB，存檔並重整畫面。
+   *
+   * 使用方式：
+   *   直接呼叫 syncFromSheets() 或綁定到按鈕的 onclick 事件。
+   */
+  window.syncFromSheets = function () {
+
+    // 顯示載入狀態
+    var btn = document.getElementById('btnSheetsSync');
+    if (btn) {
+      btn.disabled     = true;
+      btn.textContent  = '⏳ 同步中…';
+    }
+
+    var notify = document.getElementById('sheetsSyncStatus');
+    if (notify) {
+      notify.textContent = '';
+      notify.style.color = '#7B8794';
+    }
+
+    // 決定要抓取哪些工作表
+    var tasks = [
+      { key: 'inquiries',     sheet: SHEETS.inquiries,     mapper: mapInquiry     },
+      { key: 'bookings',      sheet: SHEETS.bookings,      mapper: mapBooking     },
+      { key: 'camp',          sheet: SHEETS.camp,          mapper: mapCamp        },
+      { key: 'registrations', sheet: SHEETS.registrations, mapper: mapRegistration}
+    ];
+
+    var results    = {};   // { key: [mapped objects] }
+    var errors     = [];   // 失敗的工作表名稱
+    var pending    = tasks.length;
+
+    /**
+     * 所有工作表都完成後（無論成功或失敗）執行此函式：
+     * 將結果寫入 _DB、存檔、刷新畫面。
+     */
+    function onAllDone() {
+
+      // 確認全域 _DB 存在
+      if (typeof _DB === 'undefined') {
+        console.error('[SheetsSync] 找不到 _DB，請確認管理後台已初始化。');
+        _showSyncResult(btn, notify, false, '找不到 _DB 物件，請確認後台已載入。');
+        return;
+      }
+
+      // 逐一更新 _DB 各集合
+      tasks.forEach(function (t) {
+        if (results[t.key]) {
+          _DB[t.key] = results[t.key];
+          console.log('[SheetsSync] ' + t.sheet + ' → ' + results[t.key].length + ' 筆');
+        }
+      });
+
+      // 儲存至 localStorage（透過後台提供的 saveData 函式）
+      if (typeof saveData === 'function') {
+        saveData(_DB);
+      } else {
+        // 備援：直接寫入 localStorage
+        try {
+          localStorage.setItem('xinguangAdminDB', JSON.stringify(_DB));
+        } catch (e) {
+          console.warn('[SheetsSync] localStorage 寫入失敗：', e);
+        }
+      }
+
+      // 刷新目前顯示的頁面
+      if (typeof renderCurrentView === 'function') {
+        renderCurrentView();
+      } else if (typeof loadView === 'function') {
+        loadView();
+      } else if (typeof renderTable === 'function') {
+        renderTable();
+      }
+
+      // 顯示結果訊息
+      var ok = errors.length === 0;
+      var msg = ok
+        ? '✅ 同步完成！共更新 ' +
+            Object.values(results).reduce(function (s, arr) { return s + arr.length; }, 0) +
+            ' 筆資料。'
+        : '⚠️ 部分工作表同步失敗：' + errors.join('、');
+
+      _showSyncResult(btn, notify, ok, msg);
+    }
+
+    // 逐一 fetch 每個工作表
+    tasks.forEach(function (t) {
+      var url = csvUrl(t.sheet);
+
+      fetch(url)
+        .then(function (resp) {
+          if (!resp.ok) {
+            throw new Error('HTTP ' + resp.status);
+          }
+          return resp.text();
+        })
+        .then(function (text) {
+          var rows    = parseCsv(text);
+          var objects = rowsToObjects(rows);
+          results[t.key] = objects.map(t.mapper);
+        })
+        .catch(function (err) {
+          console.error('[SheetsSync] 工作表「' + t.sheet + '」讀取失敗：', err);
+          errors.push(t.sheet);
+        })
+        .finally(function () {
+          pending--;
+          if (pending === 0) onAllDone();
+        });
+    });
+  };
+
+  // ──────────────────────────────────────────────────────────────────
+  // 輔助：顯示同步結果
+  // ──────────────────────────────────────────────────────────────────
+
+  /**
+   * 恢復按鈕狀態並顯示結果文字。
+   * @param {HTMLElement|null} btn     - 同步按鈕
+   * @param {HTMLElement|null} notify  - 顯示訊息的元素
+   * @param {boolean}          success - 是否成功
+   * @param {string}           msg     - 訊息文字
+   */
+  function _showSyncResult(btn, notify, success, msg) {
+    if (btn) {
+      btn.disabled    = false;
+      btn.textContent = '📊 從 Google Sheets 同步';
+    }
+    if (notify) {
+      notify.textContent = msg;
+      notify.style.color = success ? '#2B7A4B' : '#C0392B';
+    } else {
+      // 沒有通知元素時改用 console
+      success ? console.info('[SheetsSync]', msg) : console.warn('[SheetsSync]', msg);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // 頁面載入時，在後台工具列注入「同步按鈕」與「狀態文字」（選用）
+  // 若後台 HTML 已手動加入按鈕，此段可刪除。
+  // ──────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function () {
+
+    // 若頁面上已有 id="btnSheetsSync"，則略過自動注入
+    if (document.getElementById('btnSheetsSync')) return;
+
+    // 嘗試找到後台的工具列容器（常見 id 或 class）
+    var toolbar =
+      document.getElementById('adminToolbar') ||
+      document.getElementById('toolbar') ||
+      document.querySelector('.admin-toolbar') ||
+      document.querySelector('.toolbar') ||
+      document.querySelector('header') ||
+      document.querySelector('nav');
+
+    if (!toolbar) return; // 找不到就不注入
+
+    // 建立包裝容器
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'display:inline-flex;align-items:center;gap:10px;';
+
+    // 建立按鈕
+    var syncBtn = document.createElement('button');
+    syncBtn.id            = 'btnSheetsSync';
+    syncBtn.textContent   = '📊 從 Google Sheets 同步';
+    syncBtn.style.cssText =
+      'background:#2B7A4B;color:#fff;border:none;border-radius:8px;' +
+      'padding:9px 18px;font-size:0.9rem;font-weight:700;cursor:pointer;' +
+      'font-family:inherit;transition:background 0.2s;';
+    syncBtn.onmouseover = function () { this.style.background = '#1E5C37'; };
+    syncBtn.onmouseout  = function () { this.style.background = '#2B7A4B'; };
+    syncBtn.onclick     = window.syncFromSheets;
+
+    // 建立狀態文字
+    var statusEl = document.createElement('span');
+    statusEl.id            = 'sheetsSyncStatus';
+    statusEl.style.cssText = 'font-size:0.82rem;color:#7B8794;';
+
+    wrap.appendChild(syncBtn);
+    wrap.appendChild(statusEl);
+    toolbar.appendChild(wrap);
+  });
+
+})();
+
+</script>
 </body>
 </html>
