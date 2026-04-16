@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太平新光分校 後台管理系統</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --green:#2B7A4B;--green-light:#E8F5EE;--green-dark:#1a5c38;
+  --orange:#E8863A;--blue:#4A90D9;--purple:#7C3AED;
+  --red:#EF4444;--yellow:#F59E0B;
+  --bg:#F0F4F8;--surface:#fff;--border:#E2E8F0;
+  --text:#1A202C;--text-muted:#718096;
+  --sidebar-w:240px;
+}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column}
+
+/* ── Login ── */
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1a5c38,#2B7A4B)}
+.login-box{background:#fff;border-radius:16px;padding:40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,0.2)}
+.login-box h1{font-size:1.3rem;font-weight:800;color:var(--green);margin-bottom:6px}
+.login-box p{font-size:0.85rem;color:var(--text-muted);margin-bottom:28px}
+.login-field{margin-bottom:16px}
+.login-field label{display:block;font-size:0.82rem;font-weight:700;margin-bottom:6px;color:var(--text)}
+.login-field input{width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:8px;font-size:0.9rem;outline:none;transition:border 0.15s}
+.login-field input:focus{border-color:var(--green)}
+.login-btn{width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:12px;font-size:0.95rem;font-weight:700;cursor:pointer;margin-top:8px;transition:background 0.15s}
+.login-btn:hover{background:var(--green-dark)}
+.login-err{color:var(--red);font-size:0.82rem;margin-top:8px;display:none}
+
+/* ── App Layout ── */
+#appScreen{display:none;flex:1;flex-direction:row;min-height:100vh}
+
+/* Sidebar */
+.sidebar{width:var(--sidebar-w);background:var(--green-dark);color:#fff;display:flex;flex-direction:column;position:fixed;top:0;left:0;height:100vh;z-index:100}
+.sidebar-logo{padding:20px 20px 16px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.sidebar-logo strong{font-size:1rem;font-weight:800;display:block}
+.sidebar-logo span{font-size:0.72rem;opacity:0.6}
+.sidebar-menu{flex:1;padding:12px 0;overflow-y:auto}
+.sidebar-item{display:flex;align-items:center;gap:10px;padding:11px 20px;cursor:pointer;font-size:0.875rem;font-weight:600;color:rgba(255,255,255,0.75);transition:all 0.15s;border-left:3px solid transparent}
+.sidebar-item:hover{background:rgba(255,255,255,0.08);color:#fff}
+.sidebar-item.active{background:rgba(255,255,255,0.12);color:#fff;border-left-color:#7DFFB3}
+.sidebar-item .badge{margin-left:auto;background:var(--orange);color:#fff;border-radius:50px;padding:2px 8px;font-size:0.7rem;font-weight:800}
+.sidebar-bottom{padding:16px 20px;border-top:1px solid rgba(255,255,255,0.1)}
+.sidebar-bottom button{background:rgba(255,255,255,0.1);border:none;color:#fff;padding:8px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;width:100%}
+.sidebar-bottom button:hover{background:rgba(255,255,255,0.2)}
+
+/* Main */
+.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.topbar h2{font-size:1.15rem;font-weight:800}
+.topbar-actions{display:flex;gap:10px;align-items:center}
+.btn{padding:8px 16px;border-radius:7px;font-size:0.82rem;font-weight:700;cursor:pointer;border:none;transition:all 0.15s;display:inline-flex;align-items:center;gap:6px}
+.btn-green{background:var(--green);color:#fff}.btn-green:hover{background:var(--green-dark)}
+.btn-outline{background:#fff;color:var(--text);border:1.5px solid var(--border)}.btn-outline:hover{border-color:var(--green);color:var(--green)}
+.btn-red{background:var(--red);color:#fff}
+.content{padding:28px;flex:1}
+
+/* Dashboard */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:28px}
+.stat-card{background:#fff;border-radius:12px;padding:20px;border:1px solid var(--border)}
+.stat-card .num{font-size:2rem;font-weight:800;line-height:1}
+.stat-card .label{font-size:0.78rem;color:var(--text-muted);margin-top:6px;font-weight:600}
+.stat-card .sub{font-size:0.72rem;color:var(--text-muted);margin-top:4px}
+
+/* Table */
+.table-wrap{background:#fff;border-radius:12px;border:1px solid var(--border);overflow:hidden}
+.table-toolbar{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.table-toolbar input[type=text]{padding:8px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;outline:none;width:220px}
+.table-toolbar input:focus{border-color:var(--green)}
+.table-toolbar select{padding:8px 12px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;outline:none;background:#fff}
+.data-table{width:100%;border-collapse:collapse;font-size:0.82rem}
+.data-table th{background:#F7FAFC;padding:10px 14px;text-align:left;font-weight:700;font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;border-bottom:1px solid var(--border)}
+.data-table td{padding:11px 14px;border-bottom:1px solid #F0F4F8;vertical-align:top;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:#F7FAFC}
+.badge-status{display:inline-flex;align-items:center;padding:3px 9px;border-radius:50px;font-size:0.72rem;font-weight:700}
+.badge-pending{background:#FEF3C7;color:#92400E}
+.badge-contacted{background:#DBEAFE;color:#1E40AF}
+.badge-arranged{background:#D1FAE5;color:#065F46}
+.badge-enrolled{background:#EDE9FE;color:#5B21B6}
+.badge-cancelled{background:#FEE2E2;color:#991B1B}
+
+/* Detail Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:none;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:680px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 60px rgba(0,0,0,0.3)}
+.modal-header{padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;z-index:10}
+.modal-header h3{font-size:1rem;font-weight:800}
+.modal-close{background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-muted);padding:4px 8px}
+.modal-body{padding:24px}
+.detail-row{display:flex;margin-bottom:12px;font-size:0.87rem}
+.detail-label{width:110px;flex-shrink:0;font-weight:700;color:var(--text-muted)}
+.detail-val{flex:1;word-break:break-word;white-space:pre-wrap}
+.detail-section{font-weight:800;font-size:0.8rem;color:var(--green);text-transform:uppercase;letter-spacing:0.06em;margin:16px 0 8px;padding-bottom:6px;border-bottom:2px solid var(--green-light)}
+.script-box{background:#1E2A20;color:#7DFFB3;border-radius:8px;padding:14px;font-size:0.78rem;line-height:1.7;white-space:pre-wrap;font-family:monospace;max-height:300px;overflow-y:auto}
+.status-select{padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-size:0.82rem;background:#fff;cursor:pointer}
+
+/* Child cards */
+.child-card{background:var(--green-light);border-radius:8px;padding:12px 14px;margin-bottom:8px;font-size:0.85rem}
+.child-card strong{color:var(--green-dark)}
+
+/* Empty state */
+.empty-state{text-align:center;padding:60px 20px;color:var(--text-muted)}
+.empty-state .icon{font-size:3rem;margin-bottom:12px}
+.empty-state p{font-size:0.9rem}
+
+/* Tabs inside sections */
+.section-tabs{display:flex;gap:6px;margin-bottom:20px;flex-wrap:wrap}
+.section-tab{padding:7px 16px;border-radius:50px;border:1.5px solid var(--border);font-size:0.82rem;font-weight:600;cursor:pointer;background:#fff;color:var(--text-muted);transition:all 0.15s}
+.section-tab.active{background:var(--green);color:#fff;border-color:var(--green)}
+
+/* Notification toast */
+.toast{position:fixed;bottom:24px;right:24px;background:#1E2A20;color:#7DFFB3;padding:12px 20px;border-radius:10px;font-size:0.85rem;font-weight:600;z-index:300;transform:translateY(80px);opacity:0;transition:all 0.3s}
+.toast.show{transform:translateY(0);opacity:1}
+
+@media(max-width:768px){
+  .sidebar{width:100%;height:auto;position:relative}
+  .main{margin-left:0}
+  #appScreen{flex-direction:column}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <div class="login-box">
+    <h1>🏫 太平新光分校</h1>
+    <p>後台管理系統 · 請登入</p>
+    <div class="login-field">
+      <label>帳號</label>
+      <input type="text" id="loginUser" placeholder="admin" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <div class="login-field">
+      <label>密碼</label>
+      <input type="password" id="loginPass" placeholder="••••••" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="login-btn" onclick="doLogin()">登入</button>
+    <div class="login-err" id="loginErr">帳號或密碼錯誤</div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="appScreen">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <strong>太平新光分校</strong>
+      <span>後台管理系統</span>
+    </div>
+    <div class="sidebar-menu">
+      <div class="sidebar-item active" onclick="switchSection('dashboard')" id="nav-dashboard">
+        📊 儀表板
+      </div>
+      <div class="sidebar-item" onclick="switchSection('inquiry')" id="nav-inquiry">
+        📋 問課諮詢 <span class="badge" id="badge-inquiry">0</span>
+      </div>
+      <div class="sidebar-item" onclick="switchSection('booking')" id="nav-booking">
+        📅 預約紀錄 <span class="badge" id="badge-booking">0</span>
+      </div>
+      <div class="sidebar-item" onclick="switchSection('camp')" id="nav-camp">
+        🏕️ 夏令營報名 <span class="badge" id="badge-camp">0</span>
+      </div>
+      <div class="sidebar-item" onclick="switchSection('assess')" id="nav-assess">
+        📝 分級檢測 <span class="badge" id="badge-assess">0</span>
+      </div>
+      <div class="sidebar-item" onclick="switchSection('register')" id="nav-register">
+        🎓 正式報名 <span class="badge" id="badge-register">0</span>
+      </div>
+    </div>
+      <div class="sidebar-item" onclick="switchSection('trial')" id="nav-trial">
+        🗓️ 體驗課排班
+      </div>
+    <div class="sidebar-bottom">
+      <button onclick="doLogout()">登出</button>
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <h2 id="pageTitle">儀表板</h2>
+      <div class="topbar-actions">
+        <span id="topbarTime" style="font-size:0.78rem;color:var(--text-muted)"></span>
+        <button class="btn btn-outline" onclick="importJSON()" title="匯入 JSON 備份或從主網站複製的資料">⬆ 匯入資料</button>
+        <button class="btn btn-outline" onclick="exportJSON()">💾 備份 JSON</button>
+        <button class="btn btn-outline" onclick="exportCSV()">⬇ 匯出 CSV</button>
+        <button class="btn btn-red" style="font-size:0.78rem;padding:6px 12px" onclick="clearAllData()">清除</button>
+      </div>
+    </div>
+    <div class="content" id="mainContent">
+      <!-- 動態內容 -->
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">詳細資料</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── 設定 ──────────────────────────────────────────────────
+const ADMIN_USERS = { 'admin': 'xinguang2026', 'teacher': 'teacher123' };
+// 資料存在記憶體，請用匯出/匯入 JSON 備份
+
+// ── 資料層（記憶體 + JSON 匯出/匯入）────────────────────────
+var _DB = {"inquiries": [{"ts": "2026/4/8 上午10:23:15", "parent": "王美玲", "phone": "0912-345-678", "email": "wang.meiling@gmail.com", "line": "wang_ml_0912", "children": [{"name": "王小宇", "grade": "國小3年級", "goal": "fast", "days": "5", "oral": {"oral_intro": "g1_lo", "oral_past": "gk", "oral_compare": "none", "current_study": "school", "predictedOralLevel": "G1"}}], "classes": "菁英班、標準班", "question": "孩子有點害羞，希望老師能多鼓勵", "status": "待回電", "callScript": "您好，我是太平新光分校，請問是 王美玲 嗎？\n\n一、確認聯繫資料\n  📞 0912-345-678　📧 wang.meiling@gmail.com\n\n二、孩子 1：王小宇（國小3年級）\n  · 目標：快速提升英文　偏好天數：5\n  · 預判口說程度：一年級程度（G1）\n  · 自我介紹：片語程度　描述過去：單字\n\n  ❓ 引導問題：\n  → 學校英文大概幾分？有沒有考試截止壓力？\n  💡 程度提示：預判 G1，建議 G1 口說題組，觀察完整句子能力\n\n三、安排下一步\n  → 免費程度檢測（口說+閱讀+筆試，約 60 分鐘）"}, {"ts": "2026/4/8 下午2:45:30", "parent": "陳建志", "phone": "0923-456-789", "email": "chen.jz@yahoo.com.tw", "line": "chenjz_bb", "children": [{"name": "陳怡君", "grade": "國小1年級", "goal": "env", "days": "5", "oral": {"oral_intro": "gk", "oral_past": "none", "oral_compare": "none", "current_study": "none", "predictedOralLevel": "GK"}}, {"name": "陳怡安", "grade": "大班", "goal": "env", "days": "5", "oral": {"oral_intro": "none", "oral_past": "none", "oral_compare": "none", "current_study": "none", "predictedOralLevel": "GK"}}], "classes": "浸潤班", "question": "兩個孩子一起報，方便嗎？", "status": "已回電", "callScript": "您好，我是太平新光分校，請問是 陳建志 嗎？\n二個孩子都是零基礎，建議從浸潤班 GK 程度開始。"}, {"ts": "2026/4/9 上午9:10:05", "parent": "林淑芬", "phone": "0934-567-890", "email": "lin.sf2026@gmail.com", "line": "", "children": [{"name": "林俊豪", "grade": "國小5年級", "goal": "cert", "days": "3", "oral": {"oral_intro": "g1_hi", "oral_past": "g1_hi", "oral_compare": "g1_lo", "current_study": "cram", "predictedOralLevel": "G1-G2"}}], "classes": "全民英檢班、菁英班", "question": "孩子目標今年考過英檢初級", "status": "已安排檢測", "callScript": "已安排 4/12 下午 14:00 程度檢測。"}, {"ts": "2026/4/9 下午4:30:22", "parent": "張志明", "phone": "0945-678-901", "email": "chang.zm@hotmail.com", "line": "chang_zm0945", "children": [{"name": "張小涵", "grade": "國小2年級", "goal": "stable", "days": "2", "oral": {"oral_intro": "g1_lo", "oral_past": "gk", "oral_compare": "none", "current_study": "school", "predictedOralLevel": "GK-G1"}}], "classes": "標準班", "question": "", "status": "待回電", "callScript": "建議標準班，每週2天穩健學習。"}, {"ts": "2026/4/9 晚上7:55:40", "parent": "黃雅婷", "phone": "0956-789-012", "email": "huang.yt88@gmail.com", "line": "huang_yt88", "children": [{"name": "黃承恩", "grade": "國中1年級", "goal": "fast", "days": "3", "oral": {"oral_intro": "g2up", "oral_past": "g2up", "oral_compare": "g1_hi", "current_study": "cram", "predictedOralLevel": "G2+"}}], "classes": "菁英班、全民英檢班", "question": "之前在別的補習班學過兩年，程度還不錯", "status": "已安排檢測", "callScript": "預判 G2 以上程度，建議 G2 口說題組。已安排 4/10 下午 14:00 檢測。"}], "bookings": [{"ts": "2026/4/8 上午11:30:00", "parent": "王美玲", "phone": "0912-345-678", "child": "王小宇", "bookingType": "英文程度檢測", "date": "2026-04-12", "slot": "14:00-15:00", "cls": "菁英班", "note": "", "status": "已確認"}, {"ts": "2026/4/8 下午3:00:00", "parent": "陳建志", "phone": "0923-456-789", "child": "陳怡君", "bookingType": "參訪校區", "date": "2026-04-11", "slot": "19:00-20:00", "cls": "浸潤班", "note": "兩個孩子一起來", "status": "已完成"}, {"ts": "2026/4/9 上午10:15:00", "parent": "林淑芬", "phone": "0934-567-890", "child": "林俊豪", "bookingType": "英文程度檢測", "date": "2026-04-12", "slot": "14:00-15:00", "cls": "全民英檢班", "note": "目標今年英檢初級", "status": "待確認"}, {"ts": "2026/4/9 下午5:20:00", "parent": "黃雅婷", "phone": "0956-789-012", "child": "黃承恩", "bookingType": "課程體驗", "date": "2026-04-16", "slot": "16:30-17:30", "cls": "菁英班", "note": "", "status": "待確認"}, {"ts": "2026/4/9 晚上8:05:00", "parent": "張志明", "phone": "0945-678-901", "child": "張小涵", "bookingType": "參訪校區 + 英文程度檢測", "date": "2026-04-15", "slot": "14:00-15:00", "cls": "標準班", "note": "", "status": "待確認"}], "camp": [{"ts": "2026/4/7 上午9:00:00", "pname": "李國豪", "phone": "0967-890-123", "line": "lgh_camp26", "sname": "李品妤", "grade": "國小4年級", "enrolled": "no", "courses": {"july": {"weeks": ["第二週 7/06-7/10", "第三週 7/13-7/17"], "days": 10}, "aug": {}}, "diet": "無", "earlyBird": true, "status": "已確認"}, {"ts": "2026/4/8 下午1:30:00", "pname": "吳秀蘭", "phone": "0978-901-234", "line": "", "sname": "吳柏翰", "grade": "國小2年級", "enrolled": "no", "courses": {"july": {}, "aug": {"weeks": ["第二週 8/03-8/07", "第三週 8/10-8/14", "第四週 8/17-8/21"], "days": 15}}, "diet": "堅果過敏", "earlyBird": true, "status": "待確認"}, {"ts": "2026/4/9 上午8:45:00", "pname": "蔡明哲", "phone": "0989-012-345", "line": "cai_mz89", "sname": "蔡宜蓁", "grade": "國小3年級", "enrolled": "yes", "courses": {"july": {"weeks": ["第三週 7/13-7/17", "第四週 7/20-7/24"], "days": 10}, "aug": {"weeks": ["第一週 7/29-7/31"], "days": 3}}, "diet": "素食", "earlyBird": true, "status": "待確認"}, {"ts": "2026/4/9 下午2:10:00", "pname": "鄭雅雯", "phone": "0900-123-456", "line": "zheng_yw", "sname": "鄭宸語", "grade": "大班", "enrolled": "no", "courses": {"july": {"weeks": ["第二週 7/06-7/10", "第三週 7/13-7/17", "第四週 7/20-7/24"], "days": 15}, "aug": {}}, "diet": "無", "earlyBird": false, "status": "已繳費"}], "assessments": [{"ts": "2026/4/9 下午2:30:00", "studentName": "王小宇", "grade": "國小3年級", "oralLevel": "G1", "oralScore": "2.5", "readingStop": "1B", "writtenPaper": "G1", "writtenScore": "38", "finalClass": "1B", "teacherNote": "字母拼讀穩定，句子結構稍弱，建議 1B 班型加強"}, {"ts": "2026/4/9 下午3:30:00", "studentName": "陳怡君", "grade": "國小1年級", "oralLevel": "GK", "oralScore": "1.5", "readingStop": "SA", "writtenPaper": "Starter", "writtenScore": "28", "finalClass": "SB", "teacherNote": "認識基本顏色和數字，建議從 SB 開始扎根"}, {"ts": "2026/4/9 下午4:15:00", "studentName": "黃承恩", "grade": "國中1年級", "oralLevel": "G2", "oralScore": "4", "readingStop": "2C", "writtenPaper": "G2", "writtenScore": "61", "finalClass": "2C", "teacherNote": "程度不錯，閱讀策略需要加強，建議 2C 菁英班"}, {"ts": "2026/4/9 下午5:00:00", "studentName": "林俊豪", "grade": "國小5年級", "oralLevel": "G1", "oralScore": "3", "readingStop": "1C", "writtenPaper": "G1", "writtenScore": "52", "finalClass": "1C", "teacherNote": "口說流暢但筆試偏弱，建議 1C 搭配英檢班備考"}], "registrations": [{"ts": "2026/4/9 下午3:00:00", "parent": "王美玲", "phone": "0912-345-678", "email": "wang.meiling@gmail.com", "line": "wang_ml_0912", "studentName": "王小宇", "grade": "國小3年級", "classType": "菁英班", "assessResult": "1B", "startDate": "2026-04-21", "note": "4/21 開始上課，週一三五下午", "status": "已確認"}, {"ts": "2026/4/9 下午4:30:00", "parent": "陳建志", "phone": "0923-456-789", "email": "chen.jz@yahoo.com.tw", "line": "chenjz_bb", "studentName": "陳怡君", "grade": "國小1年級", "classType": "浸潤班", "assessResult": "SB", "startDate": "2026-04-21", "note": "姊妹兩人一起報，妹妹陳怡安安排相同時段", "status": "在讀中"}, {"ts": "2026/4/9 下午5:30:00", "parent": "黃雅婷", "phone": "0956-789-012", "email": "huang.yt88@gmail.com", "line": "huang_yt88", "studentName": "黃承恩", "grade": "國中1年級", "classType": "菁英班", "assessResult": "2C", "startDate": "2026-04-28", "note": "目標一年內挑戰 3C，同時準備英檢中級", "status": "已繳費"}]};
+
+function loadData() { return _DB; }
+function saveData(data) { _DB = data; updateBadges(data); }
+function emptyData() {
+  return { inquiries:[], bookings:[], camp:[], assessments:[], registrations:[] };
+}
+
+// ── 登入 ──────────────────────────────────────────────────
+var _loggedIn = false;
+function doLogin() {
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  if (ADMIN_USERS[u] && ADMIN_USERS[u] === p) {
+    _loggedIn = true;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appScreen').style.display = 'flex';
+    initApp();
+  } else {
+    document.getElementById('loginErr').style.display = 'block';
+  }
+}
+function doLogout() {
+  _loggedIn = false;
+  document.getElementById('appScreen').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  _DB = emptyData();
+}
+function checkSession() {
+  // No persistent session - always show login
+}
+
+// ── 初始化 ────────────────────────────────────────────────
+let currentSection = 'dashboard';
+function initApp() {
+  setInterval(() => {
+    document.getElementById('topbarTime').textContent = new Date().toLocaleString('zh-TW');
+  }, 1000);
+  updateBadges(loadData());
+  switchSection('dashboard');
+  // 主網站資料可透過「匯入 JSON」功能載入
+}
+
+function updateBadges(data) {
+  const counts = {
+    inquiry: data.inquiries.filter(r=>r.status==='待回電'||!r.status).length,
+    booking: data.bookings.filter(r=>r.status==='待確認').length,
+    camp: data.camp.filter(r=>r.status==='待確認').length,
+    assess: data.assessments.filter(r=>!r.finalClass).length,
+    register: data.registrations.filter(r=>r.status==='待處理').length,
+  };
+  Object.entries(counts).forEach(([k,v]) => {
+    const el = document.getElementById('badge-'+k);
+    if(el) { el.textContent = v; el.style.display = v > 0 ? '' : 'none'; }
+  });
+}
+
+function switchSection(sec) {
+  currentSection = sec;
+  document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+  const navEl = document.getElementById('nav-'+sec);
+  if(navEl) navEl.classList.add('active');
+  const titles = {
+    dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
+    camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
+    trial:'🗓️ 體驗課排班'
+  };
+  document.getElementById('pageTitle').textContent = titles[sec] || sec;
+  const content = document.getElementById('mainContent');
+  if(sec === 'dashboard') renderDashboard(content);
+  else if(sec === 'inquiry') renderInquiry(content);
+  else if(sec === 'booking') renderBooking(content);
+  else if(sec === 'camp') renderCamp(content);
+  else if(sec === 'assess') renderAssess(content);
+  else if(sec === 'register') renderRegister(content);
+  else if(sec === 'trial') renderTrial(content);
+}
+
+// ── 儀表板 ────────────────────────────────────────────────
+function renderDashboard(el) {
+  const d = loadData();
+  const pending_inquiry = d.inquiries.filter(r=>!r.status||r.status==='待回電').length;
+  const pending_booking = d.bookings.filter(r=>r.status==='待確認').length;
+  const pending_camp    = d.camp.filter(r=>r.status==='待確認').length;
+  const pending_assess  = d.assessments.filter(r=>!r.finalClass).length;
+
+  el.innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card" style="border-left:4px solid var(--green)">
+        <div class="num" style="color:var(--green)">${d.inquiries.length}</div>
+        <div class="label">📋 問課諮詢</div>
+        <div class="sub">${pending_inquiry} 筆待回電</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid var(--blue)">
+        <div class="num" style="color:var(--blue)">${d.bookings.length}</div>
+        <div class="label">📅 預約紀錄</div>
+        <div class="sub">${pending_booking} 筆待確認</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid var(--orange)">
+        <div class="num" style="color:var(--orange)">${d.camp.length}</div>
+        <div class="label">🏕️ 夏令營報名</div>
+        <div class="sub">${pending_camp} 筆待確認</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid var(--purple)">
+        <div class="num" style="color:var(--purple)">${d.assessments.length}</div>
+        <div class="label">📝 分級檢測</div>
+        <div class="sub">${pending_assess} 筆未完成分班</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid #10B981">
+        <div class="num" style="color:#10B981">${d.registrations.length}</div>
+        <div class="label">🎓 正式報名</div>
+        <div class="sub">${d.registrations.filter(r=>r.status==='待處理').length} 筆待處理</div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar"><strong style="font-size:0.85rem">最新動態（最近 10 筆）</strong></div>
+      <table class="data-table">
+        <thead><tr><th>時間</th><th>類型</th><th>家長/學生</th><th>內容</th><th>狀態</th></tr></thead>
+        <tbody id="recentRows"></tbody>
+      </table>
+    </div>`;
+
+  // Recent activity
+  const all = [
+    ...d.inquiries.map(r=>({...r, _type:'問課'})),
+    ...d.bookings.map(r=>({...r, _type:'預約'})),
+    ...d.camp.map(r=>({...r, _type:'夏令營'})),
+    ...d.assessments.map(r=>({...r, _type:'檢測'})),
+    ...d.registrations.map(r=>({...r, _type:'報名'})),
+  ].sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,10);
+
+  const tbody = document.getElementById('recentRows');
+  if(!all.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:30px">尚無資料</td></tr>';
+    return;
+  }
+  tbody.innerHTML = all.map(r => {
+    const name = r.parent || r.pname || r.studentName || '—';
+    const content = r._type==='問課' ? (r.classes||'—') :
+                    r._type==='預約' ? (r.date+' '+r.slot) :
+                    r._type==='夏令營' ? (r.sname||'—') :
+                    r._type==='檢測' ? (r.finalClass||'待分班') :
+                    (r.classType||'—');
+    const status = r.status || (r._type==='檢測' ? (r.finalClass?'已分班':'待分班') : '待處理');
+    const badgeClass = status.includes('待')||status.includes('未') ? 'badge-pending' :
+                       status.includes('已') ? 'badge-arranged' :
+                       status.includes('報名') ? 'badge-enrolled' : 'badge-contacted';
+    return `<tr>
+      <td style="white-space:nowrap">${(r.ts||'').substring(0,16)}</td>
+      <td><span class="badge-status badge-pending" style="background:#EEF2FF;color:#4338CA">${r._type}</span></td>
+      <td>${name}</td>
+      <td title="${content}">${content.length>20?content.substring(0,20)+'…':content}</td>
+      <td><span class="badge-status ${badgeClass}">${status}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── 問課諮詢 ──────────────────────────────────────────────
+function renderInquiry(el) {
+  const d = loadData();
+  const rows = d.inquiries;
+  const statusOpts = ['待回電','已回電','已安排檢測','已報名','不感興趣'];
+  el.innerHTML = `
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" id="searchInquiry" placeholder="搜尋姓名、電話、Email…" oninput="renderInquiry(document.getElementById('mainContent'))">
+        <select id="filterInquiryStatus" onchange="renderInquiry(document.getElementById('mainContent'))">
+          <option value="">全部狀態</option>
+          ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
+        </select>
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>Email</th><th>孩子/預判程度</th><th>感興趣班型</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody id="inquiryTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw = (document.getElementById('searchInquiry')||{}).value||'';
+  const fs = (document.getElementById('filterInquiryStatus')||{}).value||'';
+  let filtered = rows.filter(r => {
+    const match = !kw || [r.parent,r.phone,r.email,r.line].join(' ').includes(kw);
+    const statusMatch = !fs || r.status===fs;
+    return match && statusMatch;
+  });
+
+  const tbody = document.getElementById('inquiryTbody');
+  if(!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><div class="icon">📋</div><p>尚無資料</p></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map((r,i) => {
+    const children = Array.isArray(r.children) ? r.children : [];
+    const childSummary = children.map(c=>c.name+'('+c.grade+')'+(c.oral?'→'+(c.oral.predictedOralLevel||''):'')).join('、');
+    const status = r.status || '待回電';
+    const bc = status==='待回電'?'badge-pending':status==='已回電'?'badge-contacted':status==='已安排檢測'?'badge-arranged':status==='已報名'?'badge-enrolled':'badge-cancelled';
+    const realIdx = rows.indexOf(r);
+    return `<tr>
+      <td>${realIdx+1}</td>
+      <td style="white-space:nowrap">${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.parent||'—'}</strong></td>
+      <td>${r.phone||'—'}</td>
+      <td style="max-width:140px">${r.email||'—'}</td>
+      <td title="${childSummary}">${childSummary.length>25?childSummary.substring(0,25)+'…':childSummary||'—'}</td>
+      <td title="${r.classes||''}">${(r.classes||'—').substring(0,18)}</td>
+      <td>
+        <select class="status-select" onchange="updateStatus('inquiries',${realIdx},this.value)">
+          ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showInquiryDetail(${realIdx})">查看</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function showInquiryDetail(idx) {
+  const d = loadData();
+  const r = d.inquiries[idx];
+  if(!r) return;
+  const children = Array.isArray(r.children) ? r.children : [];
+  const levelMap = {GK:'幼兒園',  'GK-G1':'幼兒→一年級', G1:'一年級', 'G1-G2':'一→二年級', 'G2+':'二年級以上'};
+  const goalMap = {env:'全美語浸潤',fast:'快速提升',cert:'準備英檢',hw:'安親課輔',stable:'穩固基礎'};
+
+  const childrenHtml = children.map((c,i) => `
+    <div class="child-card">
+      <strong>${c.name}</strong>（${c.grade}）
+      ${c.oral?'<span style="margin-left:8px;color:var(--green);font-size:0.82rem">預判：'+(levelMap[c.oral.predictedOralLevel]||c.oral.predictedOralLevel||'')+'</span>':''}
+      <div style="margin-top:6px;font-size:0.82rem;color:var(--text-muted)">
+        目標：${goalMap[c.goal]||c.goal||'—'}　希望天數：${c.days||'未填'}
+      </div>
+      ${c.oral?`<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+        自我介紹能力：${({none:'無法',gk:'單字',g1_lo:'片語',g1_hi:'簡單句',g2up:'自由對話'})[c.oral.oral_intro]||'—'}　
+        描述過去：${({none:'無法',gk:'單字',g1_lo:'片語',g1_hi:'過去式',g2up:'完整描述'})[c.oral.oral_past]||'—'}
+      </div>`:''}
+    </div>`).join('');
+
+  document.getElementById('modalTitle').textContent = '問課諮詢 #'+(idx+1)+' · '+r.parent;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="detail-section">家長資料</div>
+    <div class="detail-row"><div class="detail-label">姓名</div><div class="detail-val">${r.parent||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">電話</div><div class="detail-val"><a href="tel:${r.phone}">${r.phone||'—'}</a></div></div>
+    <div class="detail-row"><div class="detail-label">Email</div><div class="detail-val">${r.email||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">LINE</div><div class="detail-val">${r.line||'—'}</div></div>
+    <div class="detail-section">孩子資料（共 ${children.length} 位）</div>
+    ${childrenHtml||'<div style="color:var(--text-muted)">無孩子資料</div>'}
+    <div class="detail-section">諮詢內容</div>
+    <div class="detail-row"><div class="detail-label">感興趣班型</div><div class="detail-val">${r.classes||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">補充說明</div><div class="detail-val">${r.question||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">時間戳記</div><div class="detail-val">${r.ts||'—'}</div></div>
+    ${r.callScript?`
+    <div class="detail-section">📞 回電引導腳本</div>
+    <div class="script-box">${r.callScript}</div>`:''}
+    <div class="detail-section">狀態管理</div>
+    <select class="status-select" onchange="updateStatus('inquiries',${idx},this.value);document.getElementById('modalBody').querySelector('.status-select').value=this.value">
+      ${['待回電','已回電','已安排檢測','已報名','不感興趣'].map(s=>`<option${s===(r.status||'待回電')?' selected':''}>${s}</option>`).join('')}
+    </select>
+    <button class="btn btn-green" style="margin-left:10px" onclick="goToAssess('${r.parent||''}','${(children[0]&&children[0].name)||''}','${(children[0]&&children[0].grade)||''}')">→ 建立檢測紀錄</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+// ── 預約紀錄 ──────────────────────────────────────────────
+function renderBooking(el) {
+  const d = loadData();
+  const rows = d.bookings;
+  const statusOpts = ['待確認','已確認','已完成','已取消'];
+  el.innerHTML = `
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" placeholder="搜尋…" oninput="renderBooking(document.getElementById('mainContent'))" id="searchBooking">
+        <select onchange="renderBooking(document.getElementById('mainContent'))" id="filterBookingStatus">
+          <option value="">全部</option>
+          ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
+        </select>
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>預約類型</th><th>日期</th><th>時段</th><th>孩子</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody id="bookingTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw = (document.getElementById('searchBooking')||{}).value||'';
+  const fs = (document.getElementById('filterBookingStatus')||{}).value||'';
+  let filtered = rows.filter(r => {
+    const match = !kw || [r.parent,r.phone,r.child,r.date].join(' ').includes(kw);
+    return match && (!fs||r.status===fs);
+  });
+
+  const tbody = document.getElementById('bookingTbody');
+  if(!filtered.length){
+    tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">尚無預約紀錄</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map((r,i) => {
+    const status=r.status||'待確認';
+    const bc=status==='待確認'?'badge-pending':status==='已確認'?'badge-contacted':status==='已完成'?'badge-arranged':'badge-cancelled';
+    const realIdx=rows.indexOf(r);
+    const typeColor={
+      '參訪校區':'#DBEAFE','英文程度檢測':'#EDE9FE','課程體驗':'#D1FAE5',
+      '參訪校區 + 英文程度檢測':'#FEF3C7'
+    }[r.bookingType]||'#F0F4F8';
+    return `<tr>
+      <td>${realIdx+1}</td>
+      <td>${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.parent||'—'}</strong></td>
+      <td>${r.phone||'—'}</td>
+      <td><span style="background:${typeColor};padding:2px 8px;border-radius:50px;font-size:0.75rem">${r.bookingType||'—'}</span></td>
+      <td>${r.date||'—'}</td>
+      <td>${r.slot||'—'}</td>
+      <td>${r.child||'—'}</td>
+      <td><select class="status-select" onchange="updateStatus('bookings',${realIdx},this.value)">
+        ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
+      </select></td>
+      <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function showBookingDetail(idx) {
+  const d = loadData();
+  const r = d.bookings[idx];
+  if(!r) return;
+  document.getElementById('modalTitle').textContent = '預約 #'+(idx+1)+' · '+r.parent;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="detail-section">預約資訊</div>
+    <div class="detail-row"><div class="detail-label">家長</div><div class="detail-val">${r.parent||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">電話</div><div class="detail-val"><a href="tel:${r.phone}">${r.phone||'—'}</a></div></div>
+    <div class="detail-row"><div class="detail-label">孩子姓名</div><div class="detail-val">${r.child||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">預約類型</div><div class="detail-val">${r.bookingType||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">日期</div><div class="detail-val">${r.date||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">時段</div><div class="detail-val">${r.slot||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">感興趣班型</div><div class="detail-val">${r.cls||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">備註</div><div class="detail-val">${r.note||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">時間戳記</div><div class="detail-val">${r.ts||'—'}</div></div>
+    <div class="detail-section">狀態</div>
+    <select class="status-select" onchange="updateStatus('bookings',${idx},this.value)">
+      ${['待確認','已確認','已完成','已取消'].map(s=>`<option${s===(r.status||'待確認')?' selected':''}>${s}</option>`).join('')}
+    </select>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+// ── 夏令營 ────────────────────────────────────────────────
+function renderCamp(el) {
+  const d = loadData();
+  const rows = d.camp;
+  const statusOpts = ['待確認','已確認','已繳費','已取消'];
+  el.innerHTML = `
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" placeholder="搜尋…" id="searchCamp" oninput="renderCamp(document.getElementById('mainContent'))">
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody id="campTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw = (document.getElementById('searchCamp')||{}).value||'';
+  let filtered = rows.filter(r => !kw || [r.pname,r.phone,r.sname].join(' ').includes(kw));
+  const tbody = document.getElementById('campTbody');
+  if(!filtered.length){
+    tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map((r,i) => {
+    const status=r.status||'待確認';
+    const bc=status==='待確認'?'badge-pending':status==='已繳費'?'badge-enrolled':'badge-arranged';
+    const realIdx=rows.indexOf(r);
+    const courses = typeof r.courses==='object' ? Object.entries(r.courses).map(([k,v])=>k+':'+v).join('、') : (r.courses||'—');
+    return `<tr>
+      <td>${realIdx+1}</td>
+      <td>${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.pname||'—'}</strong></td>
+      <td>${r.phone||'—'}</td>
+      <td>${r.sname||'—'}${r.children&&r.children.length>1?' <span style="background:var(--green);color:#fff;font-size:0.65rem;padding:1px 5px;border-radius:8px;font-weight:700">'+r.children.length+'位</span>':''}</td>
+      <td>${r.grade||'—'}</td>
+      <td title="${courses}">${courses.length>20?courses.substring(0,20)+'…':courses}</td>
+      <td>${r.earlyBird?'✅ 是':'否'}</td>
+      <td><select class="status-select" onchange="updateStatus('camp',${realIdx},this.value)">
+        ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
+      </select></td>
+      <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showCampDetail(${realIdx})">查看</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function showCampDetail(idx){
+  const d=loadData(); const r=d.camp[idx]; if(!r) return;
+  const courses = typeof r.courses==='object' ? JSON.stringify(r.courses,null,2) : (r.courses||'—');
+  document.getElementById('modalTitle').textContent='夏令營 #'+(idx+1)+' · '+r.pname;
+
+  // 每位孩子明細（新格式有 children 陣列）
+  let childrenHtml = '';
+  if(r.children && r.children.length > 0){
+    childrenHtml = r.children.map((c, ci) => {
+      const jDates = (c.julyDates||[]).join('、') || '未選';
+      const aDates = (c.augDates||[]).join('、') || '未選';
+      let dateInfo = '';
+      if(c.julyDates && c.julyDates.length) dateInfo += `<div style="margin:4px 0"><span style="color:var(--green);font-weight:600">七月（${c.julyDates.length}天）</span>：${jDates}</div>`;
+      if(c.augDates && c.augDates.length) dateInfo += `<div style="margin:4px 0"><span style="color:var(--blue);font-weight:600">八月（${c.augDates.length}天）</span>：${aDates}</div>`;
+      if(!dateInfo) dateInfo = '未選日期';
+      const sizeInfo = c.tsize ? `<div style="margin:4px 0;font-size:0.8rem;color:var(--text-muted)">👕 制服尺寸：<strong>${c.tsize}</strong></div>` : (c.height || c.weight) ? `<div style="margin:4px 0;font-size:0.8rem;color:var(--text-muted)">📏 身高 ${c.height||'—'}cm ／ 體重 ${c.weight||'—'}kg</div>` : '';
+      return `<div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:8px;border:1px solid var(--border)">
+        <div style="font-weight:700;margin-bottom:6px">👦 ${c.sname||'—'}（${c.grade||'—'}）${c.enrolled==='yes'?'<span style="color:var(--green);font-size:0.8rem"> 在校生</span>':''}</div>
+        ${sizeInfo}
+        ${dateInfo}
+      </div>`;
+    }).join('');
+  } else {
+    childrenHtml = `<div class="detail-row"><div class="detail-label">學生</div><div class="detail-val">${r.sname||'—'}（${r.grade||'—'}）</div></div>
+    <div class="detail-row"><div class="detail-label">期別週次</div><div class="detail-val"><pre style="font-size:0.82rem">${courses}</pre></div></div>`;
+  }
+
+  document.getElementById('modalBody').innerHTML=`
+    <div class="detail-section">家長資料</div>
+    <div class="detail-row"><div class="detail-label">家長</div><div class="detail-val">${r.pname||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">電話</div><div class="detail-val"><a href="tel:${r.phone}">${r.phone||'—'}</a></div></div>
+    <div class="detail-row"><div class="detail-label">LINE</div><div class="detail-val">${r.line||'—'}</div></div>
+    <div class="detail-section">報名孩子（共 ${r.children?r.children.length:1} 位）</div>
+    ${childrenHtml}
+    ${r.children?`<div class="detail-section">課程摘要</div>
+    <div class="detail-row"><div class="detail-label">完整資訊</div><div class="detail-val" style="white-space:pre-wrap;font-size:0.82rem">${courses}</div></div>`:''}
+    <div class="detail-section">其他</div>
+    <div class="detail-row"><div class="detail-label">早鳥折扣</div><div class="detail-val">${r.earlyBird?'是（85折）':'否'}</div></div>
+    <div class="detail-row"><div class="detail-label">飲食需求</div><div class="detail-val">${r.diet||'無'}</div></div>
+    <div class="detail-row"><div class="detail-label">時間戳記</div><div class="detail-val">${r.ts||'—'}</div></div>
+    <div class="detail-section">狀態</div>
+    <select class="status-select" onchange="updateStatus('camp',${idx},this.value)">
+      ${['待確認','已確認','已繳費','已取消'].map(s=>`<option${s===(r.status||'待確認')?' selected':''}>${s}</option>`).join('')}
+    </select>`;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+// ── 分級檢測 ──────────────────────────────────────────────
+function renderAssess(el) {
+  const d = loadData();
+  const rows = d.assessments;
+  el.innerHTML = `
+    <div style="margin-bottom:16px;display:flex;gap:10px">
+      <button class="btn btn-green" onclick="openAddAssess()">＋ 新增檢測紀錄</button>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" placeholder="搜尋學生…" id="searchAssess" oninput="renderAssess(document.getElementById('mainContent'))">
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>時間</th><th>學生</th><th>年級</th><th>口說級數</th><th>口說分數</th><th>閱讀停止</th><th>筆試卷</th><th>筆試分數</th><th>分班結果</th><th>操作</th></tr></thead>
+        <tbody id="assessTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw = (document.getElementById('searchAssess')||{}).value||'';
+  let filtered = rows.filter(r => !kw || [r.studentName,r.grade].join(' ').includes(kw));
+  const tbody = document.getElementById('assessTbody');
+  if(!filtered.length){
+    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無檢測紀錄</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map((r,i) => {
+    const realIdx=rows.indexOf(r);
+    return `<tr>
+      <td>${realIdx+1}</td>
+      <td>${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.studentName||'—'}</strong></td>
+      <td>${r.grade||'—'}</td>
+      <td>${r.oralLevel||'—'}</td>
+      <td>${r.oralScore||'—'}</td>
+      <td>${r.readingStop||'—'}</td>
+      <td>${r.writtenPaper||'—'}</td>
+      <td>${r.writtenScore||'—'}</td>
+      <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
+      <td>
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
+        <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddAssess() {
+  document.getElementById('modalTitle').textContent = '新增分級檢測紀錄';
+  document.getElementById('modalBody').innerHTML = `
+    <div class="detail-section">學生資料</div>
+    <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">學生姓名 *</label><input type="text" id="as_name" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">年級 *</label>
+        <select id="as_grade" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['幼幼班','小班','中班','大班','國小1年級','國小2年級','國小3年級','國小4年級','國小5年級','國小6年級','國中1年級','國中2年級','國中3年級'].map(g=>`<option>${g}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="detail-section">口說測驗</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">口說級數</label>
+        <select id="as_oral_level" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['GK','G1','G2','G3','G4'].map(l=>`<option>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">口說分數（0-5）</label><input type="number" id="as_oral_score" min="0" max="5" step="0.5" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+    </div>
+    <div class="detail-section">閱讀 & 筆試</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">閱讀停止級</label>
+        <select id="as_reading_stop" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['SA','SB','1A','1B','1C','2A','2B','2C','3A','3B','3C','4A','4B','4C'].map(l=>`<option>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">筆試卷別</label>
+        <select id="as_written_paper" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['Starter','G1','G2','G3','G4','G5'].map(l=>`<option>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">筆試總分</label><input type="number" id="as_written_score" min="0" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+    </div>
+    <div class="detail-section">分班結果</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果 *</label>
+        <select id="as_final_class" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff" onchange="autoCalcClass()">
+          <option value="">依分數自動計算</option>
+          ${['SA','SB','SC','1A','1B','1C','1D','2A','2B','2C','2D','3A','3B','3C','3D','4A','4B','4C','4D'].map(l=>`<option>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">老師備註</label><input type="text" id="as_note" placeholder="選填" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+    </div>
+    <button class="btn btn-green" style="width:100%" onclick="saveAssessment()">儲存檢測紀錄</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function autoCalcClass() {
+  const paper = (document.getElementById('as_written_paper')||{}).value;
+  const score = parseFloat((document.getElementById('as_written_score')||{}).value||0);
+  const maxMap = {Starter:65, G1:91, G2:79, G3:83, G4:100, G5:90};
+  const max = maxMap[paper];
+  const sel = document.getElementById('as_final_class');
+  if(!sel || sel.value) return; // Manual override
+  if(!max || !score) return;
+  const t = score/max;
+  const grade = paper === 'Starter' ? '' : paper;
+  const sub = t < 1/3 ? 'A' : t < 2/3 ? 'B' : 'C';
+  const result = paper==='Starter' ? ('S'+sub) : (grade.replace('G','')+sub);
+  sel.value = result;
+}
+
+function saveAssessment() {
+  const name = (document.getElementById('as_name')||{}).value||'';
+  const grade = (document.getElementById('as_grade')||{}).value||'';
+  if(!name||!grade){alert('請填寫學生姓名和年級');return;}
+  const data = loadData();
+  data.assessments.push({
+    ts: new Date().toLocaleString('zh-TW'),
+    studentName: name,
+    grade: grade,
+    oralLevel: (document.getElementById('as_oral_level')||{}).value||'',
+    oralScore:  (document.getElementById('as_oral_score')||{}).value||'',
+    readingStop:(document.getElementById('as_reading_stop')||{}).value||'',
+    writtenPaper:(document.getElementById('as_written_paper')||{}).value||'',
+    writtenScore:(document.getElementById('as_written_score')||{}).value||'',
+    finalClass: (document.getElementById('as_final_class')||{}).value||'',
+    teacherNote:(document.getElementById('as_note')||{}).value||'',
+  });
+  saveData(data);
+  closeModal();
+  showToast('✅ 檢測紀錄已儲存');
+  renderAssess(document.getElementById('mainContent'));
+}
+
+function showAssessDetail(idx) {
+  const d=loadData(); const r=d.assessments[idx]; if(!r) return;
+  document.getElementById('modalTitle').textContent='檢測紀錄 #'+(idx+1)+' · '+r.studentName;
+  document.getElementById('modalBody').innerHTML=`
+    <div class="detail-section">學生資料</div>
+    <div class="detail-row"><div class="detail-label">姓名</div><div class="detail-val">${r.studentName||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">年級</div><div class="detail-val">${r.grade||'—'}</div></div>
+    <div class="detail-section">測驗結果</div>
+    <div class="detail-row"><div class="detail-label">口說級數</div><div class="detail-val">${r.oralLevel||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">口說分數</div><div class="detail-val">${r.oralScore||'—'} / 5</div></div>
+    <div class="detail-row"><div class="detail-label">閱讀停止級</div><div class="detail-val">${r.readingStop||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">筆試卷別</div><div class="detail-val">${r.writtenPaper||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">筆試總分</div><div class="detail-val">${r.writtenScore||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">分班結果</div><div class="detail-val"><strong style="color:var(--green);font-size:1.1rem">${r.finalClass||'待分班'}</strong></div></div>
+    <div class="detail-row"><div class="detail-label">老師備註</div><div class="detail-val">${r.teacherNote||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">時間</div><div class="detail-val">${r.ts||'—'}</div></div>
+    <div class="detail-section">下一步</div>
+    <button class="btn btn-green" onclick="goToRegister(${idx})">→ 建立正式報名</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function goToRegister(assessIdx) {
+  const d=loadData(); const r=d.assessments[assessIdx]; if(!r) return;
+  closeModal();
+  switchSection('register');
+  setTimeout(()=>openAddRegister(r), 200);
+}
+
+function goToAssess(parent, childName, grade) {
+  closeModal();
+  switchSection('assess');
+  setTimeout(()=>{
+    openAddAssess();
+    if(childName) setTimeout(()=>{
+      const el = document.getElementById('as_name');
+      if(el) el.value = childName;
+      const eg = document.getElementById('as_grade');
+      if(eg && grade) eg.value = grade;
+    }, 100);
+  }, 200);
+}
+
+// ── 正式報名 ──────────────────────────────────────────────
+function renderRegister(el) {
+  const d = loadData();
+  const rows = d.registrations;
+  const statusOpts = ['待處理','已確認','已繳費','在讀中','已結業','已退班'];
+  el.innerHTML = `
+    <div style="margin-bottom:16px">
+      <button class="btn btn-green" onclick="openAddRegister()">＋ 新增報名</button>
+    </div>
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" placeholder="搜尋…" id="searchReg" oninput="renderRegister(document.getElementById('mainContent'))">
+        <select id="filterRegStatus" onchange="renderRegister(document.getElementById('mainContent'))">
+          <option value="">全部</option>
+          ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
+        </select>
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>學校</th><th>班型</th><th>分班</th><th>開始日</th><th>附加服務</th><th>狀態</th><th>操作</th></tr></thead>
+        <tbody id="regTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw=(document.getElementById('searchReg')||{}).value||'';
+  const fs=(document.getElementById('filterRegStatus')||{}).value||'';
+  let filtered=d.registrations.filter(r=>(!kw||[r.parent,r.phone,r.studentName].join(' ').includes(kw))&&(!fs||r.status===fs));
+  const tbody=document.getElementById('regTbody');
+  if(!filtered.length){tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無報名紀錄</td></tr>`;return;}
+  tbody.innerHTML=filtered.map((r,i)=>{
+    const status=r.status||'待處理';
+    const bc=status==='待處理'?'badge-pending':status==='在讀中'||status==='已結業'?'badge-enrolled':status==='已退班'?'badge-cancelled':'badge-arranged';
+    const realIdx=d.registrations.indexOf(r);
+    return `<tr>
+      <td>${realIdx+1}</td>
+      <td>${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.parent||'—'}</strong></td>
+      <td>${r.phone||'—'}</td>
+      <td>${r.studentName||'—'}</td>
+      <td>${r.grade||'—'}</td>
+      <td style="font-size:0.78rem">${r.school||'—'}</td>
+      <td>${r.classType||'—'}</td>
+      <td>${r.assessResult?`<span class="badge-status badge-enrolled">${r.assessResult}</span>`:'—'}</td>
+      <td>${r.startDate||'—'}</td>
+      <td style="font-size:0.75rem">${r.addons && r.addons!=='無' ? r.addons : '—'}</td>
+      <td><select class="status-select" onchange="updateStatus('registrations',${realIdx},this.value)">
+        ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
+      </select></td>
+      <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showRegDetail(${realIdx})">查看</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddRegister(fromAssess) {
+  // 如果不是從檢測帶入，提示需要先完成檢測
+  if(!fromAssess) {
+    const d = loadData();
+    const assessList = d.assessments || [];
+    if(assessList.length === 0) {
+      document.getElementById('modalTitle').textContent = '⚠️ 尚無檢測紀錄';
+      document.getElementById('modalBody').innerHTML = `
+        <div style="text-align:center;padding:24px 0">
+          <div style="font-size:2.5rem;margin-bottom:12px">📋</div>
+          <div style="font-weight:700;font-size:1rem;margin-bottom:8px">正式報名前，需先完成「分級檢測」</div>
+          <div style="color:var(--text-muted);font-size:0.88rem;margin-bottom:20px;line-height:1.6">請先到「分級檢測」新增檢測紀錄，<br>完成後再點「→ 報名」就能直接帶入分班結果。</div>
+          <button class="btn btn-green" onclick="closeModal();switchSection('assess')">前往分級檢測 →</button>
+        </div>`;
+      document.getElementById('modalOverlay').classList.add('open');
+      return;
+    }
+    // 有檢測紀錄：讓老師選一筆
+    document.getElementById('modalTitle').textContent = '選擇檢測紀錄 → 正式報名';
+    const optRows = assessList.map((a,i) => {
+      const hasReg = (d.registrations||[]).some(r => r.studentName === a.studentName && r.assessResult === a.finalClass);
+      return `<tr style="${hasReg?'opacity:0.45':'cursor:pointer'}" ${hasReg?'':'onclick="closeModal();openAddRegister(loadData().assessments['+i+'])"'}>
+        <td>${a.studentName||'—'}</td><td>${a.grade||'—'}</td>
+        <td><span class="badge-status badge-enrolled">${a.finalClass||'—'}</span></td>
+        <td>${a.oralLevel||'—'}</td>
+        <td>${hasReg?'<span style="color:var(--text-muted);font-size:0.8rem">已報名</span>':'<span style="color:var(--green);font-weight:700;font-size:0.8rem">選擇 →</span>'}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('modalBody').innerHTML = `
+      <div style="margin-bottom:12px;color:var(--text-muted);font-size:0.85rem;line-height:1.6">正式報名需有檢測紀錄，請選擇要報名的學生：</div>
+      <table class="data-table" style="font-size:0.85rem">
+        <thead><tr><th>學生</th><th>年級</th><th>分班</th><th>口說</th><th></th></tr></thead>
+        <tbody>${optRows}</tbody>
+      </table>
+      <div style="margin-top:16px;text-align:center">
+        <button class="btn btn-outline" style="font-size:0.82rem" onclick="closeModal();switchSection('assess')">＋ 新增檢測紀錄</button>
+      </div>`;
+    document.getElementById('modalOverlay').classList.add('open');
+    return;
+  }
+
+  document.getElementById('modalTitle').textContent = '新增正式報名';
+  document.getElementById('modalBody').innerHTML = `
+    <div style="background:var(--green-light);border:1px solid var(--green);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:0.85rem">
+      <strong>📊 檢測結果：</strong>${fromAssess.studentName||'—'}（${fromAssess.grade||'—'}）→ 分班 <strong style="color:var(--green)">${fromAssess.finalClass||'—'}</strong>　口說 ${fromAssess.oralLevel||'—'}
+    </div>
+    <div class="detail-section">家長 & 學生資料</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">家長姓名 *</label><input type="text" id="reg_parent" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">電話 *</label><input type="tel" id="reg_phone" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">Email</label><input type="email" id="reg_email" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">LINE ID</label><input type="text" id="reg_line" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">學生姓名 *</label><input type="text" id="reg_student" value="${fromAssess.studentName||''}" readonly style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:var(--surface)"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">年級</label>
+        <select id="reg_grade" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['幼幼班','小班','中班','大班','國小1年級','國小2年級','國小3年級','國小4年級','國小5年級','國小6年級','國中1年級','國中2年級','國中3年級'].map(g=>`<option${fromAssess.grade===g?' selected':''}>${g}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="detail-section">報名班型</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">班型 *</label>
+        <select id="reg_class" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
+          <option value="">請選擇</option>
+          ${['浸潤班','菁英班','標準班','全民英檢班','安親課輔班','托育班'].map(c=>`<option>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果</label><input type="text" id="reg_assess" value="${fromAssess.finalClass||''}" readonly style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:var(--surface)"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">預計開始日期</label><input type="date" id="reg_start" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
+    </div>
+    <div style="margin-bottom:16px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">備註</label><textarea id="reg_note" rows="3" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;resize:vertical">${fromAssess.teacherNote||''}</textarea></div>
+    <button class="btn btn-green" style="width:100%" onclick="saveRegistration()">儲存報名資料</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function saveRegistration() {
+  const parent=(document.getElementById('reg_parent')||{}).value||'';
+  const phone=(document.getElementById('reg_phone')||{}).value||'';
+  const student=(document.getElementById('reg_student')||{}).value||'';
+  const assess=(document.getElementById('reg_assess')||{}).value||'';
+  if(!parent||!phone||!student){alert('請填寫家長姓名、電話、學生姓名');return;}
+  if(!assess){alert('缺少分班結果。正式報名前需先完成分級檢測。');return;}
+  const data=loadData();
+  data.registrations.push({
+    ts:new Date().toLocaleString('zh-TW'),
+    parent,phone,
+    email:(document.getElementById('reg_email')||{}).value||'',
+    line:(document.getElementById('reg_line')||{}).value||'',
+    studentName:student,
+    grade:(document.getElementById('reg_grade')||{}).value||'',
+    classType:(document.getElementById('reg_class')||{}).value||'',
+    assessResult:assess,
+    startDate:(document.getElementById('reg_start')||{}).value||'',
+    note:(document.getElementById('reg_note')||{}).value||'',
+    status:'待處理',
+  });
+  saveData(data);
+  closeModal();
+  showToast('✅ 報名資料已儲存');
+  renderRegister(document.getElementById('mainContent'));
+}
+
+function showRegDetail(idx) {
+  const d=loadData(); const r=d.registrations[idx]; if(!r) return;
+  document.getElementById('modalTitle').textContent='報名 #'+(idx+1)+' · '+r.parent;
+  document.getElementById('modalBody').innerHTML=`
+    <div class="detail-section">家長資料</div>
+    <div class="detail-row"><div class="detail-label">家長</div><div class="detail-val">${r.parent||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">電話</div><div class="detail-val"><a href="tel:${r.phone}">${r.phone||'—'}</a></div></div>
+    <div class="detail-row"><div class="detail-label">Email</div><div class="detail-val">${r.email||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">LINE</div><div class="detail-val">${r.line||'—'}</div></div>
+    <div class="detail-section">學生 & 課程</div>
+    <div class="detail-row"><div class="detail-label">學生</div><div class="detail-val">${r.studentName||'—'}（${r.grade||'—'}）</div></div>
+    <div class="detail-row"><div class="detail-label">就讀學校</div><div class="detail-val">${r.school||'—'} ${r.classname?' / '+r.classname:''}</div></div>
+    ${r.nextSchool?'<div class="detail-row"><div class="detail-label">升小一學校</div><div class="detail-val">'+r.nextSchool+'</div></div>':''}
+
+    <div class="detail-row"><div class="detail-label">班型</div><div class="detail-val">${r.classType||'—'}</div></div>
+    <div class="detail-row"><div class="detail-label">分班結果</div><div class="detail-val"><strong style="color:var(--green)">${r.assessResult||'—'}</strong></div></div>
+    <div class="detail-row"><div class="detail-label">開始日期</div><div class="detail-val">${r.startDate||'—'}</div></div>
+    ${r.addons ? `<div class="detail-row"><div class="detail-label">附加服務</div><div class="detail-val">${r.addons}</div></div>` : ''}
+    <div class="detail-row"><div class="detail-label">備註</div><div class="detail-val">${r.note||'—'}</div></div>
+    <div class="detail-section">狀態</div>
+    <select class="status-select" onchange="updateStatus('registrations',${idx},this.value)">
+      ${['待處理','已確認','已繳費','在讀中','已結業','已退班'].map(s=>`<option${s===(r.status||'待處理')?' selected':''}>${s}</option>`).join('')}
+    </select>
+    <div class="detail-section" style="margin-top:16px">確認書操作</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-green" style="font-size:0.82rem;padding:8px 16px" onclick="editRegConfirmation(${idx})">✍️ 編輯確認書</button>
+      <button class="btn btn-outline" style="font-size:0.82rem;padding:8px 16px" onclick="generateRegPDF(${idx})">📄 產生 PDF</button>
+      <button class="btn btn-outline" style="font-size:0.82rem;padding:8px 16px" onclick="sendResultToParent(${idx})">📨 發送檢測結果</button>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+// ── 共用工具 ──────────────────────────────────────────────
+function updateStatus(collection, idx, newStatus) {
+  const data = loadData();
+  if(data[collection] && data[collection][idx]) {
+    data[collection][idx].status = newStatus;
+    saveData(data);
+    showToast('✅ 狀態已更新：' + newStatus);
+  }
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function exportCSV() {
+  const data = loadData();
+  const sectionMap = {
+    inquiries: ['問課諮詢','時間,家長,電話,Email,LINE,感興趣班型,預判程度,補充說明'],
+    bookings:  ['預約紀錄','時間,家長,電話,孩子,預約類型,日期,時段,狀態'],
+    camp:      ['夏令營','時間,家長,電話,學生,年級,報名期別,早鳥折扣,狀態,孩子人數'],
+    assessments:['分級檢測','時間,學生,年級,口說級,口說分,閱讀停止,筆試卷,筆試分,分班結果'],
+    registrations:['正式報名','時間,家長,電話,學生,年級,學校,班級,班型,分班,附加服務,開始日,狀態'],
+  };
+  const rows = {
+    inquiries: data.inquiries.map(r=>[r.ts,r.parent,r.phone,r.email,r.line,r.classes,(r.children||[]).map(c=>c.oral&&c.oral.predictedOralLevel).join('/'),r.question].join(',')),
+    bookings:  data.bookings.map(r=>[r.ts,r.parent,r.phone,r.child,r.bookingType,r.date,r.slot,r.status].join(',')),
+    camp:      data.camp.map(r=>[r.ts,r.pname,r.phone,r.sname,r.grade,'"'+String(r.courses||'').replace(/"/g,'""')+'"',r.earlyBird?'是':'否',r.status,r.children?r.children.length:'1'].join(',')),
+    assessments:data.assessments.map(r=>[r.ts,r.studentName,r.grade,r.oralLevel,r.oralScore,r.readingStop,r.writtenPaper,r.writtenScore,r.finalClass].join(',')),
+    registrations:data.registrations.map(r=>[r.ts,r.parent,r.phone,r.studentName,r.grade,r.classType,r.assessResult,r.startDate,r.status].join(',')),
+  };
+
+  let csv = '\uFEFF'; // BOM for Excel
+  Object.entries(sectionMap).forEach(([key,[name,header]])=>{
+    csv += `\n=== ${name} ===\n${header}\n${rows[key].join('\n')}\n`;
+  });
+
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '太平新光後台資料_' + new Date().toLocaleDateString('zh-TW') + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✅ CSV 已匯出');
+}
+
+function exportJSON() {
+  const json = JSON.stringify(_DB, null, 2);
+  const blob = new Blob([json], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '太平新光後台備份_' + new Date().toLocaleDateString('zh-TW').replace(/\//g,'-') + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('✅ JSON 備份已下載');
+}
+
+function importJSON() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if(parsed.inquiries !== undefined) {
+          if(confirm('匯入後將合併資料（不覆蓋現有資料）。確定繼續？')) {
+            _DB.inquiries    = [..._DB.inquiries,    ...(parsed.inquiries||[])];
+            _DB.bookings     = [..._DB.bookings,     ...(parsed.bookings||[])];
+            _DB.camp         = [..._DB.camp,         ...(parsed.camp||[])];
+            _DB.assessments  = [..._DB.assessments,  ...(parsed.assessments||[])];
+            _DB.registrations= [..._DB.registrations,...(parsed.registrations||[])];
+            updateBadges(_DB);
+            switchSection(currentSection);
+            showToast('✅ 資料已匯入');
+          }
+        } else {
+          alert('無效的 JSON 格式，請確認是太平新光後台的備份檔案');
+        }
+      } catch(err) { alert('讀取失敗：' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+
+// ── 體驗課排班 ────────────────────────────────────────────
+var _trialSchedule = {}; // { 'YYYY-MM-DD': { 'HH:MM-HH:MM': '班級' } }
+
+function getTrialDatesAdmin(){
+  var dates=[];
+  // 國定假日（每年固定，依需要擴充）
+  var holidays=[
+    // 2026
+    '2026-01-01','2026-01-27','2026-01-28','2026-01-29','2026-01-30',
+    '2026-01-31','2026-02-01','2026-02-02',
+    '2026-04-03','2026-04-04','2026-04-05','2026-04-06',
+    '2026-04-25','2026-05-01','2026-06-12','2026-06-19',
+    '2026-05-27','2026-06-15','2026-06-26',
+    '2026-09-25','2026-09-26','2026-09-27','2026-09-28',
+    '2026-10-09','2026-10-10','2026-10-11',
+    '2026-12-25',
+    // 2027（預留）
+    '2027-01-01','2027-02-15','2027-02-16','2027-02-17','2027-02-18',
+    '2027-02-19','2027-02-20','2027-02-21',
+    '2027-04-05','2027-04-04',
+    '2027-05-01','2027-06-09','2027-09-17','2027-10-01','2027-10-10',
+    '2027-12-25'
+  ];
+  // 範圍：今天起 3 個月（90 天）
+  var today=new Date();
+  var startMs=Date.UTC(today.getUTCFullYear(),today.getUTCMonth(),today.getUTCDate());
+  var endMs=startMs+180*24*60*60*1000; // 半年
+  var _cur=new Date(startMs);
+  var _end=new Date(endMs);
+  while(_cur<=_end){
+    var dow=_cur.getUTCDay();
+    var ds=_cur.toISOString().slice(0,10);
+    if(dow>=1&&dow<=5&&holidays.indexOf(ds)===-1) dates.push(ds);
+    _cur=new Date(_cur.getTime()+86400000);
+  }
+  return dates;
+}
+
+// 體驗課預設班次：由後台設定，預設空
+function getDefaultTrialClass(ds,slot){ return []; }
+
+function renderTrial(el) {
+  var slots3=['14:00-15:00','16:30-17:30','18:30-19:30'];
+  var dates=getTrialDatesAdmin();
+  var dowCn=['','一','二','三','四','五','六','日'];
+  var customCount=Object.values(_trialSchedule).reduce(function(a,v){return a+Object.keys(v).length;},0);
+
+  el.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <div>
+        <p style="font-size:0.85rem;color:var(--text-muted);margin-top:4px">直接在格子輸入班級名稱，留空沿用白板預設。設定後按「發布到主網站」。</p>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-outline" onclick="clearTrialSchedule()">清除全部自訂</button>
+        <button class="btn btn-green" onclick="publishTrialSchedule()">🚀 套用到主網站</button>
+      </div>
+    </div>
+    <div style="background:#F0FDF4;border:1.5px solid var(--green);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:0.85rem" id="trialPublishInfo" style="display:none">
+      <strong style="color:var(--green-dark)">📋 已自訂 ${customCount} 個時段班次</strong>
+      <span style="color:var(--text-muted);margin-left:8px">灰色格子 = 白板預設，綠色 = 你設定的</span>
+    </div>
+    <div class="table-wrap" style="overflow-x:auto">
+      <table class="data-table" id="trialTable" style="min-width:650px">
+        <thead>
+          <tr>
+            <th>日期</th>
+            ${slots3.map(s=>`<th style="text-align:center;min-width:180px">${s}<div style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-top:2px">班1 | 班2 | 班3 | 班4（各1名額）</div></th>`).join('')}
+          </tr>
+        </thead>
+        <tbody id="trialTbody"></tbody>
+      </table>
+    </div>
+    <div id="trialSyncBox" style="display:none;margin-top:20px;background:#F0FDF4;border:1.5px solid var(--green);border-radius:10px;padding:16px">
+      <div style="font-weight:700;color:var(--green-dark);margin-bottom:8px">✅ 班次已同步到主網站！</div>
+      <p style="font-size:0.85rem;color:var(--text);line-height:1.7;margin-bottom:10px">
+        主網站已自動開啟並套用新班次。<br>
+        <span style="color:var(--text-muted);font-size:0.8rem">如果主網站沒有自動開啟，請點下方按鈕手動開啟一次。</span>
+      </p>
+      <input type="hidden" id="trialSyncUrl">
+      <div style="margin-top:10px">
+        <a id="trialSyncLink" href="#" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:0.82rem;text-decoration:none;display:inline-flex">🔗 手動開啟主網站同步</a>
+      </div>
+      <div style="margin-top:8px;font-size:0.78rem;color:var(--text-muted)">
+        或複製連結在瀏覽器開啟：<br>
+        <input id="trialSyncUrlDisplay" readonly onclick="this.select()" style="width:100%;margin-top:4px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:0.75rem;background:#F7FAFC">
+      </div>
+    </div>
+  `;
+
+  // 渲染表格
+  var tbody=document.getElementById('trialTbody');
+  dates.forEach(function(ds){
+    var d=new Date(ds+'T00:00:00');
+    var mm=d.getMonth()+1, dd=d.getDate(), wd=dowCn[d.getDay()];
+    var tr=document.createElement('tr');
+    // 日期欄
+    var dateTd=document.createElement('td');
+    dateTd.style.cssText='white-space:nowrap;font-weight:700;vertical-align:middle;padding:8px 12px 8px 0';
+    dateTd.textContent=mm+'/'+dd+'（'+wd+'）';
+    tr.appendChild(dateTd);
+    // 每個時段：4個班輸入格
+    slots3.forEach(function(slot){
+      var saved=(_trialSchedule[ds]&&_trialSchedule[ds][slot]);
+      // 支援陣列或舊字串格式
+      if(!saved) saved=['','','',''];
+      else if(!Array.isArray(saved)) saved=[saved,'','',''];
+      else { saved=saved.slice(); while(saved.length<4) saved.push(''); }
+
+      var td=document.createElement('td');
+      td.style.cssText='padding:6px 8px;vertical-align:middle';
+      var wrap=document.createElement('div');
+      wrap.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:4px';
+      for(var i=0;i<4;i++){
+        (function(idx){
+          var val=saved[idx]||'';
+          var inp=document.createElement('input');
+          inp.type='text';
+          inp.value=val;
+          inp.placeholder='班'+(idx+1);
+          inp.dataset.date=ds;
+          inp.dataset.slot=slot;
+          inp.dataset.idx=idx;
+          var hasVal=val&&val.trim();
+          inp.style.cssText='width:100%;padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:0.8rem;text-align:center;font-family:inherit;background:'+(hasVal?'#F0FDF4':'#fff')+';color:'+(hasVal?'var(--green-dark)':'var(--text)');
+          inp.addEventListener('change', function(){
+            var ds2=this.dataset.date, sl=this.dataset.slot, i2=parseInt(this.dataset.idx);
+            if(!_trialSchedule[ds2]) _trialSchedule[ds2]={};
+            var arr=Array.isArray(_trialSchedule[ds2][sl])?_trialSchedule[ds2][sl].slice():['','','',''];
+            while(arr.length<4) arr.push('');
+            arr[i2]=this.value.trim();
+            var anyVal=arr.some(function(v){return v&&v.trim();});
+            if(anyVal){
+              _trialSchedule[ds2][sl]=arr;
+              this.style.background=this.value.trim()?'#F0FDF4':'#fff';
+              this.style.color=this.value.trim()?'var(--green-dark)':'var(--text)';
+            } else {
+              delete _trialSchedule[ds2][sl];
+              if(Object.keys(_trialSchedule[ds2]).length===0) delete _trialSchedule[ds2];
+              this.style.background='#fff'; this.style.color='var(--text)';
+            }
+            var cnt=Object.values(_trialSchedule).reduce(function(a,v2){return a+Object.keys(v2).length;},0);
+            var info=document.getElementById('trialPublishInfo');
+            if(info) info.querySelector('strong').textContent='📋 已自訂 '+cnt+' 個時段';
+          });
+          inp.addEventListener('focus',function(){ this.style.borderColor='var(--green)'; });
+          inp.addEventListener('blur', function(){ this.style.borderColor='var(--border)'; });
+          wrap.appendChild(inp);
+        })(i);
+      }
+      td.appendChild(wrap);
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('trialPublishInfo').style.display='block';
+}
+
+function clearTrialSchedule(){
+  if(!confirm('確定清除所有自訂班次？')) return;
+  _trialSchedule={};
+  renderTrial(document.getElementById('mainContent'));
+  showToast('🗑️ 已清除自訂班次');
+}
+
+function publishTrialSchedule(){
+  var json=JSON.stringify(_trialSchedule);
+  if(Object.keys(_trialSchedule).length===0){alert('尚無自訂班次，請先填寫');return;}
+  var b64=btoa(unescape(encodeURIComponent(json)));
+  var syncUrl='https://www.perplexity.ai/computer/a/tai-ping-xin-guang-fen-xiao-4zHJD4DcTdaaBlVxnWwwjw?trialImport='+encodeURIComponent(b64);
+  var urlInput=document.getElementById('trialSyncUrl');
+  if(urlInput) urlInput.value=syncUrl;
+  var box=document.getElementById('trialSyncBox');
+  if(box) box.style.display='block';
+  // 直接跳轉（不靠 popup，避免被擋）
+  var a=document.createElement('a');
+  a.href=syncUrl;
+  a.target='_blank';
+  a.rel='noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // 更新手動連結
+  var linkEl=document.getElementById('trialSyncLink');
+  if(linkEl) linkEl.href=syncUrl;
+  var displayEl=document.getElementById('trialSyncUrlDisplay');
+  if(displayEl) displayEl.value=syncUrl;
+  showToast('✅ 正在開啟主網站同步…');
+}
+
+function clearAllData() {
+  if(!confirm('確定清除所有資料？此操作不可復原！')) return;
+  _DB = emptyData();
+  showToast('🗑️ 資料已清除');
+  switchSection('dashboard');
+}
+
+// ── URL 參數匯入（從主網站帶過來的資料）────────────────────
+(function checkUrlImport(){
+  const params = new URLSearchParams(window.location.search);
+  const importData = params.get('import');
+  if(!importData) return;
+  try {
+    const json = decodeURIComponent(escape(atob(importData)));
+    const parsed = JSON.parse(json);
+    // 自動登入並匯入（用老師帳號）
+    _loggedIn = true;
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appScreen').style.display = 'flex';
+    // 合併資料
+    _DB.inquiries     = [..._DB.inquiries,    ...(parsed.inquiries||[])];
+    _DB.bookings      = [..._DB.bookings,     ...(parsed.bookings||[])];
+    _DB.camp          = [..._DB.camp,         ...(parsed.camp||[])];
+    _DB.assessments   = [..._DB.assessments,  ...(parsed.assessments||[])];
+    _DB.registrations = [..._DB.registrations,...(parsed.registrations||[])];
+    initApp();
+    setTimeout(()=>{ showToast('✅ 資料已從主網站自動匯入'); }, 500);
+    // 清除 URL 參數
+    history.replaceState(null, '', window.location.pathname);
+  } catch(e) {
+    checkSession();
+  }
+})();
+
+// ── 初始化 ────────────────────────────────────────────────
+checkSession();
+</script>
+</body>
+</html>
