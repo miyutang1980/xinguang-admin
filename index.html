@@ -325,6 +325,20 @@ function updateBadges(data) {
 }
 
 function switchSection(sec) {
+  // 帳號管理頁面
+  if (sec === 'accounts') {
+    document.getElementById('pageTitle').textContent = '帳號管理';
+    document.querySelectorAll('.sidebar-item').forEach(function(el){ el.classList.remove('active'); });
+    var navAcc = document.getElementById('nav-accounts');
+    if (navAcc) navAcc.classList.add('active');
+    if (typeof renderAccountsPage === 'function') {
+      document.getElementById('mainContent').innerHTML = renderAccountsPage();
+    } else {
+      document.getElementById('mainContent').innerHTML = '<div style="padding:40px;text-align:center;color:#999">帳號管理模組載入中...</div>';
+    }
+    return;
+  }
+
   currentSection = sec;
   document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
   const navEl = document.getElementById('nav-'+sec);
@@ -1702,7 +1716,7 @@ checkSession();
         ? '✅ 同步完成！共更新 ' +
             Object.values(results).reduce(function (s, arr) { return s + arr.length; }, 0) +
             ' 筆資料。'
-        : '⚠️ 部分工作表同步失敗：' + errors.join('、');
+        : '⚠️ 部分工作表同步失敗（請先到 Google Sheets 發布工作表）：' + errors.join('、');
 
       _showSyncResult(btn, notify, ok, msg);
     }
@@ -2076,6 +2090,18 @@ window.switchSection = function(section) {
   if (_origSwitchSection) _origSwitchSection(section);
 };
 </script>
+
+
+<!-- Google Sheets 同步說明 -->
+<div id="sheetsSyncNote" style="display:none;position:fixed;bottom:80px;left:16px;background:#FEF3C7;border:1px solid #FDE68A;border-radius:10px;padding:12px 16px;max-width:300px;font-size:0.78rem;color:#92400E;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.1)">
+  <strong>📋 Google Sheets 同步設定</strong><br><br>
+  需要先在 Google Sheets 發布各工作表：<br>
+  1. 開啟 Google Sheets<br>
+  2. 檔案 → 共用 → 發布到網路<br>
+  3. 選擇「整份文件」→ 按「發布」<br>
+  4. 回來按「從 Google Sheets 同步」<br><br>
+  <button onclick="this.parentElement.style.display='none'" style="background:#92400E;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem">知道了</button>
+</div>
 
 </body> in xinguang-admin/index.html
      ══════════════════════════════════════════════════════════════════ -->
@@ -3302,6 +3328,18 @@ Code 節點（組合訊息，判斷是「取消」還是「改期」）
 
 
 
+
+
+<!-- Google Sheets 同步說明 -->
+<div id="sheetsSyncNote" style="display:none;position:fixed;bottom:80px;left:16px;background:#FEF3C7;border:1px solid #FDE68A;border-radius:10px;padding:12px 16px;max-width:300px;font-size:0.78rem;color:#92400E;z-index:100;box-shadow:0 4px 12px rgba(0,0,0,0.1)">
+  <strong>📋 Google Sheets 同步設定</strong><br><br>
+  需要先在 Google Sheets 發布各工作表：<br>
+  1. 開啟 Google Sheets<br>
+  2. 檔案 → 共用 → 發布到網路<br>
+  3. 選擇「整份文件」→ 按「發布」<br>
+  4. 回來按「從 Google Sheets 同步」<br><br>
+  <button onclick="this.parentElement.style.display='none'" style="background:#92400E;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:0.75rem">知道了</button>
+</div>
 
 </body>
 </html>
