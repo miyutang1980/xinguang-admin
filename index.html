@@ -212,7 +212,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 
 <script>
 // ── 設定 ──────────────────────────────────────────────────
-const ADMIN_USERS = { 'admin': 'xinguang2026', 'teacher': 'teacher123' };
+const ADMIN_USERS = {
+  'admin': { password: 'xinguang2026', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','manual'] },
+  'teacher': { password: 'teacher123', role: 'teacher', name: '教師', permissions: ['dashboard','booking','assess','trial'] },
+  'sales': { password: 'sales2026', role: 'sales', name: '業務', permissions: ['dashboard','inquiry','booking','camp','register'] },
+  'staff': { password: 'staff2026', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial'] }
+};
+var _currentUser = null;
 // 資料存在記憶體，請用匯出/匯入 JSON 備份
 
 // ── 資料層（記憶體 + JSON 匯出/匯入）────────────────────────
@@ -226,20 +232,61 @@ function emptyData() {
 
 // ── 登入 ──────────────────────────────────────────────────
 var _loggedIn = false;
+  _currentUser = null;
 function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
-  if (ADMIN_USERS[u] && ADMIN_USERS[u] === p) {
+  const user = ADMIN_USERS[u];
+  if (user && user.password === p) {
     _loggedIn = true;
+    _currentUser = { username: u, ...user };
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'flex';
+    applyPermissions();
     initApp();
   } else {
     document.getElementById('loginErr').style.display = 'block';
   }
 }
+function applyPermissions() {
+  if (!_currentUser) return;
+  const perms = _currentUser.permissions || [];
+  // Hide/show sidebar items based on permissions
+  var navMap = {
+    'dashboard': 'nav-dashboard',
+    'inquiry': 'nav-inquiry',
+    'booking': 'nav-booking',
+    'camp': 'nav-camp',
+    'assess': 'nav-assess',
+    'register': 'nav-register',
+    'trial': 'nav-trial'
+  };
+  Object.keys(navMap).forEach(function(key) {
+    var el = document.getElementById(navMap[key]);
+    if (el) {
+      el.style.display = perms.includes(key) ? '' : 'none';
+    }
+  });
+  // Show role badge in topbar
+  var topbar = document.querySelector('.topbar h2');
+  if (topbar && !document.getElementById('roleBadge')) {
+    var badge = document.createElement('span');
+    badge.id = 'roleBadge';
+    badge.style.cssText = 'font-size:0.7rem;background:#10B981;color:#fff;padding:3px 10px;border-radius:12px;margin-left:10px;font-weight:600;vertical-align:middle';
+    badge.textContent = _currentUser.name + ' (' + _currentUser.role + ')';
+    topbar.appendChild(badge);
+  }
+  // Hide admin-only buttons for non-admin
+  if (_currentUser.role !== 'admin') {
+    var clearBtn = document.querySelector('.btn-red');
+    if (clearBtn) clearBtn.style.display = 'none';
+    var importBtn = document.querySelector('[onclick="importJSON()"]');
+    if (importBtn) importBtn.style.display = 'none';
+  }
+}
 function doLogout() {
   _loggedIn = false;
+  _currentUser = null;
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   _DB = emptyData();
