@@ -120,6 +120,13 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
   .main{margin-left:0}
   #appScreen{flex-direction:column}
 }
+
+/* 非管理員隱藏刪除按鈕 */
+body:not(.is-admin) .btn-delete,
+body:not(.is-admin) .btn-red,
+body:not(.is-admin) [onclick*="delete"],
+body:not(.is-admin) [onclick*="clearAll"],
+body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 </style>
 </head>
 <body>
@@ -222,6 +229,7 @@ const ADMIN_USERS = {
   'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial'] }
 };
 var _currentUser = null;
+function canDelete() { return _currentUser && _currentUser.role === 'admin'; }
 // 資料存在記憶體，請用匯出/匯入 JSON 備份
 
 // ── 資料層（記憶體 + JSON 匯出/匯入）────────────────────────
@@ -271,6 +279,12 @@ function applyPermissions() {
       el.style.display = perms.includes(key) ? '' : 'none';
     }
   });
+  // Set body class for permission-based CSS
+  if (_currentUser.role === 'admin') {
+    document.body.classList.add('is-admin');
+  } else {
+    document.body.classList.remove('is-admin');
+  }
   // Show role badge in topbar
   var topbar = document.querySelector('.topbar h2');
   if (topbar && !document.getElementById('roleBadge')) {
@@ -1383,6 +1397,8 @@ function publishTrialSchedule(){
 }
 
 function clearAllData() {
+  if(!canDelete()){alert('只有管理員可以刪除資料');return;}
+
   if(!confirm('確定清除所有資料？此操作不可復原！')) return;
   _DB = emptyData();
   showToast('🗑️ 資料已清除');
