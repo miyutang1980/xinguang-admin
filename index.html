@@ -1105,7 +1105,7 @@ function updateStatus(collection, idx, newStatus) {
 function closeModal() {
   var m = document.getElementById('modalOverlay');
   m.classList.remove('open');
-  m.style.display = 'none';
+  m.style.display = '';
 }
 
 function showToast(msg) {
@@ -1982,7 +1982,7 @@ function showAccModal(un,ud){
   h+='</div></div>';
   document.getElementById('modalTitle').textContent=isE?'編輯帳號：'+un:'新增帳號';
   document.getElementById('modalBody').innerHTML=h;
-  document.getElementById('modalOverlay').style.display='flex';
+  document.getElementById('modalOverlay').classList.add('open');
   setTimeout(function(){
     document.querySelectorAll('.role-opt').forEach(function(el){
       el.onclick=function(){
@@ -3424,7 +3424,7 @@ function showAccModal(un,ud){
   h+='</div></div>';
   document.getElementById('modalTitle').textContent=isE?'編輯帳號：'+un:'新增帳號';
   document.getElementById('modalBody').innerHTML=h;
-  document.getElementById('modalOverlay').style.display='flex';
+  document.getElementById('modalOverlay').classList.add('open');
   setTimeout(function(){
     document.querySelectorAll('.role-opt').forEach(function(el){
       el.onclick=function(){
