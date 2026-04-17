@@ -1757,5 +1757,1230 @@ checkSession();
 })();
 
 </script>
+<!-- ══════════════════════════════════════════════════════════════════
+     操作說明書 (Operations Manual) — Admin Panel Snippet
+     Inject this block before </body> in xinguang-admin/index.html
+     ══════════════════════════════════════════════════════════════════ -->
+
+<style>
+/* ── Manual Nav Button ── */
+#nav-manual {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 20px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.75);
+  transition: all 0.15s;
+  border-left: 3px solid transparent;
+}
+#nav-manual:hover { background: rgba(255,255,255,0.08); color: #fff; }
+#nav-manual.active { background: rgba(255,255,255,0.12); color: #fff; border-left-color: #7DFFB3; }
+
+/* ── Manual Overlay ── */
+#manualOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: #f8f9fa;
+  overflow-y: auto;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #1A202C;
+}
+#manualOverlay.open { display: block; }
+
+/* ── Manual Header Bar ── */
+#manualOverlay .man-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #1A4731;
+  color: #fff;
+  padding: 14px 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  flex-wrap: wrap;
+}
+#manualOverlay .man-header h1 {
+  font-size: 1.1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+#manualOverlay .man-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#manualSearchBox {
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: none;
+  font-size: 0.85rem;
+  outline: none;
+  width: 240px;
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+}
+#manualSearchBox::placeholder { color: rgba(255,255,255,0.55); }
+#manualSearchBox:focus { background: rgba(255,255,255,0.22); }
+.man-btn-close {
+  background: rgba(255,255,255,0.15);
+  border: none;
+  color: #fff;
+  padding: 7px 18px;
+  border-radius: 7px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.man-btn-close:hover { background: rgba(255,255,255,0.28); }
+.man-btn-print {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.man-btn-print:hover { background: rgba(255,255,255,0.2); }
+
+/* ── Manual Body ── */
+#manualOverlay .man-body {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 32px 24px 60px;
+}
+
+/* ── Chapter Cards ── */
+.man-chapter {
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.man-chapter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  cursor: pointer;
+  background: #fff;
+  border-bottom: 2px solid transparent;
+  transition: background 0.15s;
+  user-select: none;
+}
+.man-chapter-header:hover { background: #f0faf4; }
+.man-chapter-header.open {
+  border-bottom-color: #E8F5EE;
+  background: #f5fbf7;
+}
+.man-chapter-header h2 {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #1A4731;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.man-chapter-header .toggle-icon {
+  font-size: 1rem;
+  color: #2B7A4B;
+  transition: transform 0.2s;
+}
+.man-chapter-header.open .toggle-icon { transform: rotate(90deg); }
+.man-chapter-body {
+  display: none;
+  padding: 20px 24px 24px;
+  border-top: 1px solid #E8F5EE;
+}
+.man-chapter-body.open { display: block; }
+
+/* ── Typography inside manual ── */
+.man-chapter-body h3 {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #1A4731;
+  margin: 20px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 2px solid #E8F5EE;
+}
+.man-chapter-body h3:first-child { margin-top: 0; }
+.man-chapter-body h4 {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #2B7A4B;
+  margin: 16px 0 6px;
+}
+.man-chapter-body p {
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: #374151;
+  margin-bottom: 10px;
+}
+.man-chapter-body ul,
+.man-chapter-body ol {
+  font-size: 0.875rem;
+  line-height: 1.8;
+  color: #374151;
+  padding-left: 22px;
+  margin-bottom: 10px;
+}
+.man-chapter-body li { margin-bottom: 2px; }
+.man-chapter-body strong { color: #1A4731; font-weight: 700; }
+.man-chapter-body em { color: #555; font-style: italic; }
+
+/* Warning / Note callout */
+.man-note {
+  background: #FFFBEB;
+  border-left: 4px solid #F59E0B;
+  border-radius: 0 6px 6px 0;
+  padding: 10px 14px;
+  font-size: 0.84rem;
+  color: #78350F;
+  margin: 12px 0;
+  line-height: 1.65;
+}
+.man-note.danger {
+  background: #FEF2F2;
+  border-left-color: #EF4444;
+  color: #7F1D1D;
+}
+
+/* Tables */
+.man-chapter-body table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin: 12px 0 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #E2E8F0;
+}
+.man-chapter-body th {
+  background: #F0FFF8;
+  color: #1A4731;
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 2px solid #C6F6D5;
+}
+.man-chapter-body td {
+  padding: 9px 14px;
+  border-bottom: 1px solid #F0F4F8;
+  vertical-align: top;
+  color: #374151;
+  word-break: break-word;
+}
+.man-chapter-body tr:last-child td { border-bottom: none; }
+.man-chapter-body tr:hover td { background: #F7FAFC; }
+
+/* Code blocks */
+.man-chapter-body pre {
+  background: #F3F4F6;
+  border: 1px solid #E5E7EB;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  overflow-x: auto;
+  white-space: pre;
+  color: #1F2937;
+  margin: 10px 0 14px;
+}
+.man-chapter-body code {
+  background: #EEF2FF;
+  color: #3730A3;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.82em;
+}
+.man-chapter-body pre code {
+  background: none;
+  color: inherit;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+/* Dividers */
+.man-chapter-body hr {
+  border: none;
+  border-top: 1px solid #E8F5EE;
+  margin: 18px 0;
+}
+
+/* Search highlight */
+.man-highlight {
+  background: #FDE68A;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+/* No-result message */
+#manNoResult {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9CA3AF;
+  font-size: 0.9rem;
+  display: none;
+}
+
+/* Print */
+@media print {
+  #manualOverlay .man-header { position: static !important; background: #1A4731 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  #manualSearchBox, .man-btn-close, .man-btn-print { display: none !important; }
+  .man-chapter { break-inside: avoid; box-shadow: none !important; }
+  .man-chapter-body { display: block !important; }
+  .man-chapter-header { background: #f5fbf7 !important; border-bottom-color: #C6F6D5 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .man-chapter-header .toggle-icon { display: none; }
+  #manualOverlay { position: static !important; overflow: visible !important; }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  #manualOverlay .man-header { padding: 12px 16px; }
+  #manualOverlay .man-header h1 { font-size: 0.95rem; }
+  #manualSearchBox { width: 160px; }
+  #manualOverlay .man-body { padding: 16px 12px 40px; }
+  .man-chapter-header { padding: 14px 16px; }
+  .man-chapter-body { padding: 14px 16px 18px; }
+}
+</style>
+
+<!-- ── Manual Overlay DOM ─────────────────────────────────── -->
+<div id="manualOverlay">
+  <div class="man-header">
+    <h1>📖 操作說明書 — 太平新光分校 系統架構文件</h1>
+    <div class="man-header-right">
+      <input type="text" id="manualSearchBox" placeholder="🔍 搜尋內容…" oninput="manualSearch(this.value)">
+      <button class="man-btn-print" onclick="window.print()">🖨 列印</button>
+      <button class="man-btn-close" onclick="closeManual()">✕ 關閉</button>
+    </div>
+  </div>
+  <div class="man-body" id="manualBody">
+
+    <!-- ── 文件標題 ── -->
+    <div style="text-align:center;margin-bottom:28px;">
+      <div style="font-size:1.5rem;font-weight:900;color:#1A4731;margin-bottom:6px;">太平新光分校 系統架構文件</div>
+      <div style="font-size:0.85rem;color:#6B7280;">English School — 太平新光分校（台中）&nbsp;·&nbsp;文件版本：2025年&nbsp;·&nbsp;語言：繁體中文</div>
+    </div>
+
+    <div id="manNoResult">找不到符合「<span id="manNoResultTerm"></span>」的內容，請嘗試其他關鍵字。</div>
+
+    <!-- ════════════════════════════════════════════════
+         第一章：系統總覽
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="一">
+      <div class="man-chapter-header open" onclick="toggleChapter(this)">
+        <h2><span>一</span>、系統總覽</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body open">
+        <h3>1.1 架構流程圖</h3>
+        <pre>┌─────────────────────────────────────────────────────────────────────────────┐
+│                          使用者／家長瀏覽器                                    │
+└───────────────────────────────┬─────────────────────────────────────────────┘
+                                │
+         ┌──────────────────────┴──────────────────────┐
+         ▼                                             ▼
+┌─────────────────────┐                   ┌────────────────────────┐
+│  主網站              │                   │  後台管理面板            │
+│  taipingxinguang.org│                   │  admin.taipingxinguang │
+│  Railway (nginx)    │                   │  .org                  │
+│  GitHub: xinguang-  │                   │  Cloudflare Pages      │
+│  website (index.html│                   │  GitHub: xinguang-admin│
+└────────┬────────────┘                   └──────────┬─────────────┘
+         │ POST Webhook                              │ CSV Sync
+         │ (5種表單)                                  │
+         ▼                                           ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                     n8n Cloud                                     │
+│              miyutang.app.n8n.cloud                               │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐              │
+│  │ WF01:即時表單 │ │ WF02:每日提醒 │ │ WF04:LINE    │              │
+│  │ 通知          │ │ (07:00 TW)   │ │ 好友收集      │              │
+│  └──────┬───────┘ └──────┬───────┘ └──────┬───────┘              │
+│         │                │                │                       │
+│  ┌──────────────┐                                                 │
+│  │ WF05:預約    │                                                  │
+│  │ 異動/取消    │                                                   │
+│  └──────┬───────┘                                                 │
+└─────────┼──────────────────────────────────────────────────────┬──┘
+          │                                                       │
+     ┌────▼─────────────────────────────────────┐      ┌─────────▼────────┐
+     │                                           │      │  Google Sheets   │
+     │   ┌──────────────┐   ┌─────────────────┐ │      │  太平新光招生名單  │
+     │   │   LINE       │   │     Gmail        │ │      │  (6 個分頁)       │
+     │   │   官方帳號    │   │  eagle@taiping  │ │      │  - 問課諮詢       │
+     │   │   @143qbory  │   │  xinguang.com   │ │      │  - 預約紀錄       │
+     │   │   (5個群組)   │   └─────────────────┘ │      │  - 夏令營報名     │
+     │   └──────┬───────┘                        │      │  - 正式註冊       │
+     │          │                                │      │  - LINE好友       │
+     │   ┌──────▼───────┐                        │      └──────────────────┘
+     │   │  BotBonnie   │                        │
+     │   │  chatbot     │                        │
+     │   │  (@143qbory) │                        │
+     │   └──────────────┘                        │
+     └───────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────┐
+│               GitHub Repos (miyutang1980)          │
+│  - xinguang-website  (主網站 index.html)            │
+│  - xinguang-admin    (後台面板 index.html)          │
+│  - xinguang-n8n      (n8n workflow JSONs + guides)  │
+└───────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────┐
+│                  Cloudflare DNS                    │
+│  taipingxinguang.org → CNAME → Railway            │
+│  admin.taipingxinguang.org → CNAME → CF Pages     │
+└───────────────────────────────────────────────────┘</pre>
+
+        <h3>1.2 系統元件一覽</h3>
+        <table>
+          <tr><th>元件</th><th>平台</th><th>說明</th></tr>
+          <tr><td>主網站</td><td>Railway (nginx)</td><td>家長瀏覽 &amp; 表單填寫</td></tr>
+          <tr><td>後台面板</td><td>Cloudflare Pages</td><td>管理人員查看資料</td></tr>
+          <tr><td>自動化流程</td><td>n8n Cloud</td><td>5個 Workflow，處理通知、提醒、異動</td></tr>
+          <tr><td>資料存儲</td><td>Google Sheets</td><td>招生名單（6個分頁）</td></tr>
+          <tr><td>即時通訊</td><td>LINE Official Account</td><td>5個群組通知</td></tr>
+          <tr><td>聊天機器人</td><td>BotBonnie</td><td>LINE 自動回覆 &amp; 好友分流</td></tr>
+          <tr><td>電子郵件</td><td>Gmail</td><td>eagle@taipingxinguang.com</td></tr>
+          <tr><td>原始碼管理</td><td>GitHub</td><td>3個 Repo</td></tr>
+          <tr><td>DNS &amp; CDN</td><td>Cloudflare</td><td>DNS 管理 &amp; 安全代理</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第二章：主網站
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="二">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>二</span>、主網站 (taipingxinguang.org)</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>2.1 部署架構</h3>
+        <ul>
+          <li><strong>平台</strong>：Railway，使用 nginx 靜態伺服器</li>
+          <li><strong>GitHub Repo</strong>：<code>miyutang1980/xinguang-website</code></li>
+          <li><strong>自動部署</strong>：Push 到 <code>main</code> 分支 → Railway 自動重新部署</li>
+          <li><strong>檔案結構</strong>：單一 <code>index.html</code>（全部功能集成於一個檔案中）</li>
+          <li><strong>域名設定</strong>：
+            <ul>
+              <li><code>taipingxinguang.org</code> → CNAME → <code>4qihqgoo.up.railway.app</code></li>
+              <li>透過 Cloudflare DNS Proxy（橘色雲朵）代理，啟用 SSL 與 DDoS 防護</li>
+            </ul>
+          </li>
+        </ul>
+
+        <h3>2.2 表單流程（5種表單）</h3>
+
+        <h4>表單一：問課諮詢</h4>
+        <p><strong>欄位</strong>：</p>
+        <table>
+          <tr><th>欄位名稱</th><th>說明</th></tr>
+          <tr><td>家長姓名</td><td>必填</td></tr>
+          <tr><td>電話</td><td>必填</td></tr>
+          <tr><td>Email</td><td>選填</td></tr>
+          <tr><td>LINE ID</td><td>選填</td></tr>
+          <tr><td>孩子姓名</td><td>必填</td></tr>
+          <tr><td>年級</td><td>必填</td></tr>
+          <tr><td>就讀學校</td><td>必填</td></tr>
+          <tr><td>班級</td><td>選填</td></tr>
+          <tr><td>幼稚園升小一學校</td><td>若適用</td></tr>
+          <tr><td>想了解的班型</td><td>必填</td></tr>
+          <tr><td>問題</td><td>選填，自由輸入</td></tr>
+        </table>
+        <p><strong>送出流程</strong>：</p>
+        <pre>家長填寫 → POST /webhook/xinguang-form
+    → n8n WF01
+        ├→ Google Sheets（寫入「問課諮詢」分頁）
+        ├→ LINE Flex Message（綠色卡片）推播至「招生名單群」
+        └→ Email 寄至 eagle@taipingxinguang.com</pre>
+        <hr>
+
+        <h4>表單二：預約參訪／檢測</h4>
+        <p><strong>欄位</strong>：</p>
+        <table>
+          <tr><th>欄位名稱</th><th>說明</th></tr>
+          <tr><td>家長姓名</td><td>必填</td></tr>
+          <tr><td>電話</td><td>必填</td></tr>
+          <tr><td>孩子姓名</td><td>必填</td></tr>
+          <tr><td>類型</td><td>參訪 / 檢測 / 體驗（三選一）</td></tr>
+          <tr><td>日期</td><td>必填，日期選擇器</td></tr>
+          <tr><td>時段</td><td>必填，時段選擇器</td></tr>
+        </table>
+        <div class="man-note">⚠️ 前置條件（Guard Check）：必須先完成「問課諮詢」表單，才能開放此表單。</div>
+        <p><strong>送出流程</strong>：</p>
+        <pre>家長填寫 → Guard Check（已問課？）
+    ├─ 否 → 提示先填問課諮詢
+    └─ 是 → POST /webhook/xinguang-form
+        → n8n WF01
+            ├→ Google Sheets（寫入「預約紀錄」分頁）
+            ├→ LINE Flex Message（橘色卡片）推播至「招生名單群」
+            └→ Email 寄至 eagle@taipingxinguang.com</pre>
+        <hr>
+
+        <h4>表單三：預約體驗課</h4>
+        <p>與「預約參訪／檢測」流程類似，前置條件為：必須先通過檢測（Assessment Guard）。</p>
+        <p><strong>送出流程</strong>：</p>
+        <pre>家長填寫 → Assessment Guard（已完成檢測？）
+    ├─ 否 → 提示先預約檢測
+    └─ 是 → POST /webhook/xinguang-form
+        → n8n WF01
+            ├→ Google Sheets（寫入「預約紀錄」分頁，類型=體驗課）
+            ├→ LINE Flex Message（橘色卡片）推播至「招生名單群」
+            └→ Email 寄至 eagle@taipingxinguang.com</pre>
+        <hr>
+
+        <h4>表單四：夏令營報名</h4>
+        <p><strong>欄位</strong>：</p>
+        <table>
+          <tr><th>欄位名稱</th><th>說明</th></tr>
+          <tr><td>家長姓名</td><td>必填</td></tr>
+          <tr><td>電話</td><td>必填</td></tr>
+          <tr><td>LINE ID</td><td>必填</td></tr>
+          <tr><td>孩子列表</td><td>可新增多位孩子，各自選擇七月/八月日期</td></tr>
+          <tr><td>制服尺寸</td><td>每位孩子各自選擇</td></tr>
+          <tr><td>飲食需求</td><td>普通 / 素食等</td></tr>
+        </table>
+        <p><strong>85折優惠邏輯</strong>：</p>
+        <pre>條件（所有條件均需同時成立）：
+1. 同一位孩子（不可跨孩子合計）七月 + 八月報名天數 ≥ 20 天
+2. 報名日期在 5 月 31 日前
+
+顯示文字：「夏令營專屬優惠」（不顯示「85折」字樣）</pre>
+        <div class="man-note danger">⚠️ 注意：折扣計算以「單一孩子」為單位，不能將多個孩子的天數合計。</div>
+        <p><strong>送出流程</strong>：</p>
+        <pre>家長填寫 → 折扣邏輯判斷
+    → POST /webhook/xinguang-form
+        → n8n WF01
+            ├→ Google Sheets（寫入「夏令營報名」分頁）
+            ├→ LINE Flex Message（綠色帳篷卡片 + 紅色開單卡片）推播至「招生名單群」
+            └→ Email 寄至 eagle@taipingxinguang.com</pre>
+        <hr>
+
+        <h4>表單五：正式註冊</h4>
+        <p><strong>欄位</strong>：</p>
+        <table>
+          <tr><th>欄位名稱</th><th>說明</th></tr>
+          <tr><td>家長姓名</td><td>必填</td></tr>
+          <tr><td>電話</td><td>必填</td></tr>
+          <tr><td>Email</td><td>必填</td></tr>
+          <tr><td>學生姓名</td><td>必填</td></tr>
+          <tr><td>年級</td><td>必填</td></tr>
+          <tr><td>班型</td><td>必填（依分班結果）</td></tr>
+          <tr><td>分班結果</td><td>必填（填入檢測後通知的結果）</td></tr>
+          <tr><td>附加服務</td><td>多選，如課後照顧、接送等</td></tr>
+        </table>
+        <div class="man-note">⚠️ 前置條件（Assessment Validation Chain）：必須完整通過：問課諮詢 → 預約 → 檢測 → 體驗課，才能開放正式註冊。</div>
+        <p><strong>送出流程</strong>：</p>
+        <pre>家長填寫 → Assessment Validation Chain（完整驗證）
+    ├─ 未完成 → 提示尚未完成前置流程
+    └─ 完成 → POST /webhook/xinguang-form
+        → n8n WF01
+            ├→ Google Sheets（寫入「正式註冊」分頁）
+            ├→ LINE Flex Message（紅色開單卡片）推播至「招生名單群」
+            └→ Email 寄至 eagle@taipingxinguang.com</pre>
+
+        <h3>2.3 預約異動／取消功能</h3>
+        <p>透過主網站彈出的 Modal 視窗進行操作。</p>
+        <h4>取消預約流程</h4>
+        <pre>點擊「取消預約」→ Modal 彈出
+    → 填寫取消原因
+    → POST /webhook/booking-change
+        → n8n WF05
+            ├→ Google Sheets（更新「預約紀錄」分頁狀態欄為「已取消」）
+            ├→ LINE 紅色 Flex 卡片（推播至「招生名單群」）
+            ├→ Email 通知 eagle@taipingxinguang.com
+            └→ 查詢家長 LINE ID → 推播家長個人通知</pre>
+        <p>取消後，網頁顯示重新預約按鈕：</p>
+        <ul>
+          <li>「預約參訪」</li>
+          <li>「預約檢測」</li>
+          <li>「預約體驗課」</li>
+        </ul>
+        <h4>改期預約流程</h4>
+        <pre>點擊「更改預約」→ Modal 彈出
+    → 日期選擇器 + 時段選擇器 + 類型選擇
+    → POST /webhook/booking-change
+        → n8n WF05
+            ├→ Google Sheets（更新「預約紀錄」分頁狀態欄為「已改期」）
+            ├→ LINE 橘色 Flex 卡片（推播至「招生名單群」）
+            ├→ Email 通知 eagle@taipingxinguang.com
+            └→ 查詢家長 LINE ID → 推播家長個人通知</pre>
+
+        <h3>2.4 LINE 好友引導</h3>
+        <ul>
+          <li><strong>形式</strong>：網頁底部浮動綠色橫幅（Floating Banner）</li>
+          <li><strong>觸發條件</strong>：頁面滾動超過 50% 或完成任何表單送出後</li>
+          <li><strong>連結</strong>：<code>https://lin.ee/o1wzF7a</code>（LINE Official Account 加入好友連結）</li>
+        </ul>
+
+        <h3>2.5 特殊技術細節</h3>
+        <h4>時區與星期計算</h4>
+        <ul>
+          <li><strong>方法</strong>：自定義函數 <code>getDowFromDateStr()</code> 使用 <strong>Sakamoto 算法</strong>計算星期幾</li>
+          <li><strong>原因</strong>：避免使用 <code>JS Date.getDay()</code> 在不同時區環境（Railway 伺服器位於 UTC）下產生日期偏移問題</li>
+          <li><strong>適用範圍</strong>：預約日期的星期顯示、營業日判斷</li>
+        </ul>
+        <h4>Webhook 端點</h4>
+        <table>
+          <tr><th>用途</th><th>URL</th></tr>
+          <tr><td>5種表單送出</td><td><code>https://miyutang.app.n8n.cloud/webhook/xinguang-form</code></td></tr>
+          <tr><td>預約異動／取消</td><td><code>https://miyutang.app.n8n.cloud/webhook/booking-change</code></td></tr>
+        </table>
+        <h4>其他技術注意事項</h4>
+        <ul>
+          <li><strong>Admin 模式</strong>：在 URL 加入 <code>?admin=xinguang2026</code> 即可進入管理模式（顯示隱藏功能）</li>
+          <li><strong>Fetch 設定</strong>：所有 Webhook 呼叫使用 <code>mode: 'no-cors'</code>（避免跨域問題，無法讀取回應內容）</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第三章：後台管理面板
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="三">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>三</span>、後台管理面板 (admin.taipingxinguang.org)</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>3.1 部署架構</h3>
+        <ul>
+          <li><strong>平台</strong>：Cloudflare Pages</li>
+          <li><strong>Project 名稱</strong>：<code>xinguang-admin</code></li>
+          <li><strong>GitHub Repo</strong>：<code>miyutang1980/xinguang-admin</code></li>
+          <li><strong>自動部署</strong>：Push 到 <code>main</code> 分支 → Cloudflare Pages 自動部署</li>
+          <li><strong>域名</strong>：<code>admin.taipingxinguang.org</code> → CNAME → <code>xinguang-admin.pages.dev</code>（Cloudflare Proxy）</li>
+          <li><strong>檔案結構</strong>：單一 <code>index.html</code></li>
+        </ul>
+
+        <h3>3.2 登入帳號</h3>
+        <table>
+          <tr><th>角色</th><th>帳號</th><th>密碼</th></tr>
+          <tr><td>管理員</td><td><code>admin</code></td><td><code>xinguang2026</code></td></tr>
+          <tr><td>教師</td><td><code>teacher</code></td><td><code>teacher123</code></td></tr>
+        </table>
+
+        <h3>3.3 功能說明</h3>
+        <table>
+          <tr><th>功能</th><th>說明</th></tr>
+          <tr><td>查看問課諮詢</td><td>列出所有問課記錄</td></tr>
+          <tr><td>查看預約紀錄</td><td>列出所有預約，包含狀態</td></tr>
+          <tr><td>查看夏令營報名</td><td>列出所有夏令營報名</td></tr>
+          <tr><td>查看正式註冊</td><td>列出所有正式學員資料</td></tr>
+          <tr><td>同步 Google Sheets</td><td>點擊「同步」按鈕，執行 <code>syncFromSheets()</code> 函數</td></tr>
+        </table>
+
+        <h3>3.4 資料讀取方式</h3>
+        <ul>
+          <li>透過 Google Sheets <strong>公開發布的 CSV URL</strong> 讀取資料</li>
+          <li>格式：<code>https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&amp;sheet={TAB_NAME}</code></li>
+          <li>Sheet ID：<code>1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w</code></li>
+        </ul>
+        <div class="man-note">⚠️ 部署注意：Cloudflare Pages Preview 環境中 <code>localStorage</code> 被攔截，需設定 <code>should_validate: false</code>。</div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第四章：n8n Cloud Workflows
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="四">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>四</span>、n8n Cloud Workflows</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <ul>
+          <li><strong>平台</strong>：n8n Cloud</li>
+          <li><strong>基礎 URL</strong>：<code>miyutang.app.n8n.cloud</code></li>
+        </ul>
+        <div class="man-note danger">⚠️ 重要：n8n Cloud <strong>不支援 <code>$env</code> 環境變數</strong>，所有 Token、ID、URL 必須直接硬寫在節點設定中。</div>
+        <div class="man-note danger">⚠️ Webhook Body 讀取：資料位於 <code>$input.first().json.body</code>，<strong>不是</strong> <code>$input.first().json</code> 直接讀取。</div>
+
+        <h3>4.1 Workflow 01：太平新光 — 即時表單通知</h3>
+        <p><strong>觸發方式</strong>：Webhook POST <code>/xinguang-form</code></p>
+        <p><strong>流程圖</strong>：</p>
+        <pre>Webhook（接收表單）
+    │
+    ▼
+回應 200 OK（立即回應，避免前端等待）
+    │
+    ▼
+判斷表單類型（Switch 節點）
+    │
+    ├── 問課諮詢
+    │       → Code 節點（組合訊息）
+    │           ├→ LINE Flex Message（綠色卡片）→ api.line.me
+    │           ├→ Google Sheets（寫入「問課諮詢」分頁）
+    │           └→ Gmail（寄信至 eagle@taipingxinguang.com）
+    │
+    ├── 預約參訪／檢測／體驗
+    │       → Code 節點（組合訊息）
+    │           ├→ LINE Flex Message（橘色卡片）→ api.line.me
+    │           ├→ Google Sheets（寫入「預約紀錄」分頁）
+    │           └→ Gmail
+    │
+    ├── 夏令營報名
+    │       → Code 節點（組合訊息）
+    │           ├→ LINE Flex Message（綠色帳篷卡片 + 紅色開單卡片）→ api.line.me
+    │           ├→ Google Sheets（寫入「夏令營報名」分頁）
+    │           └→ Gmail
+    │
+    └── 正式註冊
+            → Code 節點（組合訊息）
+                ├→ LINE Flex Message（紅色開單卡片）→ api.line.me
+                ├→ Google Sheets（寫入「正式註冊」分頁）
+                └→ Gmail</pre>
+        <p><strong>技術細節</strong>：</p>
+        <table>
+          <tr><th>項目</th><th>說明</th></tr>
+          <tr><td>Code 節點資料來源</td><td><code>$input.first().json.body</code></td></tr>
+          <tr><td>Sheets 對應模式</td><td>Map Automatically</td></tr>
+          <tr><td>Sheets 分頁名稱</td><td>動態讀取 <code>{{ $json._sheetName }}</code></td></tr>
+          <tr><td>LINE API 端點</td><td><code>https://api.line.me/v2/bot/message/push</code></td></tr>
+          <tr><td>LINE 推播群組</td><td><code>C48adfca649b3d5e76f137d582b94fc6b</code>（招生名單群）</td></tr>
+          <tr><td>Email 認證</td><td>Gmail OAuth2</td></tr>
+        </table>
+
+        <h3>4.2 Workflow 02：太平新光 — 每日預約提醒</h3>
+        <p><strong>觸發方式</strong>：Schedule（Cron）</p>
+        <p><strong>Cron 設定</strong>：<code>0 23 * * *</code>（UTC）= 台灣時間 早上 7:00</p>
+        <p><strong>狀態</strong>：Active（啟用中）</p>
+        <p><strong>流程圖</strong>：</p>
+        <pre>排程觸發（每天台灣 07:00）
+    │
+    ▼
+讀取 Google Sheets（「預約紀錄」分頁）
+    │
+    ▼
+Filter 節點（篩選今天 &amp; 明天的預約）
+    │
+    ▼
+組合提醒訊息（Code 節點）
+    │
+    ▼
+LINE 推播提醒至指定群組</pre>
+        <p><strong>用途</strong>：每日早晨提醒工作人員當天與隔天的預約行程，避免漏接。</p>
+
+        <h3>4.3 Workflow 04：LINE 好友收集</h3>
+        <p><strong>觸發方式</strong>：Webhook POST <code>/line-friend</code></p>
+        <p><strong>流程圖</strong>：</p>
+        <pre>Webhook（接收 LINE 好友資訊）
+    │
+    ▼
+回應 200 OK
+    │
+    ▼
+Google Sheets（Append 新行至「LINE好友」分頁）</pre>
+        <p><strong>使用方式</strong>：</p>
+        <ul>
+          <li>由 BotBonnie Webhook 觸發（未來功能）</li>
+          <li>或手動匯入 LINE 好友名單</li>
+        </ul>
+
+        <h3>4.4 Workflow 05：太平新光 — 預約異動／取消</h3>
+        <p><strong>觸發方式</strong>：Webhook POST <code>/booking-change</code></p>
+        <p><strong>流程圖</strong>：</p>
+        <pre>Webhook（接收異動/取消請求）
+    │
+    ▼
+回應 200 OK
+    │
+    ▼
+Code 節點（組合訊息，判斷是「取消」還是「改期」）
+    │
+    ├─ 取消 → LINE 紅色 Flex 卡片推播（招生名單群）
+    │
+    ├─ 改期 → LINE 橘色 Flex 卡片推播（招生名單群）
+    │
+    ├─ Gmail 寄信通知
+    │
+    ├─ 更新 Google Sheets（「預約紀錄」分頁）
+    │       Append or Update Row，以「家長」欄位為比對鍵
+    │
+    └─ 查詢家長 LINE ID（從 Sheets「LINE好友」分頁）
+            │
+            ▼
+        組合家長個人通知訊息
+            │
+            ▼
+        LINE 推播至家長個人</pre>
+
+        <h3>4.5 Workflow：抓 LINE 群組 ID（工具型 Workflow）</h3>
+        <p><strong>用途</strong>：取得 LINE 群組的 Group ID（設定新群組時使用）</p>
+        <p><strong>狀態</strong>：可停用（日常不需要常駐啟動）</p>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第五章：Google Sheets
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="五">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>五</span>、Google Sheets</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>5.1 文件資訊</h3>
+        <table>
+          <tr><th>項目</th><th>值</th></tr>
+          <tr><td>文件名稱</td><td>太平新光招生名單</td></tr>
+          <tr><td>文件 ID</td><td><code>1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w</code></td></tr>
+          <tr><td>共用設定</td><td>需設定「知道連結的人可以查看」（供 Admin 面板讀取 CSV）</td></tr>
+        </table>
+
+        <h3>5.2 分頁結構與欄位定義</h3>
+
+        <h4>分頁一：問課諮詢</h4>
+        <table>
+          <tr><th>欄位</th><th>說明</th></tr>
+          <tr><td>時間</td><td>自動填入（n8n 時間戳記）</td></tr>
+          <tr><td>家長</td><td>家長姓名</td></tr>
+          <tr><td>電話</td><td>聯絡電話</td></tr>
+          <tr><td>Email</td><td>電子郵件</td></tr>
+          <tr><td>LINE</td><td>LINE ID</td></tr>
+          <tr><td>孩子</td><td>孩子姓名</td></tr>
+          <tr><td>班型</td><td>想了解的班型</td></tr>
+          <tr><td>問題</td><td>家長填寫的問題</td></tr>
+          <tr><td>狀態</td><td>待跟進 / 已聯繫 / 已預約 / 已成交</td></tr>
+        </table>
+
+        <h4>分頁二：預約紀錄</h4>
+        <table>
+          <tr><th>欄位</th><th>說明</th></tr>
+          <tr><td>時間</td><td>自動填入</td></tr>
+          <tr><td>家長</td><td>家長姓名</td></tr>
+          <tr><td>電話</td><td>聯絡電話</td></tr>
+          <tr><td>孩子</td><td>孩子姓名</td></tr>
+          <tr><td>類型</td><td>參訪 / 檢測 / 體驗</td></tr>
+          <tr><td>日期</td><td>預約日期</td></tr>
+          <tr><td>時段</td><td>預約時段</td></tr>
+          <tr><td>狀態</td><td>待確認 / 已確認 / 已完成 / 已取消 / 已改期</td></tr>
+        </table>
+
+        <h4>分頁三：夏令營報名</h4>
+        <table>
+          <tr><th>欄位</th><th>說明</th></tr>
+          <tr><td>時間</td><td>自動填入</td></tr>
+          <tr><td>家長</td><td>家長姓名</td></tr>
+          <tr><td>電話</td><td>聯絡電話</td></tr>
+          <tr><td>LINE</td><td>LINE ID</td></tr>
+          <tr><td>孩子</td><td>孩子姓名（含多位）</td></tr>
+          <tr><td>課程</td><td>報名的七月/八月日期組合</td></tr>
+          <tr><td>飲食</td><td>飲食需求</td></tr>
+          <tr><td>狀態</td><td>待確認 / 已確認 / 已繳費</td></tr>
+        </table>
+
+        <h4>分頁四：正式註冊</h4>
+        <table>
+          <tr><th>欄位</th><th>說明</th></tr>
+          <tr><td>時間</td><td>自動填入</td></tr>
+          <tr><td>家長</td><td>家長姓名</td></tr>
+          <tr><td>電話</td><td>聯絡電話</td></tr>
+          <tr><td>Email</td><td>電子郵件</td></tr>
+          <tr><td>學生</td><td>學生姓名</td></tr>
+          <tr><td>年級</td><td>就讀年級</td></tr>
+          <tr><td>班型</td><td>報名班型</td></tr>
+          <tr><td>分班</td><td>分班測驗結果</td></tr>
+          <tr><td>附加服務</td><td>選購的附加服務</td></tr>
+          <tr><td>狀態</td><td>待繳費 / 已繳費 / 已報到</td></tr>
+        </table>
+
+        <h4>分頁五：LINE好友</h4>
+        <table>
+          <tr><th>欄位</th><th>說明</th></tr>
+          <tr><td>userId</td><td>LINE 使用者 ID</td></tr>
+          <tr><td>displayName</td><td>LINE 顯示名稱</td></tr>
+          <tr><td>電話</td><td>電話（若已提供）</td></tr>
+          <tr><td>加入時間</td><td>加入官方帳號的時間</td></tr>
+          <tr><td>來源</td><td>從哪個管道加入</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第六章：LINE 系統
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="六">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>六</span>、LINE 系統</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>6.1 官方帳號資訊</h3>
+        <table>
+          <tr><th>項目</th><th>值</th></tr>
+          <tr><td>帳號 ID</td><td><code>@143qbory</code></td></tr>
+          <tr><td>加入好友連結</td><td><code>https://lin.ee/o1wzF7a</code></td></tr>
+          <tr><td>Channel Access Token</td><td><code>VZXYewFJ392pah0clhor2D/z1vVdw/e/MY8p3YpcJjirl3rsYcC1txyAacUXbaX5PW4Xr5dQqPgbzIzBLFQoafCXNkP0fR80KVSgI4hrlnun/3GMuvEaScOLdJ4cggujFr7CZ8g6EcGH9mxCEtE1VQdB04t89/1O/w1cDnyilFU=</code></td></tr>
+        </table>
+
+        <h3>6.2 五個群組</h3>
+        <table>
+          <tr><th>群組名稱</th><th>群組 ID</th><th>用途</th></tr>
+          <tr><td>招生名單群</td><td><code>C48adfca649b3d5e76f137d582b94fc6b</code></td><td>新客諮詢、預約、報名通知</td></tr>
+          <tr><td>營運公告群</td><td><code>Cad54d7e53d732fbf9f08124dd7a809e6</code></td><td>全體員工公告</td></tr>
+          <tr><td>教學公告群</td><td><code>C4fefb574f0948004d9b5d000c269e174</code></td><td>教學團隊內部通知</td></tr>
+          <tr><td>行銷內容群</td><td><code>C25aed83efb5d15a490bf1c0cc0789edd</code></td><td>行銷內容討論與分發</td></tr>
+          <tr><td>老闆戰情群</td><td><code>Cd955a82c2f6e92b97def5b5875464890</code></td><td>老闆 + 核心幹部</td></tr>
+        </table>
+
+        <h3>6.3 Flex Message 卡片類型</h3>
+        <p>n8n WF01 依據表單類型，推播不同顏色的 Flex Message 卡片。</p>
+        <table>
+          <tr><th>卡片名稱</th><th>主色</th><th>觸發時機</th><th>推播群組</th></tr>
+          <tr><td>問課諮詢卡</td><td>🟢 綠色</td><td>家長送出問課諮詢</td><td>招生名單群</td></tr>
+          <tr><td>預約通知卡</td><td>🟠 橘色</td><td>家長送出預約（參訪/檢測/體驗）</td><td>招生名單群</td></tr>
+          <tr><td>夏令營帳篷卡</td><td>🟢 綠色帳篷</td><td>夏令營報名送出</td><td>招生名單群</td></tr>
+          <tr><td>夏令營開單卡</td><td>🔴 紅色</td><td>夏令營報名送出（搭配帳篷卡）</td><td>招生名單群</td></tr>
+          <tr><td>正式註冊開單卡</td><td>🔴 紅色</td><td>正式註冊送出</td><td>招生名單群</td></tr>
+          <tr><td>取消預約卡</td><td>🔴 紅色</td><td>預約取消</td><td>招生名單群</td></tr>
+          <tr><td>改期通知卡</td><td>🟠 橘色</td><td>預約改期</td><td>招生名單群</td></tr>
+        </table>
+
+        <h3>6.4 BotBonnie 整合</h3>
+        <table>
+          <tr><th>項目</th><th>值</th></tr>
+          <tr><td>BotBonnie Webhook URL</td><td><code>https://webhook.botbonnie.com/v1/line/143qbory</code></td></tr>
+        </table>
+        <div class="man-note danger">⚠️ <strong>絕對不可覆蓋此 Webhook URL</strong>。LINE 官方帳號的 Webhook URL 必須保持指向 BotBonnie，否則所有自動回覆功能將失效。</div>
+
+        <h4>BotBonnie 歡迎流程</h4>
+        <pre>新朋友加入 @143qbory
+    │
+    ▼
+歡迎訊息（觸發分流）
+    │
+    ├── 在校生家長
+    │       → 顯示在校家長專屬選單
+    │           - 查詢課表
+    │           - 聯繫老師
+    │           - 繳費資訊
+    │
+    └── 非本校生家長
+            → 顯示招生選單
+                - 了解課程
+                - 預約參訪
+                - 加入問課諮詢</pre>
+
+        <h4>開通回覆模組</h4>
+        <ul>
+          <li><strong>觸發關鍵字</strong>：<code>1</code></li>
+          <li><strong>功能</strong>：家長輸入「1」後，觸發「開通回覆」模組（回覆特定說明或連結）</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第七章：GitHub Repos
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="七">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>七</span>、GitHub Repos</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <table>
+          <tr><th>Repo 名稱</th><th>GitHub 路徑</th><th>內容說明</th></tr>
+          <tr><td>主網站</td><td><code>miyutang1980/xinguang-website</code></td><td>主網站原始碼（<code>index.html</code>），含所有5種表單、Modal、浮動橫幅</td></tr>
+          <tr><td>後台面板</td><td><code>miyutang1980/xinguang-admin</code></td><td>後台管理面板原始碼（<code>index.html</code>），含登入、資料瀏覽、Sheets 同步</td></tr>
+          <tr><td>n8n 備份</td><td><code>miyutang1980/xinguang-n8n</code></td><td>所有 n8n Workflow 的 JSON 匯出檔案 + 操作說明文件</td></tr>
+        </table>
+
+        <h3>自動部署流程</h3>
+        <pre>開發者 push to main
+    │
+    ├── xinguang-website → Railway 自動重新部署（nginx）
+    └── xinguang-admin   → Cloudflare Pages 自動重新部署</pre>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第八章：DNS 與域名設定
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="八">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>八</span>、DNS 與域名設定 (Cloudflare)</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>8.1 DNS 記錄</h3>
+        <table>
+          <tr><th>記錄名稱</th><th>類型</th><th>目標值</th><th>Proxy 狀態</th></tr>
+          <tr><td><code>taipingxinguang.org</code></td><td>CNAME</td><td><code>4qihqgoo.up.railway.app</code></td><td>✅ Proxied（橘色雲朵）</td></tr>
+          <tr><td><code>admin</code></td><td>CNAME</td><td><code>xinguang-admin.pages.dev</code></td><td>✅ Proxied（橘色雲朵）</td></tr>
+          <tr><td><code>_railway-verify</code></td><td>TXT</td><td><code>railway-verify=7f6f…</code></td><td>—</td></tr>
+        </table>
+
+        <h3>8.2 Cloudflare 設定說明</h3>
+        <ul>
+          <li><strong>Proxy 模式</strong>（橘色雲朵）：流量透過 Cloudflare CDN，提供 SSL 憑證、DDoS 防護、快取功能</li>
+          <li><strong>Railway 驗證</strong>：<code>_railway-verify</code> TXT 記錄用於 Railway 平台驗證自訂域名所有權</li>
+          <li><strong>SSL 模式</strong>：建議設定為 <code>Full (Strict)</code> 確保端對端加密</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第九章：帳號密碼整理
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="九">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>九</span>、帳號密碼整理</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <table>
+          <tr><th>服務</th><th>帳號</th><th>密碼／Token</th><th>說明</th></tr>
+          <tr><td>主網站 Admin 模式</td><td>—</td><td><code>?admin=xinguang2026</code></td><td>URL Query Param</td></tr>
+          <tr><td>後台管理面板（管理員）</td><td><code>admin</code></td><td><code>xinguang2026</code></td><td>網頁登入</td></tr>
+          <tr><td>後台管理面板（教師）</td><td><code>teacher</code></td><td><code>teacher123</code></td><td>網頁登入</td></tr>
+          <tr><td>n8n Cloud</td><td>miyutang.app.n8n.cloud</td><td>（使用者帳號）</td><td>—</td></tr>
+          <tr><td>LINE Channel Access Token</td><td>—</td><td>（見第六章 6.1）</td><td>用於 LINE API 推播</td></tr>
+          <tr><td>GitHub</td><td><code>miyutang1980</code></td><td>（使用者帳號）</td><td>—</td></tr>
+          <tr><td>Google Sheets</td><td>—</td><td>Google OAuth2</td><td>透過 n8n Gmail OAuth2 節點</td></tr>
+          <tr><td>Gmail（接收通知）</td><td><code>eagle@taipingxinguang.com</code></td><td>—</td><td>Gmail OAuth2 by n8n</td></tr>
+        </table>
+        <div class="man-note danger">⚠️ 安全提示：本文件包含敏感 Token 與密碼，請妥善保管，不可上傳至公開 GitHub Repo 或分享給不相關人員。</div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════
+         第十章：注意事項與常見問題
+    ════════════════════════════════════════════════ -->
+    <div class="man-chapter" data-chapter="十">
+      <div class="man-chapter-header" onclick="toggleChapter(this)">
+        <h2><span>十</span>、注意事項與常見問題</h2>
+        <span class="toggle-icon">▶</span>
+      </div>
+      <div class="man-chapter-body">
+        <h3>10.1 技術限制</h3>
+        <table>
+          <tr><th>項目</th><th>說明</th></tr>
+          <tr><td>n8n <code>$env</code> 變數</td><td>n8n Cloud <strong>不支援</strong>環境變數（<code>$env.XXX</code>），所有 Token、ID、URL 必須<strong>直接硬寫</strong>在各節點設定中</td></tr>
+          <tr><td>Webhook Body 路徑</td><td>表單資料在 <code>$input.first().json.body</code>，<strong>不是</strong> <code>$input.first().json</code>（因為 Webhook 節點包了一層 <code>body</code>）</td></tr>
+          <tr><td>Cloudflare Pages 上傳</td><td>部署至 Cloudflare Pages 時，HTML/JS/CSS 檔案<strong>必須放在資料夾根目錄</strong>，否則無法正確識別</td></tr>
+          <tr><td>Admin 面板部署驗證</td><td><code>deploy_website</code> 使用 <code>should_validate: false</code>，因為 Cloudflare Pages Preview 環境中 <code>localStorage</code> 被攔截</td></tr>
+          <tr><td>BotBonnie Webhook</td><td>LINE 官方帳號的 Webhook URL <strong>不可覆蓋</strong>，必須保持 <code>https://webhook.botbonnie.com/v1/line/143qbory</code></td></tr>
+          <tr><td>夏令營 85 折計算</td><td>折扣以<strong>單一孩子</strong>為計算單位，不能將多個孩子的天數合計；網站<strong>不顯示「85折」</strong>，顯示為「夏令營專屬優惠」</td></tr>
+          <tr><td>Fetch CORS 設定</td><td>所有 Webhook 呼叫使用 <code>mode: 'no-cors'</code>，<strong>無法讀取回應內容</strong>（只能確認送出，不確認成功）</td></tr>
+        </table>
+
+        <h3>10.2 日期與時區</h3>
+        <table>
+          <tr><th>項目</th><th>說明</th></tr>
+          <tr><td>伺服器時區</td><td>Railway 伺服器位於 UTC</td></tr>
+          <tr><td>n8n Cloud 時區</td><td>預設 UTC</td></tr>
+          <tr><td>台灣時間</td><td>UTC+8（需在顯示時加 8 小時）</td></tr>
+          <tr><td>星期計算</td><td>使用 <code>getDowFromDateStr()</code> Sakamoto 算法，<strong>不使用</strong> <code>new Date().getDay()</code></td></tr>
+          <tr><td>每日提醒 Cron</td><td><code>0 23 * * *</code>（UTC）= 台灣時間 07:00</td></tr>
+        </table>
+
+        <h3>10.3 表單流程驗證鏈</h3>
+        <p>為確保家長完整走過招生流程，各表單有嚴格的前置條件：</p>
+        <pre>問課諮詢（無前置條件）
+    ↓
+預約參訪／檢測（需先完成問課諮詢）
+    ↓
+預約體驗課（需先完成檢測）
+    ↓
+正式註冊（需完整通過上述所有步驟）</pre>
+        <p>夏令營報名為<strong>獨立流程</strong>，不受上述驗證鏈限制。</p>
+
+        <h3>10.4 維護與擴充指南</h3>
+        <ol>
+          <li><strong>新增 LINE 群組通知</strong>：在 n8n WF01 的 LINE HTTP Request 節點中，更新 <code>to</code> 欄位為新群組 ID</li>
+          <li><strong>新增表單欄位</strong>：同時更新 <code>index.html</code>（前端顯示）、n8n Code 節點（訊息組合）、Google Sheets（新增欄位）</li>
+          <li><strong>新增 n8n Workflow</strong>：匯出 JSON 後，存入 <code>miyutang1980/xinguang-n8n</code> Repo 備份</li>
+          <li><strong>更換 LINE Channel Token</strong>：需同時更新 n8n 所有 Workflow 中使用 LINE HTTP Request 的節點（Token 是硬寫的）</li>
+          <li><strong>夏令營年份更新</strong>：每年需更新 <code>index.html</code> 中的報名日期範圍與優惠截止日（5/31 前）</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #E2E8F0;color:#9CA3AF;font-size:0.78rem;">
+      文件最後更新：2025年 &nbsp;·&nbsp; 適用系統版本：太平新光分校招生系統 v1.0
+    </div>
+
+  </div><!-- end man-body -->
+</div><!-- end manualOverlay -->
+
+<script>
+(function() {
+  // ── Inject nav button into sidebar ───────────────────────────
+  function injectNavButton() {
+    const sidebarMenu = document.querySelector('.sidebar-menu');
+    if (!sidebarMenu) return;
+    if (document.getElementById('nav-manual')) return; // already injected
+
+    const btn = document.createElement('div');
+    btn.id = 'nav-manual';
+    btn.className = 'sidebar-item';
+    btn.textContent = '📖 操作說明書';
+    btn.onclick = openManual;
+    sidebarMenu.appendChild(btn);
+  }
+
+  // ── Open / Close ──────────────────────────────────────────────
+  window.openManual = function() {
+    document.getElementById('manualOverlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    // highlight nav button
+    document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+    const navBtn = document.getElementById('nav-manual');
+    if (navBtn) navBtn.classList.add('active');
+    // clear search
+    document.getElementById('manualSearchBox').value = '';
+    manualSearch('');
+  };
+
+  window.closeManual = function() {
+    document.getElementById('manualOverlay').classList.remove('open');
+    document.body.style.overflow = '';
+    // restore previous active state based on currentSection
+    const navBtn = document.getElementById('nav-manual');
+    if (navBtn) navBtn.classList.remove('active');
+    if (typeof currentSection !== 'undefined') {
+      const prevNav = document.getElementById('nav-' + currentSection);
+      if (prevNav) prevNav.classList.add('active');
+    }
+  };
+
+  // ── Collapsible chapters ──────────────────────────────────────
+  window.toggleChapter = function(headerEl) {
+    const body = headerEl.nextElementSibling;
+    const isOpen = headerEl.classList.contains('open');
+    if (isOpen) {
+      headerEl.classList.remove('open');
+      body.classList.remove('open');
+    } else {
+      headerEl.classList.add('open');
+      body.classList.add('open');
+    }
+  };
+
+  // ── Search / Filter ───────────────────────────────────────────
+  window.manualSearch = function(term) {
+    term = (term || '').trim();
+    const chapters = document.querySelectorAll('#manualBody .man-chapter');
+    const noResult = document.getElementById('manNoResult');
+    const noResultTerm = document.getElementById('manNoResultTerm');
+    let anyVisible = false;
+
+    // Remove old highlights first
+    document.querySelectorAll('.man-highlight').forEach(el => {
+      const parent = el.parentNode;
+      parent.replaceChild(document.createTextNode(el.textContent), el);
+      parent.normalize();
+    });
+
+    if (!term) {
+      chapters.forEach(ch => { ch.style.display = ''; });
+      if (noResult) noResult.style.display = 'none';
+      return;
+    }
+
+    const lterm = term.toLowerCase();
+
+    chapters.forEach(ch => {
+      const text = ch.textContent.toLowerCase();
+      if (text.includes(lterm)) {
+        ch.style.display = '';
+        anyVisible = true;
+        // Auto-expand matching chapter
+        const header = ch.querySelector('.man-chapter-header');
+        const body = ch.querySelector('.man-chapter-body');
+        if (header && !header.classList.contains('open')) {
+          header.classList.add('open');
+          body.classList.add('open');
+        }
+        // Highlight matches in text nodes inside body
+        highlightInEl(ch.querySelector('.man-chapter-body'), term);
+      } else {
+        ch.style.display = 'none';
+      }
+    });
+
+    if (noResult) {
+      noResult.style.display = anyVisible ? 'none' : 'block';
+      if (noResultTerm) noResultTerm.textContent = term;
+    }
+  };
+
+  function highlightInEl(el, term) {
+    if (!el) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+    const nodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.parentNode.nodeName === 'SCRIPT' || node.parentNode.nodeName === 'STYLE') continue;
+      if (node.textContent.toLowerCase().includes(term.toLowerCase())) {
+        nodes.push(node);
+      }
+    }
+    nodes.forEach(n => {
+      const frag = document.createDocumentFragment();
+      const parts = n.textContent.split(new RegExp('(' + escapeRe(term) + ')', 'gi'));
+      parts.forEach(part => {
+        if (part.toLowerCase() === term.toLowerCase()) {
+          const mark = document.createElement('mark');
+          mark.className = 'man-highlight';
+          mark.textContent = part;
+          frag.appendChild(mark);
+        } else {
+          frag.appendChild(document.createTextNode(part));
+        }
+      });
+      n.parentNode.replaceChild(frag, n);
+    });
+  }
+
+  function escapeRe(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // ── Keyboard shortcut: Escape to close ───────────────────────
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('manualOverlay').classList.contains('open')) {
+      closeManual();
+    }
+  });
+
+  // ── Init: inject nav button when DOM is ready ─────────────────
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectNavButton);
+  } else {
+    injectNavButton();
+    // Also try after a short delay in case the admin panel rebuilds nav dynamically
+    setTimeout(injectNavButton, 500);
+  }
+})();
+</script>
+
 </body>
 </html>
