@@ -331,11 +331,14 @@ function switchSection(sec) {
     document.querySelectorAll('.sidebar-item').forEach(function(el){ el.classList.remove('active'); });
     var navAcc = document.getElementById('nav-accounts');
     if (navAcc) navAcc.classList.add('active');
-    if (typeof renderAccountsPage === 'function') {
-      document.getElementById('mainContent').innerHTML = renderAccountsPage();
-    } else {
-      document.getElementById('mainContent').innerHTML = '<div style="padding:40px;text-align:center;color:#999">帳號管理模組載入中...</div>';
-    }
+    // 延遲渲染，確保帳號管理模組已載入
+    setTimeout(function() {
+      if (typeof renderAccountsPage === 'function') {
+        document.getElementById('mainContent').innerHTML = renderAccountsPage();
+      } else {
+        document.getElementById('mainContent').innerHTML = '<div style="padding:40px;text-align:center;color:#999">帳號管理模組載入失敗，請重新整理頁面</div>';
+      }
+    }, 100);
     return;
   }
 
