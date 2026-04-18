@@ -11,7 +11,8 @@
  * 注意：
  * - 請先到「教師Email」分頁填入每班老師 email
  * - 請先到「表單設定」填入 lesson_log_form_link
- * - 為避免重複寄送，同一班級同一週只會自動寄一次；若要重寄，可用上方選單「Lesson Plan 寄送工具」→「手動寄出目前選擇」
+ * - 為避免重複寄送，同一班級同一週只會自動寄一次；若要重寄，可用上方選單「老師備課包」→「寄出目前班級週次」
+ * - 若試算表開啟後看不到「老師備課包」選單，可在 Apps Script 編輯器中手動執行 forceCreateMenu() 後重新整理試算表。
  */
 
 const CONFIG = {
@@ -35,12 +36,33 @@ const TEST_MODE_CONFIG = {
   test_recipient_email: 'miyutang1980@gmail.com',
 };
 
-function onOpen() {
+const LESSON_PLAN_MENU_NAME = '老師備課包';
+
+function onOpen(e) {
+  buildLessonPlanMenu_();
+}
+
+/**
+ * 手動在 Apps Script 編輯器中執行此函式，可強制重新建立「老師備課包」自訂選單。
+ * 適用情境：試算表重新整理後選單未出現、onOpen 授權未完成、或剛貼上新版 Code.gs
+ * 想立即看到選單時使用。執行前請先以目標試算表身份開啟 Apps Script，確保
+ * SpreadsheetApp.getUi() 可取得對應試算表 UI。
+ */
+function forceCreateMenu() {
+  buildLessonPlanMenu_();
+  try {
+    SpreadsheetApp.getUi().alert(`已重新建立「${LESSON_PLAN_MENU_NAME}」選單，請回到 Google Sheet 查看。`);
+  } catch (err) {
+    console.log('forceCreateMenu: 選單已建立，但無法顯示 alert（可能是從非試算表情境執行）。', err);
+  }
+}
+
+function buildLessonPlanMenu_() {
   SpreadsheetApp.getUi()
-    .createMenu('Lesson Plan 寄送工具')
-    .addItem('安裝自動寄送觸發器', 'setupLessonPlanAutomation')
-    .addItem('手動寄出目前選擇', 'sendCurrentSelectionManual')
-    .addItem('重設本班本週寄送紀錄', 'resetCurrentSelectionSendLog')
+    .createMenu(LESSON_PLAN_MENU_NAME)
+    .addItem('寄出目前班級週次', 'sendCurrentSelectionManual')
+    .addItem('設定自動寄送觸發器', 'setupLessonPlanAutomation')
+    .addItem('重設目前選擇寄送紀錄', 'resetCurrentSelectionSendLog')
     .addToUi();
 }
 

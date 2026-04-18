@@ -23,11 +23,11 @@
 3. 將 `Code.gs` 內容貼進 Apps Script 編輯器（或若專案已設定 [`clasp`](https://github.com/google/clasp)，用 `clasp push` 同步）。
 4. 儲存後，在編輯器中執行 `setupLessonPlanAutomation()`。
 5. 依指示授權 Gmail 及 Spreadsheet 權限（第一次需要 Google 帳號確認）。
-6. 回到 Google Sheet，試算表選單會出現「Lesson Plan 寄送工具」。
+6. 回到 Google Sheet，試算表選單會出現「老師備課包」。
 7. 測試方式：
    - 在「教師Email」分頁填入一筆測試班級的 email。
    - 在「老師入口」選擇該班級與週次。
-   - 使用選單「Lesson Plan 寄送工具 → 手動寄出目前選擇」確認可正常送出。
+   - 使用選單「老師備課包 → 寄出目前班級週次」確認可正常送出。
    - 檢查「寄送紀錄」分頁是否新增一筆。
 
 ## 測試模式（預設啟用）
@@ -49,7 +49,7 @@ const TEST_MODE_CONFIG = {
   - `email`、`intended_email`：原本應寄送的老師 email（稽核用）
   - `actual_email`：實際寄出的 Gmail 收件人（測試模式下會是 `test_recipient_email`）
   - `test_mode`：`TRUE` / `FALSE`
-- 自動寄送的重複寄送防護（`send_key = class_id|week_no`）仍有效；若要重寄同班同週，請使用「重設本班本週寄送紀錄」選單。
+- 自動寄送的重複寄送防護（`send_key = class_id|week_no`）仍有效；若要重寄同班同週，請使用「重設目前選擇寄送紀錄」選單。
 
 ### 切換到正式寄送（Production）
 
@@ -64,15 +64,25 @@ const TEST_MODE_CONFIG = {
    };
    ```
 3. 儲存並同步到 Apps Script 編輯器（或使用 `clasp push`）。
-4. 建議先用「手動寄出目前選擇」對一個已確認 email 的班級做最終驗證，確認實際收件人已變回該班老師 email，且「寄送紀錄」中 `actual_email` 等於老師 email、`test_mode = FALSE`。
+4. 建議先用「寄出目前班級週次」對一個已確認 email 的班級做最終驗證，確認實際收件人已變回該班老師 email，且「寄送紀錄」中 `actual_email` 等於老師 email、`test_mode = FALSE`。
 
 > 安全提醒：請勿同時保留測試模式並對外發送重要通知；正式切換前務必完成第 1 步的「教師Email」資料複查。
 
 ## 選單功能
 
-- 安裝自動寄送觸發器：重建 onEdit trigger。
-- 手動寄出目前選擇：不受 auto-send 開關與重複寄送限制，直接寄出當前班級與週次。
-- 重設本班本週寄送紀錄：刪除「寄送紀錄」中對應的 `send_key`，允許重新自動寄送。
+試算表開啟後，上方會出現「老師備課包」自訂選單，包含以下三個項目：
+
+- **寄出目前班級週次**（對應 `sendCurrentSelectionManual`）：不受 auto-send 開關與重複寄送限制，直接寄出目前「老師入口」選好的班級與週次。
+- **設定自動寄送觸發器**（對應 `setupLessonPlanAutomation`）：重建 onEdit trigger，讓老師在「老師入口」更改班級或週次時自動寄出。
+- **重設目前選擇寄送紀錄**（對應 `resetCurrentSelectionSendLog`）：刪除「寄送紀錄」中對應的 `send_key`，允許重新自動寄送。
+
+## 選單疑難排解
+
+若試算表上方看不到「老師備課包」選單（常見於剛貼上新版 `Code.gs`、重新授權後、或 `onOpen` 尚未執行完成的情況），請依序嘗試下列步驟：
+
+1. 先回到 Google Sheet 整個頁籤重新整理一次（`Ctrl/Cmd + R`），讓 Apps Script 重新觸發 `onOpen(e)` 建立選單。
+2. 若重新整理後仍沒有「老師備課包」選單，回到 Apps Script 編輯器，從函式下拉選單選擇 **`forceCreateMenu`** 並按執行；執行完成後回到 Google Sheet 再重新整理一次，選單應該就會出現。
+3. 若 `forceCreateMenu()` 之後重新整理仍看不到選單（例如帳號授權尚未完成、或 UI 暫時無法載入自訂選單），可以暫時略過選單，直接在 Apps Script 編輯器中選擇 **`sendCurrentSelectionManual`** 函式並按執行，即可寄出目前「老師入口」選好的班級週次備課包；事後再排查選單為何未載入即可。
 
 ## 安全性注意事項
 
