@@ -30,6 +30,44 @@
    - 使用選單「Lesson Plan 寄送工具 → 手動寄出目前選擇」確認可正常送出。
    - 檢查「寄送紀錄」分頁是否新增一筆。
 
+## 測試模式（預設啟用）
+
+目前程式預設啟用「測試模式」，用於驗收階段避免誤寄給真實老師。設定位置在 `Code.gs` 頂部的 `TEST_MODE_CONFIG`：
+
+```js
+const TEST_MODE_CONFIG = {
+  test_mode_enabled: true,
+  test_recipient_email: 'miyutang1980@gmail.com',
+};
+```
+
+測試模式啟用時：
+
+- 不論「教師Email」分頁中老師的 email 是什麼，**所有** Gmail 寄送（自動寄送與手動寄出皆同一條路徑）都會改寄到 `test_recipient_email`。
+- 信件主旨會加上 `[測試模式｜原收件人：xxx@xxx]` 標記；信件內容最上方會顯示黃色提醒橫幅，標示原訂收件人姓名與 email。
+- 「寄送紀錄」分頁會同時記錄：
+  - `email`、`intended_email`：原本應寄送的老師 email（稽核用）
+  - `actual_email`：實際寄出的 Gmail 收件人（測試模式下會是 `test_recipient_email`）
+  - `test_mode`：`TRUE` / `FALSE`
+- 自動寄送的重複寄送防護（`send_key = class_id|week_no`）仍有效；若要重寄同班同週，請使用「重設本班本週寄送紀錄」選單。
+
+### 切換到正式寄送（Production）
+
+完成測試後請依序操作：
+
+1. 到「教師Email」分頁，**逐筆確認每個 `class_id` 的 `teacher_name` 與 `email` 正確無誤**（這是正式寄送對象，錯一個就會寄錯人）。
+2. 編輯 `Code.gs`，將 `TEST_MODE_CONFIG.test_mode_enabled` 由 `true` 改為 `false`：
+   ```js
+   const TEST_MODE_CONFIG = {
+     test_mode_enabled: false,
+     test_recipient_email: 'miyutang1980@gmail.com',
+   };
+   ```
+3. 儲存並同步到 Apps Script 編輯器（或使用 `clasp push`）。
+4. 建議先用「手動寄出目前選擇」對一個已確認 email 的班級做最終驗證，確認實際收件人已變回該班老師 email，且「寄送紀錄」中 `actual_email` 等於老師 email、`test_mode = FALSE`。
+
+> 安全提醒：請勿同時保留測試模式並對外發送重要通知；正式切換前務必完成第 1 步的「教師Email」資料複查。
+
 ## 選單功能
 
 - 安裝自動寄送觸發器：重建 onEdit trigger。
