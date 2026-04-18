@@ -13,7 +13,8 @@
  * - 請先到「表單設定」填入 lesson_log_form_link
  * - 為避免重複寄送，同一班級同一週只會自動寄一次；若要重寄，可用上方選單「老師備課包」→「寄出目前班級週次」
  * - 手動寄送（「寄出目前班級週次」）時，若老師入口只選了班級、週次留空，系統會自動從 Week_Plan
- *   的「目前週次」/「time_status」/「date」欄推斷當週週次；若仍找不到才會跳警告。
+ *   的「目前週次」(數值等於 week_no 或 TRUE/Yes/是 等標記) /「time_status」/「date」欄
+ *   推斷當週週次；若仍找不到才會跳警告。
  * - 若試算表開啟後看不到「老師備課包」選單，可在 Apps Script 編輯器中手動執行 forceCreateMenu() 後重新整理試算表。
  */
 
@@ -262,10 +263,11 @@ function getWeekPlanValues_() {
 /**
  * 在 Week_Plan 中為指定 classId 找出「目前週次」。
  * 判斷順序：
- *   1. 欄位「目前週次」為 TRUE / Yes / 是 / Current / 當週 / 1 等真值
- *   2. 欄位「time_status」為「This Week」/「本週」/「當週」
- *   3. 欄位「date」<= 今天 < date + 7 天
- * 若三種方式都找不到，回傳 null。
+ *   1. 欄位「目前週次」為數值且等於該列的 week_no（v4 新公式：每列顯示同一個當週數字）
+ *   2. 欄位「目前週次」為 TRUE / Yes / 是 / Current / 當週 / 1 等真值標記
+ *   3. 欄位「time_status」為「This Week」/「本週」/「當週」
+ *   4. 欄位「date」<= 今天 < date + 7 天
+ * 若全部方式都找不到，回傳 null。
  */
 function getCurrentWeekForClass_(classId) {
   const row = findCurrentWeekPlanRow_(classId);
@@ -293,7 +295,14 @@ function findCurrentWeekPlanRow_(classId) {
   if (classRows.length === 0) return null;
 
   // 1) 目前週次 欄位（v4 新增）
+  //    優先判斷數值等於 week_no（新公式：整欄都填同一個當週數字），
+  //    若無數值匹配則退回 TRUE/Yes/是 等標記值匹配。
   if (currentWeekCol >= 0) {
+    for (const { r } of classRows) {
+      if (currentWeekNumericMatches_(r[currentWeekCol], r[weekCol])) {
+        return { weekNo: r[weekCol], source: '目前週次(numeric)' };
+      }
+    }
     for (const { r } of classRows) {
       if (isTruthyCurrentWeek_(r[currentWeekCol])) {
         return { weekNo: r[weekCol], source: '目前週次' };
@@ -351,7 +360,9 @@ function findUniqueCurrentWeekAcrossClasses_() {
     const weekNo = r[weekCol];
     if (!classId || !weekNo) continue;
     let source = null;
-    if (currentWeekCol >= 0 && isTruthyCurrentWeek_(r[currentWeekCol])) {
+    if (currentWeekCol >= 0 && currentWeekNumericMatches_(r[currentWeekCol], weekNo)) {
+      source = '目前週次(numeric)';
+    } else if (currentWeekCol >= 0 && isTruthyCurrentWeek_(r[currentWeekCol])) {
       source = '目前週次';
     } else if (timeStatusCol >= 0 && THIS_WEEK_TIME_STATUS_VALUES.includes(
       String(r[timeStatusCol] || '').trim().toLowerCase()
@@ -378,6 +389,24 @@ function isTruthyCurrentWeek_(v) {
   if (v === 1) return true;
   if (v == null || v === '') return false;
   return CURRENT_WEEK_TRUE_VALUES.includes(String(v).trim().toLowerCase());
+}
+
+/**
+ * v4 新公式：「目前週次」欄每列都填入同一個當週數字（例如全欄 = 3），
+ * 僅有 week_no 等於該數字的列視為當週。支援數值與數字字串。
+ * 布林 TRUE / 空值 / 非數字字串（如 Yes、當週）一律不算數值匹配，交給 isTruthyCurrentWeek_ 處理。
+ */
+function currentWeekNumericMatches_(currentWeekValue, weekNoValue) {
+  if (currentWeekValue === true || currentWeekValue === false) return false;
+  if (currentWeekValue == null || currentWeekValue === '') return false;
+  const weekNo = Number(weekNoValue);
+  if (!weekNo) return false;
+  if (typeof currentWeekValue === 'number') {
+    return currentWeekValue === weekNo;
+  }
+  const s = String(currentWeekValue).trim();
+  if (s === '' || !/^-?\d+(\.\d+)?$/.test(s)) return false;
+  return Number(s) === weekNo;
 }
 
 function toDateOrNull_(v) {

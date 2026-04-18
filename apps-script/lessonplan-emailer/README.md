@@ -15,7 +15,7 @@
 | `表單設定` | key/value 設定表，key 包含 `lesson_log_form_link`、`test_score_form_link`、`observation_form_link`、`enable_auto_send` |
 | `教師Email` | 每班對應的寄送對象，欄位需包含 `class_id`、`teacher_name`、`email` |
 | `寄送紀錄` | 系統自動建立；紀錄每次寄送的 `send_key`（格式：`班級|週次`），避免同班同週重複寄送 |
-| `Week_Plan` | v3/v4 週計畫分頁，欄位至少包含 `class_id`、`week_no`、`date`、`time_status`；v4 新增 `目前週次`（TRUE/Yes/是/Current/當週/1）。若分頁存在，手動寄送時可自動推斷當週週次。分頁不存在時功能仍可運作，只是無法自動推斷週次。 |
+| `Week_Plan` | v3/v4 週計畫分頁，欄位至少包含 `class_id`、`week_no`、`date`、`time_status`；v4 新增 `目前週次` 欄，支援兩種寫法：(1) 數值（或數字字串）= 整欄都填入同一個當週數字（例如全部填 `3`），系統會挑出 `week_no` 等於該數字的列作為當週；(2) 真值標記 `TRUE` / `Yes` / `是` / `Current` / `當週` / `1` 等，僅該列視為當週。若分頁存在，手動寄送時可自動推斷當週週次。分頁不存在時功能仍可運作，只是無法自動推斷週次。 |
 
 ## 安裝與部署步驟
 
@@ -75,9 +75,10 @@ const TEST_MODE_CONFIG = {
 
 - **寄出目前班級週次**（對應 `sendCurrentSelectionManual`）：不受 auto-send 開關與重複寄送限制，直接寄出目前「老師入口」選好的班級與週次。
   - 若「老師入口」只填了班級、週次留空，系統會自動從 `Week_Plan` 推斷當週週次，判斷順序為：
-    1. `目前週次` 欄（v4 新增）為 `TRUE` / `Yes` / `是` / `Current` / `當週` / `1`；
-    2. `time_status` 為 `This Week` / `本週` / `當週`；
-    3. `date` 落在 `date <= 今天 < date + 7 天` 的區間。
+    1. `目前週次` 欄（v4 新增）為**數值或數字字串**且等於該列 `week_no`（新公式寫法：整欄每列都顯示同一個當週數字，例如全欄 `=3`，系統挑出 `week_no = 3` 的列）；
+    2. `目前週次` 欄為真值標記 `TRUE` / `Yes` / `是` / `Current` / `當週` / `1` 等；
+    3. `time_status` 為 `This Week` / `本週` / `當週`；
+    4. `date` 落在 `date <= 今天 < date + 7 天` 的區間。
   - 若班級與週次都留空，僅在 `Week_Plan` 中「當週」列全試算表剛好只有唯一一筆時才會自動帶入；否則會跳警告請先選班級。
   - 找不到符合列時會跳警告訊息說明已嘗試推斷但無結果，不會亂寄。
 - **設定自動寄送觸發器**（對應 `setupLessonPlanAutomation`）：重建 onEdit trigger，讓老師在「老師入口」更改班級或週次時自動寄出。
