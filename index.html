@@ -180,6 +180,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       <div class="sidebar-item" onclick="switchSection('trial')" id="nav-trial">
         🗓️ 體驗課排班
       </div>
+    <div class="sidebar-item" onclick="switchSection('documents')" id="nav-documents">
+        📎 說明會簡報
+      </div>
     <div class="sidebar-item" onclick="switchSection('accounts')" id="nav-accounts">
         👥 帳號管理
       </div>
@@ -223,7 +226,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <script>
 // ── 設定 ──────────────────────────────────────────────────
 const ADMIN_USERS = {
-  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','manual','accounts'] },
+  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts'] },
   'teacher': { password: 'Tcm5XM0x0z', role: 'teacher', name: '教師', permissions: ['dashboard','booking','assess','trial'] },
   'sales': { password: 'SlLl9lHf39', role: 'sales', name: '業務', permissions: ['dashboard','inquiry','booking','camp','register'] },
   'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial'] }
@@ -363,7 +366,7 @@ function switchSection(sec) {
   const titles = {
     dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
-    trial:'🗓️ 體驗課排班'
+    trial:'🗓️ 體驗課排班', documents:'📎 說明會簡報'
   };
   document.getElementById('pageTitle').textContent = titles[sec] || sec;
   const content = document.getElementById('mainContent');
@@ -374,6 +377,61 @@ function switchSection(sec) {
   else if(sec === 'assess') renderAssess(content);
   else if(sec === 'register') renderRegister(content);
   else if(sec === 'trial') renderTrial(content);
+  else if(sec === 'documents') renderDocuments(content);
+}
+
+// ── 說明會簡報下載區 ──────────────────────────────────────────────────────
+function renderDocuments(el){
+  var today = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+  el.innerHTML = `
+    <div class="card" style="max-width:900px;margin:0 auto">
+      <div style="padding:28px">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;padding-bottom:20px;border-bottom:2px solid #EEE">
+          <div style="font-size:42px">📊</div>
+          <div>
+            <h2 style="margin:0;font-size:1.25rem;font-weight:800;color:#111">家長說明會參訪 PPT</h2>
+            <p style="margin:4px 0 0;font-size:0.82rem;color:#777">32 張完整簡報 · 最後更新：${today}</p>
+          </div>
+        </div>
+
+        <div style="background:#F0FDF4;border-left:4px solid #2B7A4B;border-radius:8px;padding:16px 20px;margin-bottom:20px">
+          <div style="font-weight:700;color:#14532D;margin-bottom:8px;font-size:0.92rem">✨ 本版簡報包含：</div>
+          <ul style="margin:0;padding-left:20px;font-size:0.85rem;color:#374151;line-height:1.8">
+            <li>四大班型詳解（浸潤/菁英/全民英檢初級+中級+中高級）</li>
+            <li>劍橋英檢 × CEFR × 台灣學制級數對照圖</li>
+            <li>教材用書分科目螺旋式教學（新增 2 頁）</li>
+            <li>逆向工程學習路徑：從目標倒推最佳開始時間</li>
+            <li>費用明細：浸潤/菁英 + 安親/托育組合</li>
+            <li>劍橋 vs 全民英檢進步路徑</li>
+            <li>LINE QR Code + 註冊連結</li>
+          </ul>
+        </div>
+
+        <div style="background:#FFF7ED;border-left:4px solid #E8863A;border-radius:8px;padding:14px 18px;margin-bottom:24px;font-size:0.82rem;color:#78350F;line-height:1.7">
+          💡 建議說明會前先下載到本機，並顯示模式設為「簡報者檢視」確保動畫、字型正常顯示。
+          40 分鐘完整流程：教學理念→四大班型→級數對照→教材說明→進階服務→費用方案→報名三步驟。
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <a href="parent-presentation.pptx" download="太平新光分校_家長說明會簡報.pptx"
+             style="display:flex;align-items:center;justify-content:center;gap:10px;background:#2B7A4B;color:#fff;padding:16px;border-radius:10px;font-weight:700;text-decoration:none;transition:all 0.15s"
+             onmouseover="this.style.background='#14532D'" onmouseout="this.style.background='#2B7A4B'">
+            <span style="font-size:1.4rem">⬇️</span>
+            <span>下載 PPT 檔</span>
+          </a>
+          <a href="parent-presentation.pptx" target="_blank"
+             style="display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#2B7A4B;padding:16px;border-radius:10px;font-weight:700;text-decoration:none;border:2px solid #2B7A4B;transition:all 0.15s"
+             onmouseover="this.style.background='#F0FDF4'" onmouseout="this.style.background='#fff'">
+            <span style="font-size:1.4rem">👁️</span>
+            <span>直接開啟預覽</span>
+          </a>
+        </div>
+
+        <div style="font-size:0.78rem;color:#999;text-align:center;margin-top:16px">
+          檔案大小約 272 KB · 適用於 PowerPoint 2016 以上、Keynote、Google Slides
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── 儀表板 ────────────────────────────────────────────────
