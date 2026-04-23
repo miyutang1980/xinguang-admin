@@ -247,19 +247,78 @@ function emptyData() {
 // ── 登入 ──────────────────────────────────────────────────
 var _loggedIn = false;
   _currentUser = null;
-function doLogin() {
+// ── Google Sheets 雲端帳號 API ───────────────────────────────────
+// AUTH_API_URL 由 Apps Script 部署後提供，部署後複製網址到這裡
+var AUTH_API_URL = 'https://script.google.com/macros/s/AKfycby__PLACEHOLDER__/exec';
+
+async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginErr');
+  
+  // 使用者隔離檢查
+  if (!u || !p) {
+    errEl.textContent = '請輸入帳號和密碼';
+    errEl.style.display = 'block';
+    return;
+  }
+  
+  // 先試 Google Sheets 雲端 API（主要驗證方式）
+  if (AUTH_API_URL && !AUTH_API_URL.includes('__PLACEHOLDER__')) {
+    try {
+      errEl.textContent = '驗證中...';
+      errEl.style.display = 'block';
+      errEl.style.color = '#6b7280';
+      
+      const response = await fetch(AUTH_API_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'text/plain;charset=utf-8'},  // 避開 CORS preflight
+        body: JSON.stringify({ action: 'login', username: u, password: p })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        _loggedIn = true;
+        _currentUser = {
+          username: result.user.username,
+          name: result.user.name || u,
+          role: result.user.role,
+          title: result.user.title || '',
+          permissions: result.user.permissions || []
+        };
+        errEl.style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('appScreen').style.display = 'flex';
+        applyPermissions();
+        initApp();
+        return;
+      } else {
+        errEl.textContent = result.error || '帳號或密碼錯誤';
+        errEl.style.color = '#dc2626';
+        errEl.style.display = 'block';
+        return;
+      }
+    } catch (err) {
+      console.warn('雲端驗證失敗，改用本地帳號：', err);
+      // 繼續往下走 fallback 到本地驗證
+    }
+  }
+  
+  // Fallback：本地硬寫帳號 + localStorage 帳號（緊急备援）
   const user = ADMIN_USERS[u];
   if (user && user.password === p) {
     _loggedIn = true;
     _currentUser = { username: u, ...user };
+    errEl.style.display = 'none';
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appScreen').style.display = 'flex';
     applyPermissions();
     initApp();
   } else {
-    document.getElementById('loginErr').style.display = 'block';
+    errEl.textContent = '帳號或密碼錯誤';
+    errEl.style.color = '#dc2626';
+    errEl.style.display = 'block';
   }
 }
 function applyPermissions() {
@@ -274,6 +333,8 @@ function applyPermissions() {
     'assess': 'nav-assess',
     'register': 'nav-register',
     'trial': 'nav-trial',
+    'documents': 'nav-documents',
+    'manual': 'nav-manual',
     'accounts': 'nav-accounts'
   };
   Object.keys(navMap).forEach(function(key) {
