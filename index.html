@@ -248,8 +248,8 @@ function emptyData() {
 var _loggedIn = false;
   _currentUser = null;
 // ── Google Sheets 雲端帳號 API ───────────────────────────────────
-// AUTH_API_URL 由 Apps Script 部署後提供，部署後複製網址到這裡
-var AUTH_API_URL = 'https://script.google.com/macros/s/AKfycby__PLACEHOLDER__/exec';
+// AUTH_API_URL: n8n Cloud webhook (Google Sheets 雲端帳號驗證)
+var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
 
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
@@ -272,11 +272,13 @@ async function doLogin() {
       
       const response = await fetch(AUTH_API_URL, {
         method: 'POST',
-        headers: {'Content-Type': 'text/plain;charset=utf-8'},  // 避開 CORS preflight
-        body: JSON.stringify({ action: 'login', username: u, password: p })
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ username: u, password: p })
       });
       
-      const result = await response.json();
+      let result = await response.json();
+      // n8n 回傳可能是陣列，取第一個
+      if (Array.isArray(result)) result = result[0] || {};
       
       if (result.success) {
         _loggedIn = true;
