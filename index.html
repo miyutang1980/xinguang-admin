@@ -289,6 +289,9 @@ async function doLogin() {
           title: result.user.title || '',
           permissions: result.user.permissions || []
         };
+        // 暫存密碼到 sessionStorage（帳號管理頁面需要驗證 admin 身份）
+        // sessionStorage 關掛瀏覽器就清除，比 localStorage 安全
+        try { sessionStorage.setItem('xg_session_pwd', p); } catch(e){}
         errEl.style.display = 'none';
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appScreen').style.display = 'flex';
@@ -371,6 +374,7 @@ function applyPermissions() {
 function doLogout() {
   _loggedIn = false;
   _currentUser = null;
+  try { sessionStorage.removeItem('xg_session_pwd'); } catch(e){}
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   _DB = emptyData();
@@ -1987,208 +1991,6 @@ checkSession();
 </div>
 
 <script>
-// ========== 帳號管理系統 (v2 clean) ==========
-var ACCOUNTS_KEY = 'xg_admin_accounts';
-var ACCOUNT_LOG_KEY = 'xg_account_logs';
-
-var ROLE_OPTIONS = [
-  {value:'admin',label:'管理員',desc:'全部權限'},
-  {value:'teacher',label:'教師',desc:'儀表板+預約+檢測+體驗課'},
-  {value:'sales',label:'業務',desc:'儀表板+問課+預約+夏令營+註冊'},
-  {value:'staff',label:'行政',desc:'儀表板+問課+預約+夏令營+註冊+體驗課'},
-  {value:'custom',label:'自訂',desc:'自由選擇模組'}
-];
-var ALL_MODULES = [
-  {key:'dashboard',label:'📊 儀表板'},{key:'inquiry',label:'📋 問課諮詢'},
-  {key:'booking',label:'📅 預約紀錄'},{key:'camp',label:'🏕️ 夏令營報名'},
-  {key:'assess',label:'📝 分級檢測'},{key:'register',label:'🎓 正式報名'},
-  {key:'trial',label:'🗓️ 體驗課排班'},{key:'manual',label:'📖 操作說明書'},
-  {key:'accounts',label:'👥 帳號管理'}
-];
-var ROLE_PERMS = {
-  admin:['dashboard','inquiry','booking','camp','assess','register','trial','manual','accounts'],
-  teacher:['dashboard','booking','assess','trial'],
-  sales:['dashboard','inquiry','booking','camp','register'],
-  staff:['dashboard','inquiry','booking','camp','register','trial']
-};
-
-function loadAccounts(){
-  try{var s=localStorage.getItem(ACCOUNTS_KEY);if(s){var p=JSON.parse(s);Object.keys(p).forEach(function(k){ADMIN_USERS[k]=p[k]})}}catch(e){}
-}
-function saveAccounts(){
-  var d={};Object.keys(ADMIN_USERS).forEach(function(k){d[k]=ADMIN_USERS[k]});
-  localStorage.setItem(ACCOUNTS_KEY,JSON.stringify(d));
-}
-function getAccountLogs(){try{return JSON.parse(localStorage.getItem(ACCOUNT_LOG_KEY)||'[]')}catch(e){return[]}}
-function addAccountLog(action,target,detail){
-  var logs=getAccountLogs();
-  logs.unshift({ts:new Date().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}),operator:_currentUser?_currentUser.name+'('+_currentUser.username+')':'未知',action:action,target:target,detail:detail});
-  if(logs.length>200)logs=logs.slice(0,200);
-  localStorage.setItem(ACCOUNT_LOG_KEY,JSON.stringify(logs));
-}
-loadAccounts();
-
-function renderAccountsPage(){
-  if(!_currentUser||_currentUser.role!=='admin') return '<div style="padding:40px;text-align:center;color:#999">⛔ 只有管理員可以存取此頁面</div>';
-  var h='<div style="max-width:800px">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">';
-  h+='<h3 style="margin:0;font-size:1.1rem">👥 帳號管理</h3>';
-  h+='<button id="btnAddAccount" style="background:#2B7A4B;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.85rem">＋ 新增帳號</button>';
-  h+='</div><div style="display:flex;flex-direction:column;gap:12px" id="accountList">';
-  Object.keys(ADMIN_USERS).forEach(function(un){
-    var u=ADMIN_USERS[un];
-    var rl=ROLE_OPTIONS.find(function(r){return r.value===u.role})||{label:u.role};
-    var rc=u.role==='admin'?'#DC2626':u.role==='teacher'?'#2563EB':u.role==='sales'?'#E8863A':'#10B981';
-    var isCur=_currentUser&&_currentUser.username===un;
-    h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">';
-    h+='<div style="flex:1"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
-    h+='<strong>'+un+'</strong>';
-    h+='<span style="background:'+rc+';color:#fff;padding:2px 10px;border-radius:10px;font-size:0.7rem;font-weight:600">'+rl.label+'</span>';
-    if(u.suspended) h+='<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:600">已停用</span>';
-    if(isCur) h+='<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:600">目前登入</span>';
-    h+='</div><div style="font-size:0.8rem;color:#888">'+u.name+'｜可存取 '+(u.permissions||[]).length+' 個模組</div></div>';
-    h+='<div style="display:flex;gap:6px">';
-    h+='<button data-action="edit" data-user="'+un+'" class="acc-btn" style="background:#F3F4F6;border:1px solid #e5e7eb;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">✏️ 編輯</button>';
-    if(!isCur){
-      var susp=u.suspended;
-      h+='<button data-action="suspend" data-user="'+un+'" class="acc-btn" style="background:'+(susp?'#F0FDF4':'#FEF3C7')+';border:1px solid '+(susp?'#BBF7D0':'#FDE68A')+';color:'+(susp?'#166534':'#92400E')+';padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">'+(susp?'✅ 啟用':'⏸️ 停用')+'</button>';
-      h+='<button data-action="delete" data-user="'+un+'" class="acc-btn" style="background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">🗑️ 刪除</button>';
-    }
-    h+='</div></div>';
-  });
-  h+='</div>';
-  // 操作紀錄
-  h+='<div style="margin-top:32px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h+='<h3 style="margin:0;font-size:1rem">📝 操作紀錄</h3>';
-  h+='<button id="btnClearLogs" style="background:#F3F4F6;border:1px solid #ddd;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.75rem;color:#888">清除紀錄</button>';
-  h+='</div><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;max-height:400px;overflow-y:auto">';
-  var logs=getAccountLogs();
-  if(logs.length===0){h+='<div style="text-align:center;color:#999;padding:20px">目前沒有操作紀錄</div>';}
-  else{
-    h+='<table style="width:100%;border-collapse:collapse;font-size:0.82rem"><thead><tr style="background:#F3F4F6;text-align:left">';
-    h+='<th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">時間</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">操作人</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">動作</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">對象</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">詳細</th>';
-    h+='</tr></thead><tbody>';
-    logs.forEach(function(l){
-      var ac=l.action==='新增'?'#10B981':l.action==='修改'?'#E8863A':l.action==='刪除'?'#DC2626':l.action==='停用'?'#F59E0B':l.action==='啟用'?'#3B82F6':'#6B7280';
-      h+='<tr style="border-bottom:1px solid #F3F4F6"><td style="padding:8px 12px;color:#888">'+l.ts+'</td><td style="padding:8px 12px;font-weight:600">'+l.operator+'</td>';
-      h+='<td style="padding:8px 12px"><span style="background:'+ac+';color:#fff;padding:2px 8px;border-radius:4px;font-size:0.72rem;font-weight:600">'+l.action+'</span></td>';
-      h+='<td style="padding:8px 12px;font-weight:600">'+l.target+'</td><td style="padding:8px 12px;color:#555">'+l.detail+'</td></tr>';
-    });
-    h+='</tbody></table>';
-  }
-  h+='</div></div></div>';
-  // Bind events after render
-  setTimeout(function(){
-    document.getElementById('btnAddAccount').onclick=function(){showAccModal('',null)};
-    var cl=document.getElementById('btnClearLogs');
-    if(cl)cl.onclick=function(){if(confirm('確定清除所有操作紀錄？')){localStorage.removeItem(ACCOUNT_LOG_KEY);switchSection('accounts')}};
-    document.querySelectorAll('.acc-btn').forEach(function(btn){
-      btn.onclick=function(){
-        var act=btn.getAttribute('data-action'),usr=btn.getAttribute('data-user');
-        if(act==='edit')showAccModal(usr,ADMIN_USERS[usr]);
-        else if(act==='suspend')toggleSuspend(usr);
-        else if(act==='delete')deleteAcc(usr);
-      };
-    });
-  },50);
-  return h;
-}
-
-var _accEditRole='',_accEditPerms=[];
-function showAccModal(un,ud){
-  var isE=!!ud;
-  _accEditRole=isE?ud.role:'staff';
-  _accEditPerms=isE?(ud.permissions||[]).slice():ROLE_PERMS['staff'].slice();
-  var h='<div style="max-width:460px">';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">帳號名稱</label>';
-  h+='<input type="text" id="accUN" value="'+un+'" '+(isE?'readonly style="background:#f3f4f6;"':'')+' placeholder="英文小寫" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">顯示名稱</label>';
-  h+='<input type="text" id="accNM" value="'+(isE?ud.name:'')+'" placeholder="例：王老師" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">'+(isE?'新密碼（留空不改）':'密碼')+'</label>';
-  h+='<input type="text" id="accPW" placeholder="'+(isE?'留空不修改':'設定密碼')+'" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:8px">角色</label><div id="roleSelect" style="display:flex;flex-wrap:wrap;gap:8px">';
-  ROLE_OPTIONS.forEach(function(r){
-    h+='<div data-role="'+r.value+'" class="role-opt" style="flex:1;min-width:120px;padding:10px;border:1.5px solid '+(r.value===_accEditRole?'#2B7A4B':'#ddd')+';background:'+(r.value===_accEditRole?'#F0FDF4':'#fff')+';border-radius:8px;cursor:pointer;text-align:center">';
-    h+='<div style="font-weight:600;font-size:0.85rem">'+r.label+'</div><div style="font-size:0.7rem;color:#888">'+r.desc+'</div></div>';
-  });
-  h+='</div></div>';
-  h+='<div id="customPerms" style="display:'+(_accEditRole==='custom'?'block':'none')+';margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:8px">自訂模組權限</label><div id="permList" style="display:flex;flex-wrap:wrap;gap:6px">';
-  ALL_MODULES.forEach(function(m){
-    var ck=_accEditPerms.indexOf(m.key)>=0;
-    h+='<div data-perm="'+m.key+'" class="perm-opt" style="padding:6px 12px;border:1.5px solid '+(ck?'#2B7A4B':'#ddd')+';background:'+(ck?'#F0FDF4':'#fff')+';border-radius:6px;cursor:pointer;font-size:0.8rem">'+m.label+'</div>';
-  });
-  h+='</div></div>';
-  h+='<div style="display:flex;gap:10px;margin-top:20px">';
-  h+='<button id="btnSaveAcc" style="flex:1;background:#2B7A4B;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">'+(isE?'💾 儲存修改':'＋ 新增帳號')+'</button>';
-  h+='<button id="btnCancelAcc" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">取消</button>';
-  h+='</div></div>';
-  document.getElementById('modalTitle').textContent=isE?'編輯帳號：'+un:'新增帳號';
-  document.getElementById('modalBody').innerHTML=h;
-  document.getElementById('modalOverlay').classList.add('open');
-  setTimeout(function(){
-    document.querySelectorAll('.role-opt').forEach(function(el){
-      el.onclick=function(){
-        _accEditRole=el.getAttribute('data-role');
-        document.querySelectorAll('.role-opt').forEach(function(e2){e2.style.borderColor='#ddd';e2.style.background='#fff'});
-        el.style.borderColor='#2B7A4B';el.style.background='#F0FDF4';
-        document.getElementById('customPerms').style.display=_accEditRole==='custom'?'block':'none';
-        if(_accEditRole!=='custom'&&ROLE_PERMS[_accEditRole])_accEditPerms=ROLE_PERMS[_accEditRole].slice();
-      };
-    });
-    document.querySelectorAll('.perm-opt').forEach(function(el){
-      el.onclick=function(){
-        var k=el.getAttribute('data-perm'),i=_accEditPerms.indexOf(k);
-        if(i>=0){_accEditPerms.splice(i,1);el.style.borderColor='#ddd';el.style.background='#fff';}
-        else{_accEditPerms.push(k);el.style.borderColor='#2B7A4B';el.style.background='#F0FDF4';}
-      };
-    });
-    document.getElementById('btnSaveAcc').onclick=function(){saveAcc(un,isE)};
-    document.getElementById('btnCancelAcc').onclick=function(){closeModal()};
-  },50);
-}
-
-function saveAcc(origUN,isE){
-  var un=document.getElementById('accUN').value.trim().toLowerCase();
-  var nm=document.getElementById('accNM').value.trim();
-  var pw=document.getElementById('accPW').value;
-  var role=_accEditRole;
-  var perms=role==='custom'?_accEditPerms:(ROLE_PERMS[role]||[]);
-  if(!un){alert('請輸入帳號名稱');return}
-  if(!nm){alert('請輸入顯示名稱');return}
-  if(!isE&&!pw){alert('請設定密碼');return}
-  if(!isE&&ADMIN_USERS[un]){alert('帳號已存在');return}
-  if(isE){
-    var old=ADMIN_USERS[un],ch=[];
-    if(old.name!==nm)ch.push('名稱：'+old.name+'→'+nm);
-    if(old.role!==role)ch.push('角色：'+old.role+'→'+role);
-    if(pw)ch.push('密碼已更新');
-    addAccountLog('修改',un,ch.length?ch.join('、'):'無變更');
-    ADMIN_USERS[un].name=nm;ADMIN_USERS[un].role=role;ADMIN_USERS[un].permissions=perms;
-    if(pw)ADMIN_USERS[un].password=pw;
-  }else{
-    addAccountLog('新增',un,'角色：'+role+'、名稱：'+nm);
-    ADMIN_USERS[un]={password:pw,role:role,name:nm,permissions:perms};
-  }
-  saveAccounts();closeModal();switchSection('accounts');
-  if(typeof showToast==='function')showToast(isE?'✅ 帳號已更新':'✅ 帳號已新增');
-}
-
-function toggleSuspend(un){
-  var u=ADMIN_USERS[un];if(!u)return;
-  var was=u.suspended;u.suspended=!was;
-  saveAccounts();
-  addAccountLog(was?'啟用':'停用',un,was?'帳號已重新啟用':'帳號已停用');
-  switchSection('accounts');
-  if(typeof showToast==='function')showToast(was?'✅ 帳號已啟用':'⏸️ 帳號已停用');
-}
-
-function deleteAcc(un){
-  if(!confirm('確定要刪除帳號「'+un+'」？'))return;
-  var u=ADMIN_USERS[un];
-  addAccountLog('刪除',un,'角色：'+(u?u.role:'?')+'、名稱：'+(u?u.name:'?'));
-  delete ADMIN_USERS[un];saveAccounts();switchSection('accounts');
-  if(typeof showToast==='function')showToast('🗑️ 帳號已刪除');
-}
 </script>
 <script>
 /**
@@ -4077,38 +3879,20 @@ Code 節點（組合訊息，判斷是「取消」還是「改期」）
 </div>
 
 <script>
-// ========== 帳號管理系統 (v2 clean) ==========
-var ACCOUNTS_KEY = 'xg_admin_accounts';
+// ========== 帳號管理系統 (v3 cloud - 從 Google Sheets 讀寫) ==========
+var ACCOUNT_ADMIN_API = 'https://miyutang.app.n8n.cloud/webhook/account-admin';
 var ACCOUNT_LOG_KEY = 'xg_account_logs';
 
-var ROLE_OPTIONS = [
-  {value:'admin',label:'管理員',desc:'全部權限'},
-  {value:'teacher',label:'教師',desc:'儀表板+預約+檢測+體驗課'},
-  {value:'sales',label:'業務',desc:'儀表板+問課+預約+夏令營+註冊'},
-  {value:'staff',label:'行政',desc:'儀表板+問課+預約+夏令營+註冊+體驗課'},
-  {value:'custom',label:'自訂',desc:'自由選擇模組'}
-];
-var ALL_MODULES = [
-  {key:'dashboard',label:'📊 儀表板'},{key:'inquiry',label:'📋 問課諮詢'},
-  {key:'booking',label:'📅 預約紀錄'},{key:'camp',label:'🏕️ 夏令營報名'},
-  {key:'assess',label:'📝 分級檢測'},{key:'register',label:'🎓 正式報名'},
-  {key:'trial',label:'🗓️ 體驗課排班'},{key:'manual',label:'📖 操作說明書'},
-  {key:'accounts',label:'👥 帳號管理'}
-];
-var ROLE_PERMS = {
-  admin:['dashboard','inquiry','booking','camp','assess','register','trial','manual','accounts'],
-  teacher:['dashboard','booking','assess','trial'],
-  sales:['dashboard','inquiry','booking','camp','register'],
-  staff:['dashboard','inquiry','booking','camp','register','trial']
+var ROLE_LABELS = {
+  admin: { label: '管理員', color: '#DC2626' },
+  teacher: { label: '老師', color: '#2563EB' },
+  sales: { label: '業務', color: '#E8863A' },
+  staff: { label: '行政', color: '#10B981' }
 };
 
-function loadAccounts(){
-  try{var s=localStorage.getItem(ACCOUNTS_KEY);if(s){var p=JSON.parse(s);Object.keys(p).forEach(function(k){ADMIN_USERS[k]=p[k]})}}catch(e){}
-}
-function saveAccounts(){
-  var d={};Object.keys(ADMIN_USERS).forEach(function(k){d[k]=ADMIN_USERS[k]});
-  localStorage.setItem(ACCOUNTS_KEY,JSON.stringify(d));
-}
+var _cloudAccounts = []; // 從 n8n 拉下來的帳號清單
+var _accountsLoading = false;
+
 function getAccountLogs(){try{return JSON.parse(localStorage.getItem(ACCOUNT_LOG_KEY)||'[]')}catch(e){return[]}}
 function addAccountLog(action,target,detail){
   var logs=getAccountLogs();
@@ -4116,33 +3900,90 @@ function addAccountLog(action,target,detail){
   if(logs.length>200)logs=logs.slice(0,200);
   localStorage.setItem(ACCOUNT_LOG_KEY,JSON.stringify(logs));
 }
-loadAccounts();
+
+// 呼叫 n8n API
+async function callAccountApi(action, extra){
+  if(!_currentUser || _currentUser.role !== 'admin') {
+    return { success:false, error:'只有管理員可以操作' };
+  }
+  // 從 sessionStorage 取 admin 密碼（登入時暫存）
+  var adminPass = sessionStorage.getItem('xg_session_pwd');
+  if(!adminPass){
+    return { success:false, error:'登入憑證遺失，請重新登入' };
+  }
+  var payload = Object.assign({
+    action: action,
+    adminUser: _currentUser.username,
+    adminPass: adminPass
+  }, extra || {});
+  try {
+    var resp = await fetch(ACCOUNT_ADMIN_API, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    var result = await resp.json();
+    if(Array.isArray(result)) result = result[0] || {};
+    return result;
+  } catch(e){
+    return { success:false, error:'網路錯誤：' + e.message };
+  }
+}
+
+// 載入清單
+async function reloadCloudAccounts(){
+  _accountsLoading = true;
+  var r = await callAccountApi('list');
+  _accountsLoading = false;
+  if(r.success && Array.isArray(r.list)){
+    _cloudAccounts = r.list;
+    return true;
+  } else {
+    alert('載入帳號失敗：' + (r.error || '未知錯誤'));
+    return false;
+  }
+}
 
 function renderAccountsPage(){
   if(!_currentUser||_currentUser.role!=='admin') return '<div style="padding:40px;text-align:center;color:#999">⛔ 只有管理員可以存取此頁面</div>';
-  var h='<div style="max-width:800px">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">';
+  // 第一次載入時，先觸發抓取再重渲
+  if(_cloudAccounts.length === 0 && !_accountsLoading){
+    setTimeout(async function(){
+      var ok = await reloadCloudAccounts();
+      if(ok) switchSection('accounts');
+    }, 50);
+    return '<div style="padding:60px;text-align:center;color:#888"><div style="font-size:1.1rem;margin-bottom:10px">⏳ 從雲端載入帳號中...</div><div style="font-size:0.85rem;color:#aaa">第一次載入需 1-2 秒</div></div>';
+  }
+
+  var h='<div style="max-width:900px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
   h+='<h3 style="margin:0;font-size:1.1rem">👥 帳號管理</h3>';
-  h+='<button id="btnAddAccount" style="background:#2B7A4B;color:#fff;border:none;padding:8px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.85rem">＋ 新增帳號</button>';
-  h+='</div><div style="display:flex;flex-direction:column;gap:12px" id="accountList">';
-  Object.keys(ADMIN_USERS).forEach(function(un){
-    var u=ADMIN_USERS[un];
-    var rl=ROLE_OPTIONS.find(function(r){return r.value===u.role})||{label:u.role};
-    var rc=u.role==='admin'?'#DC2626':u.role==='teacher'?'#2563EB':u.role==='sales'?'#E8863A':'#10B981';
-    var isCur=_currentUser&&_currentUser.username===un;
-    h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px">';
-    h+='<div style="flex:1"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">';
-    h+='<strong>'+un+'</strong>';
-    h+='<span style="background:'+rc+';color:#fff;padding:2px 10px;border-radius:10px;font-size:0.7rem;font-weight:600">'+rl.label+'</span>';
-    if(u.suspended) h+='<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:600">已停用</span>';
+  h+='<button id="btnReloadAcc" style="background:#F3F4F6;border:1px solid #ddd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">🔄 重新載入</button>';
+  h+='</div>';
+  h+='<div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:#92400E">';
+  h+='💡 <strong>說明</strong>：帳號資料儲存於 Google Sheets「員工帳號」分頁。此處可<strong>修改密碼</strong>與<strong>啟用/停用</strong>，新增/刪除/改角色請直接到 Google Sheets 操作。';
+  h+='</div>';
+  h+='<div style="display:flex;flex-direction:column;gap:10px" id="accountList">';
+  _cloudAccounts.forEach(function(u){
+    var account = u.account;
+    var role = (u.role||'staff').toLowerCase();
+    var rl = ROLE_LABELS[role] || { label: role, color: '#6B7280' };
+    var isCur = _currentUser && _currentUser.username.toLowerCase() === account.toLowerCase();
+    var isSusp = u.status !== '啟用';
+    h+='<div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">';
+    h+='<div style="flex:1;min-width:240px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">';
+    h+='<strong style="font-size:0.95rem">'+account+'</strong>';
+    h+='<span style="background:'+rl.color+';color:#fff;padding:2px 10px;border-radius:10px;font-size:0.7rem;font-weight:600">'+rl.label+'</span>';
+    if(isSusp) h+='<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:600">已停用</span>';
     if(isCur) h+='<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-size:0.65rem;font-weight:600">目前登入</span>';
-    h+='</div><div style="font-size:0.8rem;color:#888">'+u.name+'｜可存取 '+(u.permissions||[]).length+' 個模組</div></div>';
-    h+='<div style="display:flex;gap:6px">';
-    h+='<button data-action="edit" data-user="'+un+'" class="acc-btn" style="background:#F3F4F6;border:1px solid #e5e7eb;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">✏️ 編輯</button>';
+    h+='</div><div style="font-size:0.82rem;color:#666">';
+    h+=(u.name||'(未命名)') + (u.title?'｜'+u.title:'');
+    if(u.lastLogin) h+='｜最後登入：'+u.lastLogin;
+    h+='</div></div>';
+    h+='<div style="display:flex;gap:6px;flex-wrap:wrap">';
+    h+='<button data-action="pwd" data-user="'+account+'" data-name="'+(u.name||'')+'" class="acc-btn2" style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">🔑 改密碼</button>';
     if(!isCur){
-      var susp=u.suspended;
-      h+='<button data-action="suspend" data-user="'+un+'" class="acc-btn" style="background:'+(susp?'#F0FDF4':'#FEF3C7')+';border:1px solid '+(susp?'#BBF7D0':'#FDE68A')+';color:'+(susp?'#166534':'#92400E')+';padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">'+(susp?'✅ 啟用':'⏸️ 停用')+'</button>';
-      h+='<button data-action="delete" data-user="'+un+'" class="acc-btn" style="background:#FEF2F2;border:1px solid #FECACA;color:#DC2626;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">🗑️ 刪除</button>';
+      h+='<button data-action="status" data-user="'+account+'" data-name="'+(u.name||'')+'" data-status="'+(isSusp?'啟用':'停用')+'" class="acc-btn2" style="background:'+(isSusp?'#F0FDF4':'#FEF3C7')+';border:1px solid '+(isSusp?'#BBF7D0':'#FDE68A')+';color:'+(isSusp?'#166534':'#92400E')+';padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">'+(isSusp?'✅ 啟用':'⏸️ 停用')+'</button>';
     }
     h+='</div></div>';
   });
@@ -4159,7 +4000,7 @@ function renderAccountsPage(){
     h+='<th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">時間</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">操作人</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">動作</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">對象</th><th style="padding:8px 12px;border-bottom:2px solid #E5E7EB">詳細</th>';
     h+='</tr></thead><tbody>';
     logs.forEach(function(l){
-      var ac=l.action==='新增'?'#10B981':l.action==='修改'?'#E8863A':l.action==='刪除'?'#DC2626':l.action==='停用'?'#F59E0B':l.action==='啟用'?'#3B82F6':'#6B7280';
+      var ac=l.action==='改密碼'?'#3B82F6':l.action==='停用'?'#F59E0B':l.action==='啟用'?'#10B981':'#6B7280';
       h+='<tr style="border-bottom:1px solid #F3F4F6"><td style="padding:8px 12px;color:#888">'+l.ts+'</td><td style="padding:8px 12px;font-weight:600">'+l.operator+'</td>';
       h+='<td style="padding:8px 12px"><span style="background:'+ac+';color:#fff;padding:2px 8px;border-radius:4px;font-size:0.72rem;font-weight:600">'+l.action+'</span></td>';
       h+='<td style="padding:8px 12px;font-weight:600">'+l.target+'</td><td style="padding:8px 12px;color:#555">'+l.detail+'</td></tr>';
@@ -4167,118 +4008,105 @@ function renderAccountsPage(){
     h+='</tbody></table>';
   }
   h+='</div></div></div>';
-  // Bind events after render
   setTimeout(function(){
-    document.getElementById('btnAddAccount').onclick=function(){showAccModal('',null)};
+    var rb=document.getElementById('btnReloadAcc');
+    if(rb)rb.onclick=async function(){
+      rb.textContent='⏳ 載入中...';rb.disabled=true;
+      _cloudAccounts=[];
+      var ok = await reloadCloudAccounts();
+      if(ok) switchSection('accounts');
+    };
     var cl=document.getElementById('btnClearLogs');
     if(cl)cl.onclick=function(){if(confirm('確定清除所有操作紀錄？')){localStorage.removeItem(ACCOUNT_LOG_KEY);switchSection('accounts')}};
-    document.querySelectorAll('.acc-btn').forEach(function(btn){
+    document.querySelectorAll('.acc-btn2').forEach(function(btn){
       btn.onclick=function(){
-        var act=btn.getAttribute('data-action'),usr=btn.getAttribute('data-user');
-        if(act==='edit')showAccModal(usr,ADMIN_USERS[usr]);
-        else if(act==='suspend')toggleSuspend(usr);
-        else if(act==='delete')deleteAcc(usr);
+        var act=btn.getAttribute('data-action');
+        var usr=btn.getAttribute('data-user');
+        var nm=btn.getAttribute('data-name')||usr;
+        if(act==='pwd') showPasswordModal(usr, nm);
+        else if(act==='status') showStatusModal(usr, nm, btn.getAttribute('data-status'));
       };
     });
   },50);
   return h;
 }
 
-var _accEditRole='',_accEditPerms=[];
-function showAccModal(un,ud){
-  var isE=!!ud;
-  _accEditRole=isE?ud.role:'staff';
-  _accEditPerms=isE?(ud.permissions||[]).slice():ROLE_PERMS['staff'].slice();
-  var h='<div style="max-width:460px">';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">帳號名稱</label>';
-  h+='<input type="text" id="accUN" value="'+un+'" '+(isE?'readonly style="background:#f3f4f6;"':'')+' placeholder="英文小寫" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">顯示名稱</label>';
-  h+='<input type="text" id="accNM" value="'+(isE?ud.name:'')+'" placeholder="例：王老師" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:4px">'+(isE?'新密碼（留空不改）':'密碼')+'</label>';
-  h+='<input type="text" id="accPW" placeholder="'+(isE?'留空不修改':'設定密碼')+'" style="width:100%;padding:10px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box"></div>';
-  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:8px">角色</label><div id="roleSelect" style="display:flex;flex-wrap:wrap;gap:8px">';
-  ROLE_OPTIONS.forEach(function(r){
-    h+='<div data-role="'+r.value+'" class="role-opt" style="flex:1;min-width:120px;padding:10px;border:1.5px solid '+(r.value===_accEditRole?'#2B7A4B':'#ddd')+';background:'+(r.value===_accEditRole?'#F0FDF4':'#fff')+';border-radius:8px;cursor:pointer;text-align:center">';
-    h+='<div style="font-weight:600;font-size:0.85rem">'+r.label+'</div><div style="font-size:0.7rem;color:#888">'+r.desc+'</div></div>';
-  });
+// 改密碼 modal
+function showPasswordModal(account, name){
+  var h='<div style="max-width:420px">';
+  h+='<div style="margin-bottom:16px;padding:12px 16px;background:#EFF6FF;border-radius:8px;color:#1E40AF;font-size:0.9rem">';
+  h+='正在為 <strong>'+name+'</strong> (帳號：'+account+') 修改密碼';
+  h+='</div>';
+  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新密碼</label>';
+  h+='<input type="text" id="newPwdInput" placeholder="至少 4 字元" autocomplete="off" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;font-family:monospace"></div>';
+  h+='<div style="margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">再次確認</label>';
+  h+='<input type="text" id="newPwdInput2" placeholder="再輸入一次" autocomplete="off" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;font-family:monospace"></div>';
+  h+='<div id="pwdMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>';
+  h+='<div style="display:flex;gap:10px">';
+  h+='<button id="btnSavePwd" style="flex:1;background:#2B7A4B;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">💾 確定修改</button>';
+  h+='<button id="btnCancelPwd" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">取消</button>';
   h+='</div></div>';
-  h+='<div id="customPerms" style="display:'+(_accEditRole==='custom'?'block':'none')+';margin-bottom:16px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:8px">自訂模組權限</label><div id="permList" style="display:flex;flex-wrap:wrap;gap:6px">';
-  ALL_MODULES.forEach(function(m){
-    var ck=_accEditPerms.indexOf(m.key)>=0;
-    h+='<div data-perm="'+m.key+'" class="perm-opt" style="padding:6px 12px;border:1.5px solid '+(ck?'#2B7A4B':'#ddd')+';background:'+(ck?'#F0FDF4':'#fff')+';border-radius:6px;cursor:pointer;font-size:0.8rem">'+m.label+'</div>';
-  });
-  h+='</div></div>';
-  h+='<div style="display:flex;gap:10px;margin-top:20px">';
-  h+='<button id="btnSaveAcc" style="flex:1;background:#2B7A4B;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">'+(isE?'💾 儲存修改':'＋ 新增帳號')+'</button>';
-  h+='<button id="btnCancelAcc" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">取消</button>';
-  h+='</div></div>';
-  document.getElementById('modalTitle').textContent=isE?'編輯帳號：'+un:'新增帳號';
+  document.getElementById('modalTitle').textContent='🔑 修改密碼：'+account;
   document.getElementById('modalBody').innerHTML=h;
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(function(){
-    document.querySelectorAll('.role-opt').forEach(function(el){
-      el.onclick=function(){
-        _accEditRole=el.getAttribute('data-role');
-        document.querySelectorAll('.role-opt').forEach(function(e2){e2.style.borderColor='#ddd';e2.style.background='#fff'});
-        el.style.borderColor='#2B7A4B';el.style.background='#F0FDF4';
-        document.getElementById('customPerms').style.display=_accEditRole==='custom'?'block':'none';
-        if(_accEditRole!=='custom'&&ROLE_PERMS[_accEditRole])_accEditPerms=ROLE_PERMS[_accEditRole].slice();
-      };
-    });
-    document.querySelectorAll('.perm-opt').forEach(function(el){
-      el.onclick=function(){
-        var k=el.getAttribute('data-perm'),i=_accEditPerms.indexOf(k);
-        if(i>=0){_accEditPerms.splice(i,1);el.style.borderColor='#ddd';el.style.background='#fff';}
-        else{_accEditPerms.push(k);el.style.borderColor='#2B7A4B';el.style.background='#F0FDF4';}
-      };
-    });
-    document.getElementById('btnSaveAcc').onclick=function(){saveAcc(un,isE)};
-    document.getElementById('btnCancelAcc').onclick=function(){closeModal()};
+    document.getElementById('newPwdInput').focus();
+    document.getElementById('btnCancelPwd').onclick=function(){closeModal()};
+    document.getElementById('btnSavePwd').onclick=async function(){
+      var p1=document.getElementById('newPwdInput').value;
+      var p2=document.getElementById('newPwdInput2').value;
+      var msg=document.getElementById('pwdMsg');
+      msg.style.color='#DC2626';
+      if(!p1||p1.length<4){msg.textContent='密碼至少 4 字元';return;}
+      if(p1!==p2){msg.textContent='兩次密碼不一致';return;}
+      var btn=document.getElementById('btnSavePwd');
+      btn.disabled=true;btn.textContent='⏳ 寫入 Google Sheets...';
+      var r=await callAccountApi('changePassword',{ targetUser: account, newPassword: p1 });
+      if(r.success){
+        addAccountLog('改密碼', account, '密碼已更新（'+name+'）');
+        closeModal();
+        if(typeof showToast==='function')showToast('✅ '+(r.message||'密碼已更新'));
+        // 重新載入清單
+        _cloudAccounts=[];
+        await reloadCloudAccounts();
+        switchSection('accounts');
+      } else {
+        msg.textContent='❌ '+(r.error||'修改失敗');
+        btn.disabled=false;btn.textContent='💾 確定修改';
+      }
+    };
   },50);
 }
 
-function saveAcc(origUN,isE){
-  var un=document.getElementById('accUN').value.trim().toLowerCase();
-  var nm=document.getElementById('accNM').value.trim();
-  var pw=document.getElementById('accPW').value;
-  var role=_accEditRole;
-  var perms=role==='custom'?_accEditPerms:(ROLE_PERMS[role]||[]);
-  if(!un){alert('請輸入帳號名稱');return}
-  if(!nm){alert('請輸入顯示名稱');return}
-  if(!isE&&!pw){alert('請設定密碼');return}
-  if(!isE&&ADMIN_USERS[un]){alert('帳號已存在');return}
-  if(isE){
-    var old=ADMIN_USERS[un],ch=[];
-    if(old.name!==nm)ch.push('名稱：'+old.name+'→'+nm);
-    if(old.role!==role)ch.push('角色：'+old.role+'→'+role);
-    if(pw)ch.push('密碼已更新');
-    addAccountLog('修改',un,ch.length?ch.join('、'):'無變更');
-    ADMIN_USERS[un].name=nm;ADMIN_USERS[un].role=role;ADMIN_USERS[un].permissions=perms;
-    if(pw)ADMIN_USERS[un].password=pw;
-  }else{
-    addAccountLog('新增',un,'角色：'+role+'、名稱：'+nm);
-    ADMIN_USERS[un]={password:pw,role:role,name:nm,permissions:perms};
-  }
-  saveAccounts();closeModal();switchSection('accounts');
-  if(typeof showToast==='function')showToast(isE?'✅ 帳號已更新':'✅ 帳號已新增');
+// 改狀態 modal
+function showStatusModal(account, name, newStatus){
+  if(!confirm('確定要將「'+name+'」('+account+') '+newStatus+'？')) return;
+  (async function(){
+    var r=await callAccountApi('changeStatus',{ targetUser: account, newStatus: newStatus });
+    if(r.success){
+      addAccountLog(newStatus, account, '帳號已'+newStatus+'（'+name+'）');
+      if(typeof showToast==='function')showToast('✅ '+(r.message||'狀態已更新'));
+      _cloudAccounts=[];
+      await reloadCloudAccounts();
+      switchSection('accounts');
+    } else {
+      alert('❌ '+(r.error||'修改失敗'));
+    }
+  })();
 }
 
+// 舊函數保留為 stub，避免其他地方呼叫炸掉
+function loadAccounts(){}
+function saveAccounts(){}
+function showAccModal(){alert('請使用「改密碼」按鈕修改密碼。新增/刪除帳號請到 Google Sheets「員工帳號」分頁操作。');}
+function saveAcc(){}
 function toggleSuspend(un){
-  var u=ADMIN_USERS[un];if(!u)return;
-  var was=u.suspended;u.suspended=!was;
-  saveAccounts();
-  addAccountLog(was?'啟用':'停用',un,was?'帳號已重新啟用':'帳號已停用');
-  switchSection('accounts');
-  if(typeof showToast==='function')showToast(was?'✅ 帳號已啟用':'⏸️ 帳號已停用');
+  var u=_cloudAccounts.find(function(x){return x.account.toLowerCase()===String(un).toLowerCase()});
+  if(!u){alert('帳號不存在');return}
+  var newSt = u.status==='啟用' ? '停用' : '啟用';
+  showStatusModal(u.account, u.name, newSt);
 }
-
-function deleteAcc(un){
-  if(!confirm('確定要刪除帳號「'+un+'」？'))return;
-  var u=ADMIN_USERS[un];
-  addAccountLog('刪除',un,'角色：'+(u?u.role:'?')+'、名稱：'+(u?u.name:'?'));
-  delete ADMIN_USERS[un];saveAccounts();switchSection('accounts');
-  if(typeof showToast==='function')showToast('🗑️ 帳號已刪除');
-}
+function deleteAcc(){alert('刪除帳號請直接到 Google Sheets「員工帳號」分頁刪除整列。');}
 </script>
 <script>
 /**
