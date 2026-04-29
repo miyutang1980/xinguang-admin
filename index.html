@@ -4814,190 +4814,179 @@ async function _pickupCall(url, payload) {
 // ========================================================================
 // 1. 接送排程 (pickup-schedule)
 // ========================================================================
+// ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
 async function renderPickupSchedule(el) {
-  el.innerHTML = '<div class="card" style="padding:24px"><div style="text-align:center;color:#888">載入中...</div></div>';
-  try {
-    var data = await _pickupCall(PICKUP_API.schedule, _adminPayload({ action: 'list' }));
-    if (!data.success) throw new Error(data.error || '讀取失敗');
-    var schedules = data.schedules || [];
-    el.innerHTML = _renderScheduleUI(schedules);
-    _bindScheduleHandlers(schedules);
-  } catch (e) {
-    el.innerHTML = '<div class="card" style="padding:24px;color:#c00">載入失敗：' + e.message + '</div>';
+  const ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
+  const auth = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const auth_payload = { admin_username: auth.username || 'admin', admin_role: auth.role || 'admin' };
+
+  el.innerHTML = `
+    <div style="padding:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div>
+          <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程</h2>
+          <div style="color:#7a7974;font-size:0.85rem;margin-top:4px">
+            5 條路線 × 每日中午/下午班次 · 假日週末自動標休 · 編輯後自動儲存
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <select id="ps-filter-week" style="padding:6px 10px;border:1px solid #d4d1ca;border-radius:4px"></select>
+          <button id="ps-refresh" style="padding:6px 14px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer">🔄 重新載入</button>
+        </div>
+      </div>
+      <div id="ps-status" style="margin-bottom:8px;font-size:0.85rem;color:#7a7974">載入中…</div>
+      <div id="ps-table-wrap" style="background:#fff;border:1px solid #d4d1ca;border-radius:6px;overflow:auto;max-height:70vh"></div>
+    </div>
+  `;
+
+  let staffList = [];
+  let allRows = [];
+
+  async function api(payload) {
+    const resp = await fetch(ROUTE_API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({...payload, ...auth_payload})
+    });
+    return await resp.json();
   }
-}
 
-function _renderScheduleUI(schedules) {
-  var byWeekday = {};
-  for (var i = 1; i <= 7; i++) byWeekday[i] = [];
-  schedules.forEach(function(s) {
-    var w = parseInt(s.weekday, 10) || 0;
-    if (byWeekday[w]) byWeekday[w].push(s);
-  });
+  async function loadAll() {
+    document.getElementById('ps-status').textContent = '載入中…';
+    const [staffR, listR] = await Promise.all([
+      api({action: 'get_staff'}),
+      api({action: 'list'})
+    ]);
+    staffList = (staffR.staff || []).map(s => s.name);
+    allRows = listR.rows || [];
+    populateWeekFilter();
+    renderTable();
+    document.getElementById('ps-status').innerHTML =
+      `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+  }
 
-  var html = '<div style="max-width:1200px;margin:0 auto">';
-  html += '<div class="card" style="padding:20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">';
-  html += '<div><h3 style="margin:0;font-size:1.1rem;font-weight:800">接送排程管理</h3>';
-  html += '<p style="margin:4px 0 0;color:#777;font-size:0.85rem">每天 05:00 自動展開為當日指派 · 週末/國定假日略過</p></div>';
-  html += '<button class="btn btn-primary" onclick="openScheduleModal()">＋ 新增排程</button></div>';
+  function populateWeekFilter() {
+    const sel = document.getElementById('ps-filter-week');
+    const weeks = new Map();
+    allRows.forEach(r => {
+      if (!r.date) return;
+      const d = new Date(r.date);
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+      const key = monday.toISOString().slice(0, 10);
+      if (!weeks.has(key)) weeks.set(key, key);
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    let defaultWeek = '';
+    sel.innerHTML = '<option value="">所有週次</option>' +
+      [...weeks.keys()].map(w => {
+        const end = new Date(w); end.setDate(end.getDate() + 4);
+        const label = `${w} ~ ${end.toISOString().slice(5,10)}`;
+        if (!defaultWeek && w <= today && end.toISOString().slice(0,10) >= today) defaultWeek = w;
+        return `<option value="${w}">${label}</option>`;
+      }).join('');
+    if (defaultWeek) sel.value = defaultWeek;
+    sel.onchange = renderTable;
+  }
 
-  for (var wd = 1; wd <= 7; wd++) {
-    var rows = byWeekday[wd];
-    var bg = (wd === 6 || wd === 7) ? '#fef3c7' : '#fff';
-    html += '<div class="card" style="margin-bottom:14px;overflow:hidden">';
-    html += '<div style="padding:12px 18px;background:' + bg + ';border-bottom:1px solid #eee;font-weight:700;font-size:0.95rem">';
-    html += WEEKDAY_LABEL[wd] + ' · ' + rows.length + ' 個班次';
-    if (wd === 6 || wd === 7) html += ' <span style="font-size:0.78rem;color:#92400e;margin-left:8px">假日不執行</span>';
-    html += '</div>';
-    if (rows.length === 0) {
-      html += '<div style="padding:18px;text-align:center;color:#aaa;font-size:0.85rem">無排程</div>';
-    } else {
-      html += '<table style="width:100%;border-collapse:collapse;font-size:0.88rem">';
-      html += '<thead><tr style="background:#f9fafb;text-align:left"><th style="padding:10px 14px">班次</th><th style="padding:10px 14px">時間</th><th style="padding:10px 14px">路線</th><th style="padding:10px 14px">老師</th><th style="padding:10px 14px">學生</th><th style="padding:10px 14px">狀態</th><th style="padding:10px 14px;width:130px"></th></tr></thead><tbody>';
-      rows.sort(function(a,b){ return String(a.depart_time).localeCompare(String(b.depart_time)); });
-      rows.forEach(function(s) {
-        var kids = (s.student_ids || '').split(',').filter(Boolean).length;
-        var active = String(s.active).toUpperCase() === 'TRUE';
-        html += '<tr style="border-top:1px solid #eee">';
-        html += '<td style="padding:10px 14px">' + (SESSION_LABEL[s.session] || s.session || '-') + '</td>';
-        html += '<td style="padding:10px 14px;font-weight:600">' + (s.depart_time || '-') + '</td>';
-        html += '<td style="padding:10px 14px">' + (s.route || '-') + '</td>';
-        html += '<td style="padding:10px 14px">' + (s.assigned_teacher || '-') + '</td>';
-        html += '<td style="padding:10px 14px">' + kids + ' 位</td>';
-        html += '<td style="padding:10px 14px">' + (active
-          ? '<span style="color:#059669;font-weight:600">啟用</span>'
-          : '<span style="color:#9ca3af">停用</span>') + '</td>';
-        html += '<td style="padding:10px 14px;text-align:right">';
-        html += '<button class="btn btn-sm" onclick="editSchedule(\'' + s.schedule_id + '\')" style="padding:4px 10px;font-size:0.78rem;margin-right:4px">編輯</button>';
-        html += '<button class="btn btn-sm" onclick="toggleSchedule(\'' + s.schedule_id + '\',' + (!active) + ')" style="padding:4px 10px;font-size:0.78rem">' + (active ? '停用' : '啟用') + '</button>';
-        html += '</td></tr>';
+  function renderTable() {
+    const week = document.getElementById('ps-filter-week').value;
+    const filtered = !week ? allRows : allRows.filter(r => {
+      if (!r.date) return false;
+      const d = new Date(r.date);
+      const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay()+6) % 7));
+      return monday.toISOString().slice(0,10) === week;
+    });
+
+    const driverOpts = ['<option value=""></option>',
+      ...staffList.map(n => `<option value="${n}">${n}</option>`)].join('');
+
+    const rowsHtml = filtered.map(r => {
+      const isHoliday = r.status === '休';
+      const bg = isHoliday ? 'background:#f0efea;color:#999' : '';
+      const isFirstOfDay = filtered.indexOf(r) === 0 ||
+        filtered[filtered.indexOf(r)-1].date !== r.date;
+      const dateBorder = isFirstOfDay ? 'border-top:2px solid #01696F' : '';
+
+      return `<tr data-row="${r.row_index}" style="${bg};${dateBorder}">
+        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.date : ''}</td>
+        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.weekday : ''}</td>
+        <td style="padding:6px;text-align:center">
+          <select data-field="status" style="border:1px solid #d4d1ca;padding:2px 4px;font-size:0.85rem">
+            <option value="上" ${r.status==='上'?'selected':''}>上</option>
+            <option value="休" ${r.status==='休'?'selected':''}>休</option>
+          </select>
+        </td>
+        <td style="padding:6px;font-size:0.85rem">${r.route}</td>
+        <td style="padding:6px;text-align:center;color:#7a7974;font-size:0.85rem">${r.capacity || '-'}</td>
+        <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.noon_driver}"`,`value="${r.noon_driver}" selected`)}</select></td>
+        <td style="padding:6px"><input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:50px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px"><input data-field="noon_time" type="time" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver}"`,`value="${r.pm_driver}" selected`)}</select></td>
+        <td style="padding:6px"><input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:50px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px"><input data-field="pm_time" type="time" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px;font-size:0.85rem;color:${isHoliday?'#a12c7b':'#7a7974'}">${r.remark||''}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('ps-table-wrap').innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead style="position:sticky;top:0;background:#1B474D;color:#fff;z-index:1">
+          <tr>
+            <th style="padding:8px;border:1px solid #1b474d;width:90px">日期</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:50px">週幾</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:50px">上班?</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:140px">路線</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:50px">上限</th>
+            <th style="padding:8px;border:1px solid #1b474d" colspan="3" style="background:#205058">中午班</th>
+            <th style="padding:8px;border:1px solid #1b474d" colspan="3" style="background:#1f4047">下午班</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:80px">備註</th>
+          </tr>
+          <tr>
+            <th colspan="5" style="border:none"></th>
+            <th style="padding:6px;background:#205058;font-size:0.75rem">司機</th>
+            <th style="padding:6px;background:#205058;font-size:0.75rem">人數</th>
+            <th style="padding:6px;background:#205058;font-size:0.75rem">時間</th>
+            <th style="padding:6px;background:#1f4047;font-size:0.75rem">司機</th>
+            <th style="padding:6px;background:#1f4047;font-size:0.75rem">人數</th>
+            <th style="padding:6px;background:#1f4047;font-size:0.75rem">時間</th>
+            <th style="border:none"></th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    `;
+
+    // 自動儲存:change 事件
+    document.querySelectorAll('#ps-table-wrap [data-field]').forEach(input => {
+      input.addEventListener('change', async (e) => {
+        const tr = e.target.closest('tr');
+        const row_index = parseInt(tr.dataset.row);
+        const field = e.target.dataset.field;
+        const value = e.target.value;
+        e.target.style.background = '#fff8e1';
+        try {
+          const r = await api({action: 'save', row_index, field, value});
+          if (r.success) {
+            e.target.style.background = '#e8f5e9';
+            setTimeout(() => e.target.style.background = '', 800);
+            // 更新本地快取
+            const local = allRows.find(x => x.row_index === row_index);
+            if (local) local[field] = value;
+          } else {
+            e.target.style.background = '#fce4e8';
+            alert('儲存失敗: ' + (r.error || '未知錯誤'));
+          }
+        } catch (err) {
+          e.target.style.background = '#fce4e8';
+          alert('網路錯誤: ' + err.message);
+        }
       });
-      html += '</tbody></table>';
-    }
-    html += '</div>';
-  }
-  html += '</div>';
-
-  // Modal
-  html += '<div id="scheduleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center;padding:20px"><div class="card" style="max-width:560px;width:100%;max-height:90vh;overflow-y:auto"><div style="padding:18px 22px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center"><h3 id="scheduleModalTitle" style="margin:0;font-size:1.05rem">新增排程</h3><button onclick="closeScheduleModal()" style="background:none;border:0;font-size:22px;cursor:pointer;color:#999">×</button></div><div style="padding:22px"><form id="scheduleForm">'
-    + _scheduleFormHTML()
-    + '</form></div><div style="padding:14px 22px;border-top:1px solid #eee;display:flex;gap:10px;justify-content:flex-end"><button class="btn" onclick="closeScheduleModal()">取消</button><button class="btn btn-primary" onclick="saveSchedule()" id="scheduleSaveBtn">儲存</button></div></div></div>';
-  return html;
-}
-
-function _scheduleFormHTML() {
-  var html = '<input type="hidden" id="sf_id" />';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">星期 *</label><select id="sf_weekday" class="form-control"><option value="1">週一</option><option value="2">週二</option><option value="3">週三</option><option value="4">週四</option><option value="5">週五</option><option value="6">週六</option><option value="7">週日</option></select></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">班次 *</label><select id="sf_session" class="form-control"><option value="noon">午接</option><option value="afternoon" selected>下午接</option></select></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">出發時間 *</label><input type="time" id="sf_time" class="form-control" /></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">指派老師 *</label><input type="text" id="sf_teacher" class="form-control" placeholder="如 Ruby" /></div>';
-  html += '<div style="grid-column:1/-1"><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">路線 *</label><input type="text" id="sf_route" class="form-control" placeholder="如 太平校->新光分校" /></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">起點</label><input type="text" id="sf_from" class="form-control" /></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">迄點</label><input type="text" id="sf_to" class="form-control" /></div>';
-  html += '<div style="grid-column:1/-1"><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">學生 ID (逗號分隔)</label><input type="text" id="sf_students" class="form-control" placeholder="S001,S002" /></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">預計人數</label><input type="number" id="sf_kids" class="form-control" min="0" value="0" /></div>';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">啟用</label><select id="sf_active" class="form-control"><option value="TRUE">是</option><option value="FALSE">否</option></select></div>';
-  html += '<div style="grid-column:1/-1"><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">備註</label><textarea id="sf_notes" class="form-control" rows="2"></textarea></div>';
-  html += '</div>';
-  return html;
-}
-
-window._currentSchedules = [];
-function _bindScheduleHandlers(schedules) {
-  window._currentSchedules = schedules;
-}
-
-function openScheduleModal() {
-  document.getElementById('sf_id').value = '';
-  document.getElementById('sf_weekday').value = '1';
-  document.getElementById('sf_session').value = 'afternoon';
-  document.getElementById('sf_time').value = '15:30';
-  document.getElementById('sf_teacher').value = '';
-  document.getElementById('sf_route').value = '';
-  document.getElementById('sf_from').value = '';
-  document.getElementById('sf_to').value = '';
-  document.getElementById('sf_students').value = '';
-  document.getElementById('sf_kids').value = '0';
-  document.getElementById('sf_active').value = 'TRUE';
-  document.getElementById('sf_notes').value = '';
-  document.getElementById('scheduleModalTitle').textContent = '新增排程';
-  document.getElementById('scheduleModal').style.display = 'flex';
-}
-
-function editSchedule(id) {
-  var s = (window._currentSchedules || []).find(function(x) { return x.schedule_id === id; });
-  if (!s) return;
-  document.getElementById('sf_id').value = id;
-  document.getElementById('sf_weekday').value = String(s.weekday || '1');
-  document.getElementById('sf_session').value = s.session || 'afternoon';
-  document.getElementById('sf_time').value = s.depart_time || '';
-  document.getElementById('sf_teacher').value = s.assigned_teacher || '';
-  document.getElementById('sf_route').value = s.route || '';
-  document.getElementById('sf_from').value = s.from_school || '';
-  document.getElementById('sf_to').value = s.to_school || '';
-  document.getElementById('sf_students').value = s.student_ids || '';
-  document.getElementById('sf_kids').value = s.estimated_kids || '0';
-  document.getElementById('sf_active').value = String(s.active).toUpperCase() === 'TRUE' ? 'TRUE' : 'FALSE';
-  document.getElementById('sf_notes').value = s.notes || '';
-  document.getElementById('scheduleModalTitle').textContent = '編輯排程 · ' + id;
-  document.getElementById('scheduleModal').style.display = 'flex';
-}
-
-function closeScheduleModal() {
-  document.getElementById('scheduleModal').style.display = 'none';
-}
-
-async function saveSchedule() {
-  var id = document.getElementById('sf_id').value;
-  var payload = {
-    weekday: document.getElementById('sf_weekday').value,
-    session: document.getElementById('sf_session').value,
-    depart_time: document.getElementById('sf_time').value,
-    assigned_teacher: document.getElementById('sf_teacher').value.trim(),
-    route: document.getElementById('sf_route').value.trim(),
-    from_school: document.getElementById('sf_from').value.trim(),
-    to_school: document.getElementById('sf_to').value.trim(),
-    student_ids: document.getElementById('sf_students').value.trim(),
-    estimated_kids: document.getElementById('sf_kids').value,
-    active: document.getElementById('sf_active').value,
-    notes: document.getElementById('sf_notes').value.trim()
-  };
-  if (!payload.depart_time || !payload.route || !payload.assigned_teacher) {
-    alert('請填寫出發時間、路線、指派老師');
-    return;
+    });
   }
 
-  var btn = document.getElementById('scheduleSaveBtn');
-  btn.disabled = true; btn.textContent = '儲存中...';
-  try {
-    var body;
-    if (id) {
-      body = _adminPayload({ action: 'update', payload: Object.assign({ schedule_id: id }, payload) });
-    } else {
-      body = _adminPayload({ action: 'create', payload: payload });
-    }
-    var data = await _pickupCall(PICKUP_API.schedule, body);
-    if (!data.success) throw new Error(data.error || '儲存失敗');
-    closeScheduleModal();
-    renderPickupSchedule(document.getElementById('mainContent'));
-  } catch (e) {
-    alert('儲存失敗：' + e.message);
-    btn.disabled = false; btn.textContent = '儲存';
-  }
-}
-
-async function toggleSchedule(id, makeActive) {
-  if (!confirm(makeActive ? '要啟用此排程?' : '要停用此排程?')) return;
-  try {
-    var data = await _pickupCall(PICKUP_API.schedule, _adminPayload({
-      action: 'toggle', payload: { schedule_id: id, active: makeActive }
-    }));
-    if (!data.success) throw new Error(data.error || '操作失敗');
-    renderPickupSchedule(document.getElementById('mainContent'));
-  } catch (e) {
-    alert('失敗：' + e.message);
-  }
+  document.getElementById('ps-refresh').onclick = loadAll;
+  await loadAll();
 }
 
 // ========================================================================
