@@ -986,8 +986,90 @@ function showCampDetail(idx){
     <div class="detail-section">狀態</div>
     <select class="status-select" onchange="updateStatus('camp',${idx},this.value)">
       ${['待確認','已確認','已繳費','已取消'].map(s=>`<option${s===(r.status||'待確認')?' selected':''}>${s}</option>`).join('')}
-    </select>`;
+    </select>
+    
+    <div class="detail-section" style="margin-top:24px">協助家長異動</div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">進行家長異動（課程日期、飲食）或取消報名，<strong>會同步寫回 Google Sheets 並自動通知招生名單群，如果家長有加 LINE 好友會一併通知。</strong></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-green" style="flex:1;padding:10px;font-size:0.85rem" onclick="showCampChangeModal(${idx},'update')">🔄 協助異動</button>
+      <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626" onclick="showCampChangeModal(${idx},'cancel')">❌ 協助取消</button>
+    </div>`;
   document.getElementById('modalOverlay').classList.add('open');
+}
+
+// 協助家長夏令營異動 modal
+function showCampChangeModal(idx, action){
+  const d = loadData();
+  const r = d.camp[idx];
+  if(!r) return;
+  const isCancel = action === 'cancel';
+  const title = isCancel ? '❌ 協助取消夏令營報名' : '🔄 協助夏令營異動';
+  const oldCourses = (typeof r.courses === 'object' ? JSON.stringify(r.courses) : (r.courses||''));
+  const oldDiet = r.diet || '無';
+  let bodyHtml = `<div style="max-width:560px">`;
+  bodyHtml += `<div style="background:var(--surface);padding:12px;border-radius:8px;margin-bottom:16px;font-size:0.85rem;border:1px solid var(--border)">`;
+  bodyHtml += `<div><strong>${r.pname}</strong>（${r.phone}）</div>`;
+  bodyHtml += `<div style="color:var(--text-muted);margin-top:4px">${r.sname||(r.children&&r.children[0]&&r.children[0].sname)||''}</div></div>`;
+  if(!isCancel){
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">課程詳細（可編輯增減天數）</label>`;
+    bodyHtml += `<textarea id="chgCourses" rows="3" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.9rem;box-sizing:border-box;resize:vertical;font-family:inherit">${oldCourses}</textarea>`;
+    bodyHtml += `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">例：湯宥昃：七月 7/1～7/14（10天） / 八月 8/12～8/19（5天）</div></div>`;
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">飲食需求</label>`;
+    bodyHtml += `<input type="text" id="chgDiet" value="${oldDiet}" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+  }
+  bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">說明（可選）</label>`;
+  bodyHtml += `<input type="text" id="chgReason" placeholder="例：家長來電說要加 2 天" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+  bodyHtml += `<div id="chgMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>`;
+  bodyHtml += `<div style="display:flex;gap:10px">`;
+  bodyHtml += `<button id="chgSubmit" style="flex:1;background:${isCancel?'#DC2626':'#2D6B3F'};color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">確定${isCancel?'取消':'異動'}</button>`;
+  bodyHtml += `<button id="chgCancel" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">返回</button>`;
+  bodyHtml += `</div></div>`;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  setTimeout(function(){
+    document.getElementById('chgCancel').onclick = function(){ showCampDetail(idx); };
+    document.getElementById('chgSubmit').onclick = async function(){
+      const msg = document.getElementById('chgMsg');
+      const btn = document.getElementById('chgSubmit');
+      msg.textContent = '';
+      const payload = {
+        action: action,
+        source: 'admin',
+        phone: r.phone,
+        reason: (document.getElementById('chgReason').value||'').trim()
+      };
+      if(!isCancel){
+        const nc = (document.getElementById('chgCourses').value||'').trim();
+        const nd = (document.getElementById('chgDiet').value||'').trim();
+        if(!nc){ msg.textContent = '課程不能為空'; return; }
+        payload.newCourses = nc;
+        payload.newDiet = nd || '無';
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳ 處理中…';
+      try {
+        const resp = await fetch('https://miyutang.app.n8n.cloud/webhook/camp-change', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if(result.success){
+          if(typeof showToast === 'function') showToast('✅ ' + (isCancel?'已取消':'已異動') + (result.notifiedParent?'，家長已 LINE 通知':'，家長未加 LINE 好友請電話聯繫'));
+          closeModal();
+          if(typeof window.syncFromSheets === 'function') setTimeout(window.syncFromSheets, 1500);
+        } else {
+          msg.textContent = '❌ ' + (result.error||'處理失敗');
+          btn.disabled = false;
+          btn.textContent = '確定' + (isCancel?'取消':'異動');
+        }
+      } catch(e){
+        msg.textContent = '❌ 網路錯誤：' + e.message;
+        btn.disabled = false;
+        btn.textContent = '確定' + (isCancel?'取消':'異動');
+      }
+    };
+  }, 50);
 }
 
 // ── 分級檢測 ──────────────────────────────────────────────
