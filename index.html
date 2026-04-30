@@ -643,7 +643,7 @@ function renderInquiry(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>Email</th><th>孩子/預判程度</th><th>感興趣班型</th><th>狀態</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>Email</th><th>孩子/預判程度</th><th>感興趣班型</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
         <tbody id="inquiryTbody"></tbody>
       </table>
     </div>`;
@@ -658,7 +658,7 @@ function renderInquiry(el) {
 
   const tbody = document.getElementById('inquiryTbody');
   if(!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><div class="icon">📋</div><p>尚無資料</p></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><div class="icon">📋</div><p>尚無資料</p></td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -681,6 +681,7 @@ function renderInquiry(el) {
         </select>
       </td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showInquiryDetail(${realIdx})">查看</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('inquiries',${realIdx})" title="刪除這筆問課諮詢">❌</button></td>
     </tr>`;
   }).join('');
 }
@@ -747,7 +748,7 @@ function renderBooking(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>預約類型</th><th>日期</th><th>時段</th><th>孩子</th><th>狀態</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>預約類型</th><th>日期</th><th>時段</th><th>孩子</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
         <tbody id="bookingTbody"></tbody>
       </table>
     </div>`;
@@ -761,7 +762,7 @@ function renderBooking(el) {
 
   const tbody = document.getElementById('bookingTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">尚無預約紀錄</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無預約紀錄</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -785,6 +786,7 @@ function renderBooking(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">❌</button></td>
     </tr>`;
   }).join('');
 }
@@ -909,7 +911,7 @@ function renderCamp(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
         <tbody id="campTbody"></tbody>
       </table>
     </div>`;
@@ -918,7 +920,7 @@ function renderCamp(el) {
   let filtered = rows.filter(r => !kw || [r.pname,r.phone,r.sname].join(' ').includes(kw));
   const tbody = document.getElementById('campTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -939,6 +941,7 @@ function renderCamp(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showCampDetail(${realIdx})">查看</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('camp',${realIdx})" title="刪除這筆夏令營報名">❌</button></td>
     </tr>`;
   }).join('');
 }
@@ -1273,7 +1276,7 @@ function renderRegister(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>學校</th><th>班型</th><th>分班</th><th>開始日</th><th>附加服務</th><th>狀態</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>學校</th><th>班型</th><th>分班</th><th>開始日</th><th>附加服務</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
         <tbody id="regTbody"></tbody>
       </table>
     </div>`;
@@ -1282,7 +1285,7 @@ function renderRegister(el) {
   const fs=(document.getElementById('filterRegStatus')||{}).value||'';
   let filtered=d.registrations.filter(r=>(!kw||[r.parent,r.phone,r.studentName].join(' ').includes(kw))&&(!fs||r.status===fs));
   const tbody=document.getElementById('regTbody');
-  if(!filtered.length){tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無報名紀錄</td></tr>`;return;}
+  if(!filtered.length){tbody.innerHTML=`<tr><td colspan="14" style="text-align:center;padding:40px;color:var(--text-muted)">尚無報名紀錄</td></tr>`;return;}
   tbody.innerHTML=filtered.map((r,i)=>{
     const status=r.status||'待處理';
     const bc=status==='待處理'?'badge-pending':status==='在讀中'||status==='已結業'?'badge-enrolled':status==='已退班'?'badge-cancelled':'badge-arranged';
@@ -1303,6 +1306,7 @@ function renderRegister(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showRegDetail(${realIdx})">查看</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('registrations',${realIdx})" title="刪除這筆正式報名">❌</button></td>
     </tr>`;
   }).join('');
 }
@@ -1985,11 +1989,13 @@ checkSession();
   function rowsToObjects(rows) {
     if (!rows || rows.length < 2) return [];
     var headers = rows[0];
-    return rows.slice(1).map(function (row) {
+    return rows.slice(1).map(function (row, idx) {
       var obj = {};
       headers.forEach(function (h, i) {
         obj[h] = row[i] !== undefined ? row[i] : '';
       });
+      // _rowIndex = sheets 真實 row 編號（row 1 是表頭，data 從 row 2 起）
+      obj._rowIndex = idx + 2;
       return obj;
     });
   }
@@ -2018,7 +2024,8 @@ checkSession();
       children: childrenNames,
       classes:  row['班型'] || row['有興趣的課程'] || '',
       question: row['問題'] || row['想詢問的問題'] || '',
-      status:   row['狀態'] || 'new'
+      status:   row['狀態'] || 'new',
+      _rowIndex: row._rowIndex
     };
   }
 
@@ -2035,7 +2042,8 @@ checkSession();
       bookingType: row['類型'] || row['預約類型'] || '',
       date:        row['日期'] || '',
       slot:        row['時段'] || '',
-      status:      row['狀態'] || 'pending'
+      status:      row['狀態'] || 'pending',
+      _rowIndex:   row._rowIndex
     };
   }
 
@@ -2052,7 +2060,8 @@ checkSession();
       sname:   row['孩子'] || row['孩子姓名'] || '',
       courses: row['課程'] || row['報名課程'] || '',
       diet:    row['飲食'] || row['飲食需求'] || row['飲食限制'] || '',
-      status:  row['狀態'] || 'new'
+      status:  row['狀態'] || 'new',
+      _rowIndex: row._rowIndex
     };
   }
 
@@ -2071,7 +2080,8 @@ checkSession();
       classType:    row['班型'] || '',
       assessResult: row['分班'] || row['分班結果'] || '',
       addons:       row['附加服務'] || '',
-      status:       row['狀態'] || 'active'
+      status:       row['狀態'] || 'active',
+      _rowIndex:    row._rowIndex
     };
   }
 
@@ -2126,11 +2136,15 @@ checkSession();
         return;
       }
 
-      // 逐一更新 _DB 各集合
+      // 逐一更新 _DB 各集合，並過濾軟刪除的項目
+      var deletedSet = (typeof getDeletedFormsSet === 'function') ? getDeletedFormsSet() : new Set();
       tasks.forEach(function (t) {
         if (results[t.key]) {
-          _DB[t.key] = results[t.key];
-          console.log('[SheetsSync] ' + t.sheet + ' → ' + results[t.key].length + ' 筆');
+          var arr = results[t.key];
+          // 軟刪除：跳過 deletedSet 內的 ts
+          var filtered = arr.filter(function(r){ return !deletedSet.has(t.key + ':' + (r.ts||'')); });
+          _DB[t.key] = filtered;
+          console.log('[SheetsSync] ' + t.sheet + ' → ' + arr.length + ' 筆（過濾後 ' + filtered.length + ' 筆）');
         }
       });
 
@@ -6166,6 +6180,104 @@ async function _studentsDelete(row_index, name, sid) {
   } else {
     alert('已送出刪除請求。請重新載入確認。');
     renderStudents(document.getElementById('mainContent'));
+  }
+}
+
+// ── 4 表（問課/預約/夏令營/正式報名）刪除工具 ─────────────────────────
+// 軟刪除清單存在 localStorage，syncFromSheets 後過濾掉，並在當下 _DB 也濾掉
+function getDeletedFormsSet() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('xinguangDeletedFormsIds') || '[]'));
+  } catch (e) { return new Set(); }
+}
+function _saveDeletedFormsSet(set) {
+  try {
+    localStorage.setItem('xinguangDeletedFormsIds', JSON.stringify(Array.from(set)));
+  } catch (e) { console.warn('[forms-delete] 寫 localStorage 失敗', e); }
+}
+function _addToDeletedFormsSet(collection, ts) {
+  var s = getDeletedFormsSet();
+  s.add(collection + ':' + (ts||''));
+  _saveDeletedFormsSet(s);
+}
+
+// 對應 collection → render 函數 + 顯示名稱
+var _FORM_META = {
+  inquiries:     { name: '問課諮詢',   render: function(){ if(typeof renderInquiry==='function')  renderInquiry(document.getElementById('mainContent')); } },
+  bookings:      { name: '預約紀錄',   render: function(){ if(typeof renderBooking==='function')  renderBooking(document.getElementById('mainContent')); } },
+  camp:          { name: '夏令營報名', render: function(){ if(typeof renderCamp==='function')     renderCamp(document.getElementById('mainContent')); } },
+  registrations: { name: '正式報名',   render: function(){ if(typeof renderRegister==='function') renderRegister(document.getElementById('mainContent')); } }
+};
+
+// 主入口：選擇刪除方式
+async function _formDelete(collection, idx) {
+  var d = loadData();
+  var arr = (d[collection] || []);
+  var r = arr[idx];
+  if (!r) { alert('找不到資料'); return; }
+  var displayName = r.parent || r.pname || r.studentName || r.sname || '（無姓名）';
+  var meta = _FORM_META[collection] || { name: collection, render: function(){} };
+
+  var choice = await _confirmDialog({
+    title: '刪除' + meta.name + '：' + displayName,
+    message: '請選擇刪除方式：\n\n軟刪除 = 隱藏此筆，Sheets 仍保留\n硬刪除 = 永久從 Google Sheets 刪掉整列',
+    options: [
+      { label: '軟刪除 (隱藏，可至設定回復)', value: 'soft', color: '#0EA5E9' },
+      { label: '硬刪除 (永久從 Sheets 刪掉)',   value: 'hard', color: '#DC2626' },
+      { label: '取消',                         value: '',     color: '#6B7280' }
+    ]
+  });
+  if (!choice) return;
+
+  if (choice === 'soft') {
+    _addToDeletedFormsSet(collection, r.ts);
+    // 從目前 _DB 移除一筆
+    if (Array.isArray(_DB[collection])) {
+      _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+      if (typeof saveData === 'function') saveData(_DB);
+    }
+    if (typeof showToast === 'function') showToast('✅ 已軟刪除');
+    else alert('已軟刪除');
+    meta.render();
+    return;
+  }
+
+  // 硬刪除：雙重確認
+  if (!r._rowIndex || r._rowIndex < 2) {
+    alert('此筆資料缺 row_index（請先按「同步」按鈕重新從 Sheets 載入後再試）');
+    return;
+  }
+  var confirm2 = prompt('硬刪除無法復原。\n\n請輸入家長姓名「' + displayName + '」以確認：');
+  if (confirm2 !== displayName) { alert('姓名不符，已取消刪除'); return; }
+
+  try {
+    var resp = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'hard_delete',
+        admin_username: (_currentUser && _currentUser.username) || 'admin',
+        admin_role: (_currentUser && _currentUser.role) || 'admin',
+        collection: collection,
+        row_index: r._rowIndex
+      })
+    });
+    var result = {};
+    try { result = await resp.json(); } catch(e) {}
+    if (resp.ok && result && result.success !== false) {
+      _addToDeletedFormsSet(collection, r.ts);  // 同時加軟刪 set，避免下次同步又跑出來
+      if (Array.isArray(_DB[collection])) {
+        _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+        if (typeof saveData === 'function') saveData(_DB);
+      }
+      if (typeof showToast === 'function') showToast('✅ 已永久刪除');
+      else alert('已永久刪除 ' + displayName);
+      meta.render();
+    } else {
+      alert('刪除失敗：' + (result.error || ('HTTP ' + resp.status)));
+    }
+  } catch(e) {
+    alert('網路錯誤：' + e.message);
   }
 }
 
