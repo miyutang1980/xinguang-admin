@@ -1440,8 +1440,94 @@ function showRegDetail(idx) {
       <button class="btn btn-outline" style="font-size:0.82rem;padding:8px 16px" onclick="generateRegPDF(${idx})">📄 產生 PDF</button>
       <button class="btn btn-outline" style="font-size:0.82rem;padding:8px 16px" onclick="sendResultToParent(${idx})">📨 發送檢測結果</button>
     </div>
+    
+    <div class="detail-section" style="margin-top:24px">協助家長異動</div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">修改班型、分班、附加服務或年級，<strong>會同步寫回 Google Sheets 並自動通知招生名單群，如果家長有加 LINE 好友會一併通知。</strong></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#2563EB;color:#fff;border:none" onclick="showRegChangeModal(${idx},'update')">🔄 協助異動</button>
+      <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626" onclick="showRegChangeModal(${idx},'cancel')">❌ 協助取消</button>
+    </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
+}
+
+// 協助家長正式註冊異動 modal
+function showRegChangeModal(idx, action){
+  const d = loadData();
+  const r = d.registrations[idx];
+  if(!r) return;
+  const isCancel = action === 'cancel';
+  const title = isCancel ? '❌ 協助取消正式註冊' : '🔄 協助正式註冊異動';
+  let bodyHtml = `<div style="max-width:520px">`;
+  bodyHtml += `<div style="background:var(--surface);padding:12px;border-radius:8px;margin-bottom:16px;font-size:0.85rem;border:1px solid var(--border)">`;
+  bodyHtml += `<div><strong>${r.parent}</strong>（${r.phone}）</div>`;
+  bodyHtml += `<div style="color:var(--text-muted);margin-top:4px">${r.studentName||''}（${r.grade||''}）｜${r.classType||''} → ${r.assessResult||''}</div></div>`;
+  if(!isCancel){
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">年級</label>`;
+    bodyHtml += `<input type="text" id="chgGrade" value="${r.grade||''}" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">班型</label>`;
+    bodyHtml += `<select id="chgClassType" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box">`;
+    ['','浸潤班','菁英班','標準班'].forEach(opt=>{
+      bodyHtml += `<option${opt===(r.classType||'')?' selected':''}>${opt}</option>`;
+    });
+    bodyHtml += `</select></div>`;
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">分班結果</label>`;
+    bodyHtml += `<input type="text" id="chgAssess" value="${r.assessResult||''}" placeholder="例：3B、菁英班 3A" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">附加服務</label>`;
+    bodyHtml += `<input type="text" id="chgAddons" value="${r.addons||''}" placeholder="例：安親、交通車" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+  }
+  bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">說明（可選）</label>`;
+  bodyHtml += `<input type="text" id="chgReason" placeholder="例：家長來電說要換班" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+  bodyHtml += `<div id="chgMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>`;
+  bodyHtml += `<div style="display:flex;gap:10px">`;
+  bodyHtml += `<button id="chgSubmit" style="flex:1;background:${isCancel?'#DC2626':'#2563EB'};color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">確定${isCancel?'取消':'異動'}</button>`;
+  bodyHtml += `<button id="chgCancel" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">返回</button>`;
+  bodyHtml += `</div></div>`;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  setTimeout(function(){
+    document.getElementById('chgCancel').onclick = function(){ showRegDetail(idx); };
+    document.getElementById('chgSubmit').onclick = async function(){
+      const msg = document.getElementById('chgMsg');
+      const btn = document.getElementById('chgSubmit');
+      msg.textContent = '';
+      const payload = {
+        action: action,
+        source: 'admin',
+        phone: r.phone,
+        reason: (document.getElementById('chgReason').value||'').trim()
+      };
+      if(!isCancel){
+        payload.newGrade = (document.getElementById('chgGrade').value||'').trim();
+        payload.newClassType = (document.getElementById('chgClassType').value||'').trim();
+        payload.newAssessResult = (document.getElementById('chgAssess').value||'').trim();
+        payload.newAddons = (document.getElementById('chgAddons').value||'').trim();
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳ 處理中…';
+      try {
+        const resp = await fetch('https://miyutang.app.n8n.cloud/webhook/register-change', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if(result.success){
+          if(typeof showToast === 'function') showToast('✅ ' + (isCancel?'已取消':'已異動') + (result.notifiedParent?'，家長已 LINE 通知':'，家長未加 LINE 好友請電話聯繫'));
+          closeModal();
+          if(typeof window.syncFromSheets === 'function') setTimeout(window.syncFromSheets, 1500);
+        } else {
+          msg.textContent = '❌ ' + (result.error||'處理失敗');
+          btn.disabled = false;
+          btn.textContent = '確定' + (isCancel?'取消':'異動');
+        }
+      } catch(e){
+        msg.textContent = '❌ 網路錯誤：' + e.message;
+        btn.disabled = false;
+        btn.textContent = '確定' + (isCancel?'取消':'異動');
+      }
+    };
+  }, 50);
 }
 
 // ── 共用工具 ──────────────────────────────────────────────
