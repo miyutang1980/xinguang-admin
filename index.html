@@ -4837,6 +4837,258 @@ async function _pickupCall(url, payload) {
 // ========================================================================
 // 1. 接送排程 (pickup-schedule)
 // ========================================================================
+// ─── W16 接送明細 webhook ───
+const PICKUP_DETAILS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/pickup-details';
+const SCHOOLS_LIST = [
+  {code:'SCH-001', name:'新光國小'}, {code:'SCH-002', name:'新高國小'},
+  {code:'SCH-003', name:'廍子國小'}, {code:'SCH-004', name:'軍功國小'},
+  {code:'SCH-005', name:'新興國小'}, {code:'SCH-006', name:'成功國小'},
+  {code:'SCH-007', name:'東光國小'}, {code:'SCH-008', name:'進德國小'},
+  {code:'SCH-009', name:'力行國小'}, {code:'SCH-010', name:'北屯國小'}
+];
+
+// 學生快取(避免重複打 API)
+const _schoolStudentsCache = {};
+async function _getSchoolStudents(schoolName, authPayload) {
+  if (_schoolStudentsCache[schoolName]) return _schoolStudentsCache[schoolName];
+  const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
+    action: 'get_students_by_school', school_name: schoolName
+  }, authPayload));
+  const list = (r && r.students) || [];
+  _schoolStudentsCache[schoolName] = list;
+  return list;
+}
+
+async function _getRouteDetails(scheduleRow, session, authPayload) {
+  const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
+    action: 'get_route_details', schedule_row: scheduleRow, session
+  }, authPayload));
+  return r || { details: [], total_count: 0 };
+}
+
+async function _saveRouteDetails(scheduleRow, session, date, route, details, authPayload) {
+  return _pickupCall(PICKUP_DETAILS_API, Object.assign({
+    action: 'save_route_details', schedule_row: scheduleRow, session, date, route, details
+  }, authPayload));
+}
+
+// 開啟班次明細編輯彈窗
+async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
+  // 移除舊 modal
+  document.getElementById('rd-modal-overlay')?.remove();
+  const sessionLabel = session === 'noon' ? '中午班' : '下午班';
+  const overlay = document.createElement('div');
+  overlay.id = 'rd-modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:8px;width:680px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.3)">
+      <div style="padding:16px 20px;background:#1B474D;color:#fff;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:1.1rem;font-weight:700">📋 ${rowData.route} · ${sessionLabel}</div>
+          <div style="font-size:0.85rem;opacity:0.8;margin-top:2px">${rowData.date} (${rowData.weekday})</div>
+        </div>
+        <button id="rd-close" style="background:transparent;color:#fff;border:none;font-size:1.4rem;cursor:pointer">×</button>
+      </div>
+      <div id="rd-body" style="flex:1;overflow:auto;padding:16px 20px">
+        <div style="text-align:center;color:#888;padding:40px">載入中…</div>
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <div id="rd-summary" style="font-size:0.95rem;color:#01696F;font-weight:600">合計 0 人</div>
+        <div style="display:flex;gap:8px">
+          <button id="rd-cancel" style="padding:8px 16px;border:1px solid #d4d1ca;background:#fff;border-radius:4px;cursor:pointer">取消</button>
+          <button id="rd-save" style="padding:8px 18px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">💾 儲存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // 讀現有明細
+  const existing = await _getRouteDetails(rowData.row_index, session, authPayload);
+  // schoolMap: school_name -> { school_code, selected_ids:Set, students:[] }
+  const schoolMap = new Map();
+  (existing.details || []).forEach(d => {
+    schoolMap.set(d.school_name, {
+      school_code: d.school_code,
+      school_name: d.school_name,
+      selected_ids: new Set(d.student_ids || [])
+    });
+  });
+
+  function calcTotal() {
+    let n = 0;
+    schoolMap.forEach(v => { n += v.selected_ids.size; });
+    document.getElementById('rd-summary').innerHTML = `合計 <span style="font-size:1.2rem">${n}</span> 人 · 上限 ${rowData.capacity || '-'} 人`;
+    return n;
+  }
+
+  async function renderBody() {
+    const body = document.getElementById('rd-body');
+    if (schoolMap.size === 0) {
+      body.innerHTML = `
+        <div style="text-align:center;padding:30px;color:#888;background:#fafafa;border-radius:6px">
+          目前沒有任何學校,請點下方「+ 新增學校」
+        </div>
+        <div style="margin-top:14px;text-align:center">
+          <button id="rd-add-school-empty" style="padding:8px 18px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer">+ 新增學校</button>
+        </div>
+      `;
+      document.getElementById('rd-add-school-empty').onclick = openSchoolPicker;
+      calcTotal();
+      return;
+    }
+
+    // 每所學校一個區塊
+    let html = '';
+    for (const [name, val] of schoolMap.entries()) {
+      const students = await _getSchoolStudents(name, authPayload);
+      val.students = students;
+      const checkedAll = students.length > 0 && students.every(s => val.selected_ids.has(s.student_id));
+      html += `
+        <div data-school="${name}" style="margin-bottom:14px;border:1px solid #d4d1ca;border-radius:6px;overflow:hidden">
+          <div style="background:#f0efea;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+            <div style="font-weight:600;color:#1B474D">🏫 ${name} <span style="color:#7a7974;font-weight:400;font-size:0.85rem">(${val.selected_ids.size}/${students.length})</span></div>
+            <div style="display:flex;gap:6px">
+              <button class="rd-toggle-all" data-school="${name}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #01696F;color:#01696F;border-radius:4px;cursor:pointer">${checkedAll?'取消全選':'全選'}</button>
+              <button class="rd-remove-school" data-school="${name}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #c44569;color:#c44569;border-radius:4px;cursor:pointer">移除</button>
+            </div>
+          </div>
+          <div style="padding:10px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px">
+            ${students.length === 0 ? '<div style="color:#999;font-size:0.85rem">該校無在學學生(students 表 status=active 且 has_pickup=TRUE)</div>' :
+              students.map(s => `
+                <label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:0.85rem">
+                  <input type="checkbox" class="rd-stu" data-school="${name}" data-sid="${s.student_id}" data-sname="${s.chinese_name}" ${val.selected_ids.has(s.student_id)?'checked':''}>
+                  <span>${s.chinese_name}${s.english_name?' ('+s.english_name+')':''}</span>
+                </label>
+              `).join('')
+            }
+          </div>
+        </div>
+      `;
+    }
+    html += `<div style="margin-top:10px;text-align:center"><button id="rd-add-school" style="padding:6px 14px;background:#fff;color:#01696F;border:1px solid #01696F;border-radius:4px;cursor:pointer">+ 新增學校</button></div>`;
+    body.innerHTML = html;
+    bindBodyEvents();
+    calcTotal();
+  }
+
+  function bindBodyEvents() {
+    document.getElementById('rd-add-school')?.addEventListener('click', openSchoolPicker);
+    document.querySelectorAll('.rd-remove-school').forEach(btn => {
+      btn.onclick = () => {
+        const sn = btn.dataset.school;
+        if (!confirm(`確定要從本班次移除「${sn}」嗎?(此學校所有勾選將清除)`)) return;
+        schoolMap.delete(sn);
+        renderBody();
+      };
+    });
+    document.querySelectorAll('.rd-toggle-all').forEach(btn => {
+      btn.onclick = () => {
+        const sn = btn.dataset.school;
+        const val = schoolMap.get(sn);
+        const allChecked = val.students.length > 0 && val.students.every(s => val.selected_ids.has(s.student_id));
+        if (allChecked) {
+          val.selected_ids.clear();
+        } else {
+          val.students.forEach(s => val.selected_ids.add(s.student_id));
+        }
+        renderBody();
+      };
+    });
+    document.querySelectorAll('.rd-stu').forEach(cb => {
+      cb.onchange = () => {
+        const sn = cb.dataset.school;
+        const sid = cb.dataset.sid;
+        const val = schoolMap.get(sn);
+        if (cb.checked) val.selected_ids.add(sid); else val.selected_ids.delete(sid);
+        // 更新該校頭部計數
+        renderBody();
+      };
+    });
+  }
+
+  function openSchoolPicker() {
+    const used = new Set([...schoolMap.keys()]);
+    const available = SCHOOLS_LIST.filter(s => !used.has(s.name));
+    if (available.length === 0) {
+      alert('10 所學校都已加入');
+      return;
+    }
+    const pick = document.createElement('div');
+    pick.id = 'rd-school-picker';
+    pick.style.cssText = 'position:absolute;background:#fff;border:1px solid #d4d1ca;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:8px;z-index:10001;max-height:300px;overflow:auto';
+    pick.innerHTML = available.map(s => `<div data-name="${s.name}" data-code="${s.code}" style="padding:6px 12px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='#f0efea'" onmouseout="this.style.background='#fff'">${s.name}</div>`).join('');
+    document.body.appendChild(pick);
+    // 定位在按鈕下方
+    const btn = document.getElementById('rd-add-school') || document.getElementById('rd-add-school-empty');
+    const rect = btn.getBoundingClientRect();
+    pick.style.left = rect.left + 'px';
+    pick.style.top = (rect.bottom + 4) + 'px';
+    pick.querySelectorAll('div[data-name]').forEach(d => {
+      d.onclick = () => {
+        schoolMap.set(d.dataset.name, {
+          school_code: d.dataset.code,
+          school_name: d.dataset.name,
+          selected_ids: new Set()
+        });
+        pick.remove();
+        renderBody();
+      };
+    });
+    setTimeout(() => {
+      const closeOutside = (e) => {
+        if (!pick.contains(e.target)) { pick.remove(); document.removeEventListener('click', closeOutside); }
+      };
+      document.addEventListener('click', closeOutside);
+    }, 50);
+  }
+
+  function close() {
+    overlay.remove();
+  }
+
+  document.getElementById('rd-close').onclick = close;
+  document.getElementById('rd-cancel').onclick = close;
+  document.getElementById('rd-save').onclick = async () => {
+    // 整理 details
+    const details = [];
+    schoolMap.forEach(val => {
+      const ids = [...val.selected_ids];
+      const names = (val.students || [])
+        .filter(s => val.selected_ids.has(s.student_id))
+        .map(s => s.chinese_name);
+      details.push({
+        school_code: val.school_code,
+        school_name: val.school_name,
+        student_ids: ids,
+        student_names: names
+      });
+    });
+    const total = details.reduce((s, d) => s + d.student_ids.length, 0);
+    if (rowData.capacity && total > parseInt(rowData.capacity)) {
+      if (!confirm(`合計 ${total} 人 已超過上限 ${rowData.capacity},仍要儲存?`)) return;
+    }
+    document.getElementById('rd-save').disabled = true;
+    document.getElementById('rd-save').textContent = '儲存中…';
+    try {
+      const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload);
+      if (r && r.success) {
+        if (typeof onSaved === 'function') onSaved(total);
+        close();
+      } else {
+        alert('儲存失敗: ' + (r && r.error || '未知錯誤'));
+      }
+    } catch (e) {
+      alert('網路錯誤: ' + e.message);
+    } finally {
+      const sb = document.getElementById('rd-save');
+      if (sb) { sb.disabled = false; sb.textContent = '💾 儲存'; }
+    }
+  };
+
+  await renderBody();
+}
+
 // ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
 async function renderPickupSchedule(el) {
   const ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
@@ -4943,10 +5195,16 @@ async function renderPickupSchedule(el) {
         <td style="padding:6px;font-size:0.85rem">${r.route}</td>
         <td style="padding:6px;text-align:center;color:#7a7974;font-size:0.85rem">${r.capacity || '-'}</td>
         <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.noon_driver}"`,`value="${r.noon_driver}" selected`)}</select></td>
-        <td style="padding:6px"><input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:50px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px;white-space:nowrap">
+          <input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}>
+          <button class="btn-detail" data-session="noon" title="選學校 + 學生" style="margin-left:2px;padding:1px 5px;background:#01696F;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:0.85rem" ${isHoliday?'disabled':''}>📋</button>
+        </td>
         <td style="padding:6px"><input data-field="noon_time" type="time" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver}"`,`value="${r.pm_driver}" selected`)}</select></td>
-        <td style="padding:6px"><input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:50px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px;white-space:nowrap">
+          <input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}>
+          <button class="btn-detail" data-session="pm" title="選學校 + 學生" style="margin-left:2px;padding:1px 5px;background:#01696F;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:0.85rem" ${isHoliday?'disabled':''}>📋</button>
+        </td>
         <td style="padding:6px"><input data-field="pm_time" type="time" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px;font-size:0.85rem;color:${isHoliday?'#a12c7b':'#7a7974'}">${r.remark||''}</td>
       </tr>`;
@@ -4979,6 +5237,38 @@ async function renderPickupSchedule(el) {
         <tbody>${rowsHtml}</tbody>
       </table>
     `;
+
+    // 📋 按鈕:開明細 modal
+    document.querySelectorAll('#ps-table-wrap .btn-detail').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const tr = btn.closest('tr');
+        const row_index = parseInt(tr.dataset.row);
+        const session = btn.dataset.session;
+        const r = allRows.find(x => x.row_index === row_index);
+        if (!r) return;
+        openRouteDetailsModal(r, session, auth_payload, async (newTotal) => {
+          // 回填 count 並觸發 W14 save
+          const field = session === 'noon' ? 'noon_count' : 'pm_count';
+          const countInput = tr.querySelector(`input[data-field="${field}"]`);
+          if (countInput) {
+            countInput.value = newTotal;
+            countInput.style.background = '#fff8e1';
+          }
+          try {
+            const sr = await api({action: 'save', row_index, field, value: String(newTotal)});
+            if (sr.success) {
+              if (countInput) {
+                countInput.style.background = '#e8f5e9';
+                setTimeout(() => countInput.style.background = '', 1200);
+              }
+              const local = allRows.find(x => x.row_index === row_index);
+              if (local) local[field] = newTotal;
+            }
+          } catch (err) { console.error('人數回填失敗', err); }
+        });
+      };
+    });
 
     // 自動儲存:change 事件
     document.querySelectorAll('#ps-table-wrap [data-field]').forEach(input => {
