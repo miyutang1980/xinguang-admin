@@ -4255,7 +4255,7 @@ function renderAccountsPage(){
   h+='<button id="btnReloadAcc" style="background:#F3F4F6;border:1px solid #ddd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">🔄 重新載入</button>';
   h+='</div>';
   h+='<div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:#92400E">';
-  h+='💡 <strong>說明</strong>：帳號資料儲存於 Google Sheets「員工帳號」分頁。此處可<strong>修改密碼</strong>與<strong>啟用/停用</strong>，新增/刪除/改角色請直接到 Google Sheets 操作。';
+  h+='💡 <strong>說明</strong>：帳號資料儲存於 Google Sheets「員工帳號」分頁。此處可<strong>改密碼</strong>、<strong>停用/啟用</strong>、<strong>刪除帳號</strong>；新增/改角色請直接到 Google Sheets 操作。刪除為永久操作。';
   h+='</div>';
   h+='<div style="display:flex;flex-direction:column;gap:10px" id="accountList">';
   _cloudAccounts.forEach(function(u){
@@ -4278,6 +4278,7 @@ function renderAccountsPage(){
     h+='<button data-action="pwd" data-user="'+account+'" data-name="'+(u.name||'')+'" class="acc-btn2" style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1D4ED8;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">🔑 改密碼</button>';
     if(!isCur){
       h+='<button data-action="status" data-user="'+account+'" data-name="'+(u.name||'')+'" data-status="'+(isSusp?'啟用':'停用')+'" class="acc-btn2" style="background:'+(isSusp?'#F0FDF4':'#FEF3C7')+';border:1px solid '+(isSusp?'#BBF7D0':'#FDE68A')+';color:'+(isSusp?'#166534':'#92400E')+';padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">'+(isSusp?'✅ 啟用':'⏸️ 停用')+'</button>';
+      h+='<button data-action="delete" data-user="'+account+'" data-name="'+(u.name||'')+'" class="acc-btn2" style="background:#FEF2F2;border:1px solid #FECACA;color:#B91C1C;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">❌ 刪除</button>';
     }
     h+='</div></div>';
   });
@@ -4319,6 +4320,7 @@ function renderAccountsPage(){
         var nm=btn.getAttribute('data-name')||usr;
         if(act==='pwd') showPasswordModal(usr, nm);
         else if(act==='status') showStatusModal(usr, nm, btn.getAttribute('data-status'));
+        else if(act==='delete') showDeleteAccountModal(usr, nm);
       };
     });
   },50);
@@ -4387,6 +4389,57 @@ function showStatusModal(account, name, newStatus){
       alert('❌ '+(r.error||'修改失敗'));
     }
   })();
+}
+
+// 刪除帳號 modal (雙重確認)
+function showDeleteAccountModal(account, name){
+  var dispName = name || account;
+  var h = '<div style="max-width:440px">';
+  h += '<div style="margin-bottom:16px;padding:14px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;color:#7F1D1D;font-size:0.9rem;line-height:1.6">';
+  h += '<div style="font-weight:700;font-size:1rem;margin-bottom:6px">⚠️ 永久刪除帳號</div>';
+  h += '<div>即將從 Google Sheets 「員工帳號」分頁刪掉：</div>';
+  h += '<div style="margin-top:8px">· 姓名：<strong>' + dispName + '</strong></div>';
+  h += '<div>· 帳號：<strong>' + account + '</strong></div>';
+  h += '<div style="margin-top:10px;color:#991B1B">這個動作無法復原。若只是離職，建議使用「⏸️ 停用」即可。</div>';
+  h += '</div>';
+  h += '<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">請輸入帳號「' + account + '」以確認</label>';
+  h += '<input type="text" id="delAccConfirm" placeholder="輸入帳號" autocomplete="off" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;font-family:monospace"></div>';
+  h += '<div id="delAccMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>';
+  h += '<div style="display:flex;gap:10px">';
+  h += '<button id="btnDelAccConfirm" style="flex:1;background:#DC2626;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">❌ 確定刪除</button>';
+  h += '<button id="btnDelAccCancel" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">取消</button>';
+  h += '</div></div>';
+  document.getElementById('modalTitle').textContent = '❌ 刪除帳號：' + account;
+  document.getElementById('modalBody').innerHTML = h;
+  document.getElementById('modalOverlay').classList.add('open');
+  setTimeout(function(){
+    var ipt = document.getElementById('delAccConfirm');
+    if(ipt) ipt.focus();
+    document.getElementById('btnDelAccCancel').onclick = function(){ closeModal(); };
+    document.getElementById('btnDelAccConfirm').onclick = async function(){
+      var typed = document.getElementById('delAccConfirm').value.trim();
+      var msg = document.getElementById('delAccMsg');
+      msg.style.color = '#DC2626';
+      if(typed.toLowerCase() !== account.toLowerCase()){
+        msg.textContent = '帳號不符，請重輸';
+        return;
+      }
+      var btn = document.getElementById('btnDelAccConfirm');
+      btn.disabled = true; btn.textContent = '⏳ 刪除中…';
+      var r = await callAccountApi('deleteAccount', { targetUser: account });
+      if(r.success){
+        addAccountLog('刪除', account, '帳號已刪除（' + dispName + '）');
+        closeModal();
+        if(typeof showToast === 'function') showToast('✅ ' + (r.message || '帳號已刪除'));
+        _cloudAccounts = [];
+        await reloadCloudAccounts();
+        switchSection('accounts');
+      } else {
+        msg.textContent = '❌ ' + (r.error || '刪除失敗');
+        btn.disabled = false; btn.textContent = '❌ 確定刪除';
+      }
+    };
+  }, 50);
 }
 
 // 舊函數保留為 stub，避免其他地方呼叫炸掉
@@ -5144,9 +5197,10 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
       <div id="rd-body" style="flex:1;overflow:auto;padding:16px 20px">
         <div style="text-align:center;color:#888;padding:40px">載入中…</div>
       </div>
-      <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
         <div id="rd-summary" style="font-size:0.95rem;color:#01696F;font-weight:600">合計 0 人</div>
-        <div style="display:flex;gap:8px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="rd-clear-all" style="padding:8px 14px;border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:4px;cursor:pointer;font-weight:600">🗑️ 清空整筆明細</button>
           <button id="rd-cancel" style="padding:8px 16px;border:1px solid #d4d1ca;background:#fff;border-radius:4px;cursor:pointer">取消</button>
           <button id="rd-save" style="padding:8px 18px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">💾 儲存</button>
         </div>
@@ -5157,6 +5211,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
 
   // 讀現有明細
   const existing = await _getRouteDetails(rowData.row_index, session, authPayload);
+  // 記住所有屬於這個班次的 sheet row 號 (含重複)，供「清空整筆」使用
+  const allDetailRows = (existing.all_row_numbers || []).slice();
   // schoolMap: school_name -> { school_code, selected_ids:Set, students:[] }
   const schoolMap = new Map();
   (existing.details || []).forEach(d => {
@@ -5311,6 +5367,37 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
 
   document.getElementById('rd-close').onclick = close;
   document.getElementById('rd-cancel').onclick = close;
+  document.getElementById('rd-clear-all').onclick = async () => {
+    if (allDetailRows.length === 0 && schoolMap.size === 0) {
+      alert('本班次本來就沒明細');
+      return;
+    }
+    const c = await _confirmDialog({
+      title: '清空整筆明細',
+      message: '請確認要清空：' + rowData.date + ' · ' + rowData.route + ' · ' + sessionLabel + '\n\n這會從 Sheets 刪除這個班次的所有學校與學生明細 (' + allDetailRows.length + ' 筆)，無法復原。',
+      options: [
+        { label: '取消', value: '', color: '#6B7280' },
+        { label: '確定清空', value: 'clear', color: '#DC2626' }
+      ]
+    });
+    if (c !== 'clear') return;
+    document.getElementById('rd-clear-all').disabled = true;
+    document.getElementById('rd-clear-all').textContent = '清空中…';
+    // 從大到小刪，避免 row index 偏移
+    const sortedRows = allDetailRows.slice().sort((a,b) => b - a);
+    let okCount = 0, failCount = 0;
+    for (const rowNum of sortedRows) {
+      try {
+        const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
+          action: 'hard_delete', row_number: rowNum
+        }, authPayload));
+        if (r && r.success) okCount++; else failCount++;
+      } catch (e) { failCount++; }
+    }
+    alert('已刪除 ' + okCount + ' 筆' + (failCount ? ' (失敗 ' + failCount + ')' : ''));
+    if (typeof onSaved === 'function') onSaved(0);
+    close();
+  };
   document.getElementById('rd-save').onclick = async () => {
     // 整理 details
     const details = [];
@@ -5473,6 +5560,9 @@ async function renderPickupSchedule(el) {
         </td>
         <td style="padding:6px"><input data-field="pm_time" type="time" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px;font-size:0.85rem;color:${isHoliday?'#a12c7b':'#7a7974'}">${r.remark||''}</td>
+        <td style="padding:6px;text-align:center">
+          <button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button>
+        </td>
       </tr>`;
     }).join('');
 
@@ -5488,6 +5578,7 @@ async function renderPickupSchedule(el) {
             <th style="padding:8px;border:1px solid #1b474d" colspan="4" style="background:#205058">中午班</th>
             <th style="padding:8px;border:1px solid #1b474d" colspan="4" style="background:#1f4047">下午班</th>
             <th style="padding:8px;border:1px solid #1b474d;width:80px">備註</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:50px">刪除</th>
           </tr>
           <tr>
             <th colspan="5" style="border:none"></th>
@@ -5500,6 +5591,7 @@ async function renderPickupSchedule(el) {
             <th style="padding:6px;background:#1f4047;font-size:0.75rem">人數</th>
             <th style="padding:6px;background:#1f4047;font-size:0.75rem">時間</th>
             <th style="border:none"></th>
+            <th style="border:none"></th>
           </tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -5507,6 +5599,36 @@ async function renderPickupSchedule(el) {
     `;
 
     // 📋 按鈕:開明細 modal
+    // ❌ 硬刪除整列
+    document.querySelectorAll('#ps-table-wrap .btn-route-del').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.preventDefault();
+        const row_index = parseInt(btn.dataset.row);
+        const date = btn.dataset.date;
+        const route = btn.dataset.route;
+        const c = await _confirmDialog({
+          title: '硬刪除排程',
+          message: '請確認要刪除：' + date + ' · ' + route + '\n\n永久刪掉整列資料，無法復原。\n(若只是請假請使用「上班?」欄改為「休」。)',
+          options: [
+            { label: '取消', value: '', color: '#6B7280' },
+            { label: '確定永久刪除', value: 'hard', color: '#DC2626' }
+          ]
+        });
+        if (c !== 'hard') return;
+        try {
+          const r = await api({ action: 'hard_delete', row_index });
+          if (r && r.success) {
+            alert('已刪除 ' + date + ' · ' + route);
+            await loadAll();
+          } else {
+            alert('刪除失敗：' + (r && r.error ? r.error : '伺服器無回應'));
+          }
+        } catch (err) {
+          alert('網路錯誤：' + err.message);
+        }
+      };
+    });
+
     document.querySelectorAll('#ps-table-wrap .btn-detail').forEach(btn => {
       btn.onclick = (e) => {
         e.preventDefault();
@@ -5880,7 +6002,7 @@ function _renderStudentsView(el) {
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">家長電話</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">接送方式</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">狀態</th>
-      <th style="padding:8px 10px;text-align:center;font-size:0.78rem;color:#14532D;width:70px">操作</th>
+      <th style="padding:8px 10px;text-align:center;font-size:0.78rem;color:#14532D;width:120px">操作</th>
     </tr>`;
 
   const rows = filtered.map(r => {
@@ -5899,7 +6021,10 @@ function _renderStudentsView(el) {
         <td style="padding:4px 6px"><input data-f="parent1_phone" value="${_esc(r.parent1_phone||'')}" style="width:110px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><select data-f="pickup_method" style="width:100px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${methodSel}</select></td>
         <td style="padding:4px 6px"><select data-f="status" style="width:80px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${statusSel}</select></td>
-        <td style="padding:6px 10px;text-align:center"><button class="btn-link" onclick="_studentsViewDetail(${r.row_index})" style="background:none;border:none;color:#1e90ff;cursor:pointer;font-size:0.85rem">詳細</button></td>
+        <td style="padding:6px 6px;text-align:center;white-space:nowrap">
+          <button class="btn-link" onclick="_studentsViewDetail(${r.row_index})" style="background:none;border:none;color:#1e90ff;cursor:pointer;font-size:0.82rem;padding:2px 4px" title="詳細">📄</button>
+          <button onclick="_studentsDelete(${r.row_index}, '${_esc(r.chinese_name||'').replace(/'/g,"\\'")}', '${_esc(r.student_id||'')}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 4px" title="刪除">❌</button>
+        </td>
       </tr>`;
   }).join('');
 
@@ -6002,6 +6127,69 @@ async function _studentsDoCreate() {
   } else {
     alert('建立失敗:' + (res.error || ''));
   }
+}
+
+// 刪除學生：軟刪除 (status=left/deleted) 或 硬刪除 (整列刪)
+async function _studentsDelete(row_index, name, sid) {
+  const choice = await _confirmDialog({
+    title: '刪除學生：' + name + ' (' + sid + ')',
+    message: '請選擇刪除方式：',
+    options: [
+      { label: '軟刪除 (改為離校，保留資料)', value: 'soft', color: '#0EA5E9' },
+      { label: '硬刪除 (永久從 Sheets 刪掉整列)', value: 'hard', color: '#DC2626' },
+      { label: '取消', value: '', color: '#6B7280' }
+    ]
+  });
+  if (!choice) return;
+  if (choice === 'soft') {
+    const res = await _studentsCall('save', { row_index, field: 'status', value: 'left' });
+    if (res.success) {
+      const local = _studentsRows.find(x => x.row_index === row_index);
+      if (local) local.status = 'left';
+      _renderStudentsView(document.getElementById('mainContent'));
+      alert('已軟刪除 (改為離校)');
+    } else {
+      alert('刪除失敗：' + (res.error || ''));
+    }
+    return;
+  }
+  // 硬刪除 雙重確認
+  const confirm2 = prompt('硬刪除無法復原。\n\n請輸入學生姓名「' + name + '」以確認：');
+  if (confirm2 !== name) { alert('姓名不符，已取消刪除'); return; }
+  const res = await _studentsCall('hard_delete', { row_index });
+  // n8n hard_delete 成功時回 respond；失敗時可能無回應
+  if (res && res.success) {
+    alert('已永久刪除 ' + name);
+    renderStudents(document.getElementById('mainContent'));
+  } else if (res && res.error) {
+    alert('刪除失敗：' + res.error);
+  } else {
+    alert('已送出刪除請求。請重新載入確認。');
+    renderStudents(document.getElementById('mainContent'));
+  }
+}
+
+// 三選一確認 dialog：返回 Promise<value>
+function _confirmDialog({ title, message, options }) {
+  return new Promise(resolve => {
+    const m = document.createElement('div');
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999';
+    const btnHtml = options.map((o, i) =>
+      '<button data-v="' + i + '" style="background:' + o.color + ';color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;font-size:0.9rem;margin:4px">' + _esc(o.label) + '</button>'
+    ).join('');
+    m.innerHTML = '<div style="background:#fff;border-radius:10px;padding:24px;min-width:380px;max-width:520px">'
+      + '<h3 style="margin:0 0 12px;font-size:1.1rem;color:#111">' + _esc(title) + '</h3>'
+      + '<p style="margin:0 0 18px;color:#555;line-height:1.6">' + _esc(message) + '</p>'
+      + '<div style="text-align:right">' + btnHtml + '</div></div>';
+    document.body.appendChild(m);
+    m.querySelectorAll('button[data-v]').forEach(b => {
+      b.onclick = () => {
+        const idx = parseInt(b.getAttribute('data-v'), 10);
+        m.remove();
+        resolve(options[idx].value);
+      };
+    });
+  });
 }
 
 function _studentsViewDetail(row_index) {
