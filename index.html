@@ -809,8 +809,92 @@ function showBookingDetail(idx) {
     <select class="status-select" onchange="updateStatus('bookings',${idx},this.value)">
       ${['待確認','已確認','已完成','已取消'].map(s=>`<option${s===(r.status||'待確認')?' selected':''}>${s}</option>`).join('')}
     </select>
+    
+    <div class="detail-section" style="margin-top:24px">協助家長異動</div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">使用以下按鈕幫家長改期或取消預約，<strong>會同步寫回 Google Sheets 並自動通知招生名單群，如果家長有加 LINE 好友會一併通知。</strong></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-blue" style="flex:1;padding:10px;font-size:0.85rem" onclick="showBookingChangeModal(${idx},'reschedule')">📅 協助改期</button>
+      <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626" onclick="showBookingChangeModal(${idx},'cancel')">❌ 協助取消</button>
+    </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
+}
+
+// 協助家長預約異動 modal
+function showBookingChangeModal(idx, action){
+  const d = loadData();
+  const r = d.bookings[idx];
+  if(!r) return;
+  const isCancel = action === 'cancel';
+  const title = isCancel ? '❌ 協助取消預約' : '📅 協助改期';
+  let bodyHtml = `<div style="max-width:480px">`;
+  bodyHtml += `<div style="background:var(--surface);padding:12px;border-radius:8px;margin-bottom:16px;font-size:0.85rem;border:1px solid var(--border)">`;
+  bodyHtml += `<div><strong>${r.parent}</strong>（${r.phone}）</div>`;
+  bodyHtml += `<div style="color:var(--text-muted);margin-top:4px">${r.bookingType}｜${r.date} ${r.slot}｜${r.child}</div></div>`;
+  if(!isCancel){
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新日期 *</label>`;
+    bodyHtml += `<input type="date" id="chgNewDate" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+    bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新時段 *</label>`;
+    bodyHtml += `<select id="chgNewSlot" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box">`;
+    bodyHtml += `<option value="">請選擇</option>`;
+    bodyHtml += `<option>09:00-10:00</option><option>10:00-11:00</option><option>11:00-12:00</option>`;
+    bodyHtml += `<option>14:00-15:00</option><option>15:00-16:00</option><option>16:00-17:00</option>`;
+    bodyHtml += `<option>19:00-20:00</option><option>20:00-21:00</option>`;
+    bodyHtml += `</select></div>`;
+  }
+  bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">說明（可選）</label>`;
+  bodyHtml += `<input type="text" id="chgReason" placeholder="例：家長來電許說要改期" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+  bodyHtml += `<div id="chgMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>`;
+  bodyHtml += `<div style="display:flex;gap:10px">`;
+  bodyHtml += `<button id="chgSubmit" style="flex:1;background:${isCancel?'#DC2626':'#2B7A4B'};color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">確定${isCancel?'取消':'改期'}</button>`;
+  bodyHtml += `<button id="chgCancel" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">返回</button>`;
+  bodyHtml += `</div></div>`;
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  setTimeout(function(){
+    document.getElementById('chgCancel').onclick = function(){ showBookingDetail(idx); };
+    document.getElementById('chgSubmit').onclick = async function(){
+      const msg = document.getElementById('chgMsg');
+      const btn = document.getElementById('chgSubmit');
+      msg.textContent = '';
+      const payload = {
+        action: action,
+        source: 'admin',
+        phone: r.phone,
+        reason: (document.getElementById('chgReason').value||'').trim()
+      };
+      if(!isCancel){
+        const nd = document.getElementById('chgNewDate').value;
+        const ns = document.getElementById('chgNewSlot').value;
+        if(!nd || !ns){ msg.textContent = '請選擇新日期和新時段'; return; }
+        payload.newDate = nd;
+        payload.newSlot = ns;
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳ 處理中…';
+      try {
+        const resp = await fetch('https://miyutang.app.n8n.cloud/webhook/booking-change', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const result = await resp.json();
+        if(result.success){
+          if(typeof showToast === 'function') showToast('✅ ' + (isCancel?'已取消':'已改期') + (result.notifiedParent?'，家長已 LINE 通知':'，家長未加 LINE 好友請電話聯繫'));
+          closeModal();
+          if(typeof window.syncFromSheets === 'function') setTimeout(window.syncFromSheets, 1500);
+        } else {
+          msg.textContent = '❌ ' + (result.error||'處理失敗');
+          btn.disabled = false;
+          btn.textContent = '確定' + (isCancel?'取消':'改期');
+        }
+      } catch(e){
+        msg.textContent = '❌ 網路錯誤：' + e.message;
+        btn.disabled = false;
+        btn.textContent = '確定' + (isCancel?'取消':'改期');
+      }
+    };
+  }, 50);
 }
 
 // ── 夏令營 ────────────────────────────────────────────────
