@@ -412,7 +412,20 @@ function initApp() {
   }, 1000);
   updateBadges(loadData());
   switchSection('dashboard');
-  // 主網站資料可透過「匯入 JSON」功能載入
+  // 登入後自動從 Google Sheets 同步一次（不需手動點按鈕）
+  // 延遲 800ms 讓 syncFromSheets 定義完成、畫面也適合顯示 Toast
+  setTimeout(function(){
+    if (typeof window.syncFromSheets === 'function') {
+      try {
+        if (typeof showToast === 'function') showToast('⏳ 正在從 Google Sheets 同步資料…');
+        window.syncFromSheets();
+      } catch(e) {
+        console.warn('自動同步失敗，請手動點「從 Google Sheets 同步」按鈕：', e);
+      }
+    } else {
+      console.warn('syncFromSheets 未定義，跳過自動同步');
+    }
+  }, 800);
 }
 
 function updateBadges(data) {
