@@ -4914,6 +4914,16 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
       selected_ids: new Set(d.student_ids || [])
     });
   });
+  // 如果表格中選了學校(noon_school/pm_school) 但明細裡還沒有 → 自動加入
+  const presetSchool = session === 'noon' ? rowData.noon_school : rowData.pm_school;
+  if (presetSchool && !schoolMap.has(presetSchool)) {
+    const sObj = SCHOOLS_LIST.find(s => s.name === presetSchool);
+    schoolMap.set(presetSchool, {
+      school_code: sObj?.code || '',
+      school_name: presetSchool,
+      selected_ids: new Set()
+    });
+  }
 
   function calcTotal() {
     let n = 0;
@@ -5175,6 +5185,8 @@ async function renderPickupSchedule(el) {
 
     const driverOpts = ['<option value=""></option>',
       ...staffList.map(n => `<option value="${n}">${n}</option>`)].join('');
+    const schoolOpts = ['<option value=""></option>',
+      ...SCHOOLS_LIST.map(s => `<option value="${s.name}">${s.name}</option>`)].join('');
 
     const rowsHtml = filtered.map(r => {
       const isHoliday = r.status === '休';
@@ -5195,12 +5207,14 @@ async function renderPickupSchedule(el) {
         <td style="padding:6px;font-size:0.85rem">${r.route}</td>
         <td style="padding:6px;text-align:center;color:#7a7974;font-size:0.85rem">${r.capacity || '-'}</td>
         <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.noon_driver}"`,`value="${r.noon_driver}" selected`)}</select></td>
+        <td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${schoolOpts.replace(`value="${r.noon_school||''}"`,`value="${r.noon_school||''}" selected`)}</select></td>
         <td style="padding:6px;white-space:nowrap">
           <input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}>
           <button class="btn-detail" data-session="noon" title="選學校 + 學生" style="margin-left:2px;padding:1px 5px;background:#01696F;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:0.85rem" ${isHoliday?'disabled':''}>📋</button>
         </td>
         <td style="padding:6px"><input data-field="noon_time" type="time" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver}"`,`value="${r.pm_driver}" selected`)}</select></td>
+        <td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${schoolOpts.replace(`value="${r.pm_school||''}"`,`value="${r.pm_school||''}" selected`)}</select></td>
         <td style="padding:6px;white-space:nowrap">
           <input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;text-align:center" ${isHoliday?'disabled':''}>
           <button class="btn-detail" data-session="pm" title="選學校 + 學生" style="margin-left:2px;padding:1px 5px;background:#01696F;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:0.85rem" ${isHoliday?'disabled':''}>📋</button>
@@ -5219,16 +5233,18 @@ async function renderPickupSchedule(el) {
             <th style="padding:8px;border:1px solid #1b474d;width:50px">上班?</th>
             <th style="padding:8px;border:1px solid #1b474d;width:140px">路線</th>
             <th style="padding:8px;border:1px solid #1b474d;width:50px">上限</th>
-            <th style="padding:8px;border:1px solid #1b474d" colspan="3" style="background:#205058">中午班</th>
-            <th style="padding:8px;border:1px solid #1b474d" colspan="3" style="background:#1f4047">下午班</th>
+            <th style="padding:8px;border:1px solid #1b474d" colspan="4" style="background:#205058">中午班</th>
+            <th style="padding:8px;border:1px solid #1b474d" colspan="4" style="background:#1f4047">下午班</th>
             <th style="padding:8px;border:1px solid #1b474d;width:80px">備註</th>
           </tr>
           <tr>
             <th colspan="5" style="border:none"></th>
             <th style="padding:6px;background:#205058;font-size:0.75rem">司機</th>
+            <th style="padding:6px;background:#205058;font-size:0.75rem">學校</th>
             <th style="padding:6px;background:#205058;font-size:0.75rem">人數</th>
             <th style="padding:6px;background:#205058;font-size:0.75rem">時間</th>
             <th style="padding:6px;background:#1f4047;font-size:0.75rem">司機</th>
+            <th style="padding:6px;background:#1f4047;font-size:0.75rem">學校</th>
             <th style="padding:6px;background:#1f4047;font-size:0.75rem">人數</th>
             <th style="padding:6px;background:#1f4047;font-size:0.75rem">時間</th>
             <th style="border:none"></th>
