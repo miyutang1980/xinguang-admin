@@ -183,6 +183,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('documents')" id="nav-documents">
         📎 說明會簡報
       </div>
+    <div class="sidebar-item" onclick="switchSection('students')" id="nav-students">
+        🎓 學生管理
+      </div>
     <div class="sidebar-item" onclick="switchSection('pickup')" id="nav-pickup">
         🚐 接送排程
       </div>
@@ -239,10 +242,10 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <script>
 // ── 設定 ──────────────────────────────────────────────────
 const ADMIN_USERS = {
-  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts','pickup','assignments','transfer','stats'] },
+  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts','students','pickup','assignments','transfer','stats'] },
   'teacher': { password: 'Tcm5XM0x0z', role: 'teacher', name: '教師', permissions: ['dashboard','booking','assess','trial'] },
   'sales': { password: 'SlLl9lHf39', role: 'sales', name: '業務', permissions: ['dashboard','inquiry','booking','camp','register'] },
-  'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial','pickup','assignments','stats'] }
+  'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial','students','pickup','assignments','stats'] }
 };
 var _currentUser = null;
 function canDelete() { return _currentUser && _currentUser.role === 'admin'; }
@@ -353,7 +356,12 @@ function applyPermissions() {
     'trial': 'nav-trial',
     'documents': 'nav-documents',
     'manual': 'nav-manual',
-    'accounts': 'nav-accounts'
+    'accounts': 'nav-accounts',
+    'students': 'nav-students',
+    'pickup': 'nav-pickup',
+    'assignments': 'nav-assignments',
+    'transfer': 'nav-transfer',
+    'stats': 'nav-stats'
   };
   Object.keys(navMap).forEach(function(key) {
     var el = document.getElementById(navMap[key]);
@@ -447,6 +455,7 @@ function switchSection(sec) {
     dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
     trial:'🗓️ 體驗課排班', documents:'📎 說明會簡報',
+    students:'🎓 學生管理',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報'
   };
@@ -460,6 +469,7 @@ function switchSection(sec) {
   else if(sec === 'register') renderRegister(content);
   else if(sec === 'trial') renderTrial(content);
   else if(sec === 'documents') renderDocuments(content);
+  else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'transfer') { if(typeof renderTransferAdmin==='function') renderTransferAdmin(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -5225,6 +5235,223 @@ function _renderStatsUI() {
   return html;
 }
 
+
+
+// ── 學生管理 ──────────────────────────────────────────────
+const STUDENTS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/students';
+let _studentsRows = [];
+let _schoolsList = [];
+let _studentsFilter = { keyword: '', school: '', status: '' };
+
+async function _studentsCall(action, extra) {
+  const u = JSON.parse(sessionStorage.getItem('user') || '{}');
+  const body = Object.assign({ action: action, admin_username: u.username || '', admin_role: u.role || '' }, extra || {});
+  const res = await fetch(STUDENTS_API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  return await res.json();
+}
+
+async function renderStudents(el) {
+  el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
+  try {
+    const [listRes, schoolsRes] = await Promise.all([
+      _studentsCall('list'),
+      _studentsCall('get_schools')
+    ]);
+    if (!listRes.success) { el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">讀取失敗:' + (listRes.error || '未知錯誤') + '</div>'; return; }
+    _studentsRows = listRes.rows || [];
+    _schoolsList = (schoolsRes.schools || []).map(s => s.school_name);
+    _renderStudentsView(el);
+  } catch (e) {
+    el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">連線失敗:' + e.message + '</div>';
+  }
+}
+
+function _renderStudentsView(el) {
+  const f = _studentsFilter;
+  const filtered = _studentsRows.filter(r => {
+    if (f.school && r.school_name !== f.school) return false;
+    if (f.status && r.status !== f.status) return false;
+    if (f.keyword) {
+      const k = f.keyword.toLowerCase();
+      const hay = ((r.chinese_name||'') + (r.english_name||'') + (r.student_id||'') + (r.parent1_name||'') + (r.parent1_phone||'') + (r.class_code||'')).toLowerCase();
+      if (!hay.includes(k)) return false;
+    }
+    return true;
+  });
+
+  const schoolOptions = _schoolsList.map(s => '<option value="'+_esc(s)+'">'+_esc(s)+'</option>').join('');
+  const filterBar = `
+    <div class="card" style="padding:16px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input id="stuKeyword" placeholder="搜尋:中英文姓名/學號/家長/手機/班級" value="${_esc(f.keyword)}" style="flex:1;min-width:240px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
+      <select id="stuSchoolFilter" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
+        <option value="">全部學校</option>${schoolOptions}
+      </select>
+      <select id="stuStatusFilter" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
+        <option value="">全部狀態</option>
+        <option value="active">在籍</option>
+        <option value="paused">暫停</option>
+        <option value="left">離校</option>
+      </select>
+      <button class="btn btn-green" onclick="_studentsAddNew()">＋ 新增學生</button>
+      <button class="btn btn-outline" onclick="renderStudents(document.getElementById('mainContent'))">🔄 重新整理</button>
+      <span style="color:#777;font-size:0.82rem">共 ${filtered.length} / ${_studentsRows.length} 筆</span>
+    </div>`;
+
+  // 表格(含 inline 編輯)
+  const head = `
+    <tr style="background:#F0FDF4">
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D;width:90px">學號</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">中文姓名</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">英文名</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">就讀學校</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">班級</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">家長</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">家長電話</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">接送方式</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#14532D">狀態</th>
+      <th style="padding:8px 10px;text-align:center;font-size:0.78rem;color:#14532D;width:70px">操作</th>
+    </tr>`;
+
+  const rows = filtered.map(r => {
+    const sel = (val, opts) => opts.map(o => '<option value="'+_esc(o.v)+'"' + (val===o.v?' selected':'') + '>'+_esc(o.l)+'</option>').join('');
+    const schoolSel = '<option value="">--</option>' + _schoolsList.map(s => '<option value="'+_esc(s)+'"' + (r.school_name===s?' selected':'') + '>'+_esc(s)+'</option>').join('');
+    const statusSel = sel(r.status||'', [{v:'active',l:'在籍'},{v:'paused',l:'暫停'},{v:'left',l:'離校'}]);
+    const methodSel = '<option value="">--</option>' + sel(r.pickup_method||'', [{v:'walk',l:'走路'},{v:'bus',l:'交通車'},{v:'official_car',l:'公務車'},{v:'parent',l:'家長接送'}]);
+    return `
+      <tr data-row="${r.row_index}" style="border-bottom:1px solid #eee">
+        <td style="padding:6px 10px;font-size:0.82rem;color:#666;font-family:monospace">${_esc(r.student_id)}</td>
+        <td style="padding:4px 6px"><input data-f="chinese_name" value="${_esc(r.chinese_name||'')}" style="width:90px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="english_name" value="${_esc(r.english_name||'')}" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><select data-f="school_name" style="width:120px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${schoolSel}</select></td>
+        <td style="padding:4px 6px"><input data-f="class_code" value="${_esc(r.class_code||'')}" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="parent1_name" value="${_esc(r.parent1_name||'')}" style="width:90px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="parent1_phone" value="${_esc(r.parent1_phone||'')}" style="width:110px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><select data-f="pickup_method" style="width:100px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${methodSel}</select></td>
+        <td style="padding:4px 6px"><select data-f="status" style="width:80px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${statusSel}</select></td>
+        <td style="padding:6px 10px;text-align:center"><button class="btn-link" onclick="_studentsViewDetail(${r.row_index})" style="background:none;border:none;color:#1e90ff;cursor:pointer;font-size:0.85rem">詳細</button></td>
+      </tr>`;
+  }).join('');
+
+  el.innerHTML = filterBar + `
+    <div class="card" style="padding:0;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
+        <thead>${head}</thead>
+        <tbody id="stuTbody">${rows || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#999">沒有符合條件的學生</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
+  // 篩選綁定
+  document.getElementById('stuKeyword').oninput = (e) => { _studentsFilter.keyword = e.target.value; _renderStudentsView(el); document.getElementById('stuKeyword').focus(); };
+  document.getElementById('stuSchoolFilter').onchange = (e) => { _studentsFilter.school = e.target.value; _renderStudentsView(el); };
+  document.getElementById('stuStatusFilter').onchange = (e) => { _studentsFilter.status = e.target.value; _renderStudentsView(el); };
+
+  // inline save (blur 自動存)
+  document.querySelectorAll('#stuTbody [data-f]').forEach(input => {
+    input.addEventListener('blur', async (ev) => {
+      const tr = ev.target.closest('tr');
+      const row_index = parseInt(tr.getAttribute('data-row'), 10);
+      const field = ev.target.getAttribute('data-f');
+      const value = ev.target.value;
+      ev.target.style.background = '#FFFBEB';
+      const res = await _studentsCall('save', { row_index, field, value });
+      if (res.success) {
+        ev.target.style.background = '#D1FAE5';
+        // 同步本地快取
+        const local = _studentsRows.find(x => x.row_index === row_index);
+        if (local) local[field] = value;
+        setTimeout(() => { ev.target.style.background = ''; }, 1500);
+      } else {
+        ev.target.style.background = '#FEE2E2';
+        alert('儲存失敗:' + (res.error || ''));
+      }
+    });
+  });
+}
+
+function _esc(s) { if (s==null) return ''; return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function _studentsAddNew() {
+  const schoolOpts = _schoolsList.map(s => '<option value="'+_esc(s)+'">'+_esc(s)+'</option>').join('');
+  const html = `
+    <div style="padding:24px;min-width:480px">
+      <h3 style="margin:0 0 18px;font-size:1.1rem">新增學生</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <label>中文姓名 <input id="ns_cn" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px"></label>
+        <label>英文名 <input id="ns_en" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px"></label>
+        <label>就讀學校
+          <select id="ns_sch" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px">
+            <option value="">--</option>${schoolOpts}
+          </select>
+        </label>
+        <label>班級代碼 <input id="ns_cls" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px" placeholder="如新光1"></label>
+        <label>家長姓名 <input id="ns_p1" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px"></label>
+        <label>家長電話 <input id="ns_ph" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px"></label>
+        <label>接送方式
+          <select id="ns_pm" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px">
+            <option value="walk">走路</option>
+            <option value="bus">交通車</option>
+            <option value="official_car">公務車</option>
+            <option value="parent">家長接送</option>
+          </select>
+        </label>
+        <label>狀態
+          <select id="ns_st" style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:4px">
+            <option value="active">在籍</option>
+            <option value="paused">暫停</option>
+          </select>
+        </label>
+      </div>
+      <div style="margin-top:20px;text-align:right">
+        <button class="btn btn-outline" onclick="closeModal()">取消</button>
+        <button class="btn btn-green" onclick="_studentsDoCreate()">建立</button>
+      </div>
+    </div>`;
+  if (typeof openModal === 'function') openModal(html);
+  else { const m=document.createElement('div'); m.id='_stuModal'; m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999'; m.innerHTML='<div style="background:#fff;border-radius:10px;max-width:600px">'+html+'</div>'; document.body.appendChild(m); window.closeModal=function(){const m=document.getElementById('_stuModal');if(m)m.remove();}; }
+}
+
+async function _studentsDoCreate() {
+  const data = {
+    chinese_name: document.getElementById('ns_cn').value.trim(),
+    english_name: document.getElementById('ns_en').value.trim(),
+    school_name: document.getElementById('ns_sch').value,
+    class_code: document.getElementById('ns_cls').value.trim(),
+    parent1_name: document.getElementById('ns_p1').value.trim(),
+    parent1_phone: document.getElementById('ns_ph').value.trim(),
+    pickup_method: document.getElementById('ns_pm').value,
+    status: document.getElementById('ns_st').value,
+    has_pickup: 'TRUE'
+  };
+  if (!data.chinese_name) { alert('中文姓名必填'); return; }
+  const res = await _studentsCall('create', { data });
+  if (res.success) {
+    if (typeof closeModal === 'function') closeModal();
+    alert('已建立學生 ' + res.student_id);
+    renderStudents(document.getElementById('mainContent'));
+  } else {
+    alert('建立失敗:' + (res.error || ''));
+  }
+}
+
+function _studentsViewDetail(row_index) {
+  const r = _studentsRows.find(x => x.row_index === row_index);
+  if (!r) return;
+  const rows = [
+    ['學號', r.student_id], ['中文姓名', r.chinese_name], ['英文名', r.english_name],
+    ['就讀學校', r.school_name], ['班級', r.class_code], ['狀態', r.status],
+    ['家長1', r.parent1_name], ['家長1 LINE UID', r.parent1_line_uid], ['家長1電話', r.parent1_phone],
+    ['家長2', r.parent2_name], ['家長2電話', r.parent2_phone], ['緊急聯絡人', r.emergency_contact],
+    ['接送時段', r.pickup_time_slots], ['預設車輛', r.assigned_vehicle], ['接送方式', r.pickup_method],
+    ['美語班級', r.english_class_code], ['美語上課時間', r.english_class_time],
+    ['有接送', r.has_pickup], ['有安親', r.has_daycare], ['有家教', r.has_tutoring], ['有美語', r.has_english],
+    ['備註', r.remarks], ['更新時間', r.updated_at]
+  ];
+  const tableHtml = '<div style="padding:24px;min-width:520px;max-height:80vh;overflow:auto"><h3 style="margin:0 0 16px;font-size:1.1rem">學生詳細 — ' + _esc(r.chinese_name||'') + '</h3>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:0.88rem">' + rows.map(([k,v]) => '<tr><td style="padding:6px 10px;background:#F9FAFB;color:#666;width:130px">' + _esc(k) + '</td><td style="padding:6px 10px">' + _esc(v||'-') + '</td></tr>').join('') + '</table>'
+    + '<div style="margin-top:18px;text-align:right"><button class="btn btn-green" onclick="closeModal()">關閉</button></div></div>';
+  if (typeof openModal === 'function') openModal(tableHtml);
+  else { const m=document.createElement('div'); m.id='_stuModal'; m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999'; m.innerHTML='<div style="background:#fff;border-radius:10px;max-width:680px">'+tableHtml+'</div>'; document.body.appendChild(m); window.closeModal=function(){const m=document.getElementById('_stuModal');if(m)m.remove();}; }
+}
 
 </script>
 </body>
