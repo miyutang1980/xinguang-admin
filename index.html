@@ -532,15 +532,28 @@ async function fetchSheetHeaders(sheetName){
 }
 
 async function checkUrlAlive(url){
-  try {
-    var ctrl = new AbortController();
-    var t = setTimeout(function(){ ctrl.abort(); }, 8000);
-    await fetch(url, {method:'GET', mode:'no-cors', cache:'no-store', signal: ctrl.signal});
-    clearTimeout(t);
-    return { ok:true, status:'reachable' };
-  } catch(e) {
-    return { ok:false, status: String(e && e.message || e).slice(0,80) };
-  }
+  // 使用 image 元素阈探測服務是否活著（不受 CORS 限制）
+  // 品牌 URL + /favicon.ico 或任何 GET-able 資源都可
+  return new Promise(function(resolve){
+    var img = new Image();
+    var t = setTimeout(function(){
+      img.onload = img.onerror = null;
+      resolve({ ok:false, status:'timeout' });
+    }, 8000);
+    img.onload = function(){ clearTimeout(t); resolve({ ok:true, status:'reachable' }); };
+    img.onerror = function(){
+      clearTimeout(t);
+      // 安全備援：用 fetch HEAD 再試（有些伺服器 favicon 沒設定）
+      var ctrl = new AbortController();
+      var t2 = setTimeout(function(){ ctrl.abort(); }, 5000);
+      fetch(url, {method:'GET', mode:'no-cors', cache:'no-store', signal: ctrl.signal})
+        .then(function(){ clearTimeout(t2); resolve({ ok:true, status:'reachable (fallback)' }); })
+        .catch(function(e){ clearTimeout(t2); resolve({ ok:false, status: String(e && e.message || e).slice(0,80) }); });
+    };
+    // 加 cachebuster 避免快取
+    var sep = url.indexOf('?') >= 0 ? '&' : '?';
+    img.src = url.replace(/\/$/, '') + '/favicon.ico' + sep + '_=' + Date.now();
+  });
 }
 
 async function runHealthCheck(){
