@@ -201,6 +201,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('accounts')" id="nav-accounts">
         👥 帳號管理
       </div>
+    <div class="sidebar-item" onclick="switchSection('health')" id="nav-health">
+        🩺 系統健檢 <span id="badge-health" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:1px 6px;font-size:0.65rem;margin-left:4px"></span>
+      </div>
     </div>
     <div class="sidebar-bottom">
       <button onclick="doLogout()">登出</button>
@@ -470,7 +473,8 @@ function switchSection(sec) {
     trial:'🗓️ 體驗課排班', documents:'📎 說明會簡報',
     students:'🎓 學生管理',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
-    transfer:'🔄 強制轉交', stats:'📊 老師月報'
+    transfer:'🔄 強制轉交', stats:'📊 老師月報',
+    health:'🩺 系統健檢'
   };
   document.getElementById('pageTitle').textContent = titles[sec] || sec;
   const content = document.getElementById('mainContent');
@@ -487,9 +491,199 @@ function switchSection(sec) {
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'transfer') { if(typeof renderTransferAdmin==='function') renderTransferAdmin(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'stats') { if(typeof renderTeacherStats==='function') renderTeacherStats(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
+  else if(sec === 'health') { if(typeof renderHealth==='function') renderHealth(content); else content.innerHTML='<div style="padding:40px">健檢模組未載入</div>'; }
 }
 
 // ── 說明會簡報下載區 ──────────────────────────────────────────────────────
+// ===== 系統健檢模組 =====
+window.SHEET_EXPECTED_HEADERS = {
+  '問課諮詢':   ['時間','家長','電話','Email','LINE','孩子','班型','問題','狀態'],
+  '預約紀錄':   ['時間','家長','電話','孩子','類型','日期','時段','狀態'],
+  '夏令營報名': ['時間','家長','電話','LINE','孩子','課程','飲食','狀態'],
+  '正式註冊':   ['時間','家長','電話','Email','學生','年級','班型','分班','附加服務','狀態'],
+  'LINE好友':    ['userId','displayName','電話','加入時間','來源','sentMessages']
+};
+
+window.healthState = { lastReport: null, isChecking: false };
+
+async function fetchSheetHeaders(sheetName){
+  var url = 'https://docs.google.com/spreadsheets/d/' + (window.SHEET_ID||'1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w') +
+    '/gviz/tq?tqx=out:csv&headers=0&range=A1:BZ1&sheet=' + encodeURIComponent(sheetName);
+  var resp = await fetch(url, {cache:'no-store'});
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  var text = await resp.text();
+  var cells = [];
+  var cur = '', inQ = false;
+  for (var i=0; i<text.length; i++){
+    var c = text[i];
+    if (inQ){
+      if (c === '"' && text[i+1] === '"'){ cur += '"'; i++; }
+      else if (c === '"'){ inQ = false; }
+      else cur += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === ','){ cells.push(cur); cur=''; }
+      else if (c === '\n' || c === '\r') break;
+      else cur += c;
+    }
+  }
+  cells.push(cur);
+  return cells;
+}
+
+async function checkUrlAlive(url){
+  try {
+    var ctrl = new AbortController();
+    var t = setTimeout(function(){ ctrl.abort(); }, 8000);
+    await fetch(url, {method:'GET', mode:'no-cors', cache:'no-store', signal: ctrl.signal});
+    clearTimeout(t);
+    return { ok:true, status:'reachable' };
+  } catch(e) {
+    return { ok:false, status: String(e && e.message || e).slice(0,80) };
+  }
+}
+
+async function runHealthCheck(){
+  var report = {
+    when: new Date().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}),
+    services: {}, sheets: {}, issues: [], warnings: []
+  };
+  var serviceTargets = [
+    { key:'main',  label:'主網站',  url:'https://taipingxinguang.org/' },
+    { key:'admin', label:'後台',     url:'https://admin.taipingxinguang.org/' },
+    { key:'n8n',   label:'n8n 服務', url:'https://miyutang.app.n8n.cloud/' }
+  ];
+  for (var i=0; i<serviceTargets.length; i++){
+    var t = serviceTargets[i];
+    var r = await checkUrlAlive(t.url);
+    report.services[t.key] = { label:t.label, url:t.url, ok:r.ok, status:r.ok?'✅':'❌', detail:r.status };
+    if (!r.ok) report.issues.push(t.label + ' 連線失敗：' + r.status);
+  }
+  var sheetNames = Object.keys(window.SHEET_EXPECTED_HEADERS);
+  for (var j=0; j<sheetNames.length; j++){
+    var name = sheetNames[j];
+    var expected = window.SHEET_EXPECTED_HEADERS[name];
+    try {
+      var headers = await fetchSheetHeaders(name);
+      var nonEmpty = headers.filter(function(h){ return h && String(h).trim() !== ''; });
+      var missing  = expected.filter(function(k){ return nonEmpty.indexOf(k) < 0; });
+      var pollutedMeta = nonEmpty.filter(function(k){ return /^_/.test(String(k)); });
+      var extra = nonEmpty.filter(function(k){ return expected.indexOf(k) < 0 && pollutedMeta.indexOf(k) < 0; });
+      var status = '✅';
+      if (missing.length) status = '❌';
+      else if (pollutedMeta.length || extra.length) status = '⚠️';
+      report.sheets[name] = { status:status, expected:expected, actual:nonEmpty, missing:missing, extra:extra, polluted:pollutedMeta };
+      if (missing.length) report.issues.push(name + ' 缺欄位：' + missing.join(', '));
+      if (pollutedMeta.length) report.warnings.push(name + ' 有 ' + pollutedMeta.length + ' 個中繼欄位污染：' + pollutedMeta.slice(0,5).join(', ') + (pollutedMeta.length>5?'…':''));
+      if (extra.length) report.warnings.push(name + ' 有 ' + extra.length + ' 個多出欄位：' + extra.slice(0,5).join(', ') + (extra.length>5?'…':''));
+    } catch(e) {
+      report.sheets[name] = { status:'❌', error: String(e && e.message || e) };
+      report.issues.push(name + ' 讀取失敗：' + String(e && e.message || e));
+    }
+  }
+  return report;
+}
+
+function healthEscape(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function renderHealth(el){
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#666">⏳ 進行健檢中…</div>';
+  if (window.healthState.isChecking) return;
+  window.healthState.isChecking = true;
+  var report;
+  try { report = await runHealthCheck(); }
+  catch(e) { el.innerHTML = '<div style="padding:40px;color:#c00">健檢失敗：' + String(e && e.message || e) + '</div>'; window.healthState.isChecking=false; return; }
+  window.healthState.isChecking = false;
+  window.healthState.lastReport = report;
+
+  var totalProblems = (report.issues||[]).length + (report.warnings||[]).length;
+  var badge = document.getElementById('badge-health');
+  if (badge){
+    if (totalProblems > 0){ badge.textContent = totalProblems; badge.style.display=''; }
+    else { badge.style.display='none'; }
+  }
+
+  var html = '<div style="max-width:1000px;margin:0 auto">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">';
+  html += '<div><h2 style="margin:0;font-size:1.2rem">🩺 系統健檢報告</h2><div style="font-size:0.78rem;color:#888;margin-top:4px">最後檢查：' + healthEscape(report.when) + ' (台北時間)</div></div>';
+  html += '<button onclick="renderHealth(document.getElementById(\'mainContent\'))" style="padding:8px 18px;background:#2B7A4B;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:0.85rem;font-weight:600">🔄 重新檢查</button>';
+  html += '</div>';
+
+  if (report.issues.length === 0 && report.warnings.length === 0){
+    html += '<div style="background:#F0FDF4;border:1.5px solid #2B7A4B;border-radius:10px;padding:20px;margin-bottom:24px;text-align:center"><div style="font-size:2rem;margin-bottom:8px">✅</div><div style="font-weight:700;color:#2B7A4B">一切正常</div><div style="font-size:0.82rem;color:#555;margin-top:4px">服務、分頁、欄位都 OK</div></div>';
+  } else if (report.issues.length > 0){
+    html += '<div style="background:#FEF2F2;border:1.5px solid #C0392B;border-radius:10px;padding:16px 20px;margin-bottom:24px"><div style="font-weight:700;color:#C0392B;margin-bottom:8px">❌ 發現 ' + report.issues.length + ' 個嚴重問題</div><ul style="margin:0;padding-left:20px;font-size:0.85rem;color:#7B2418">';
+    for (var ii=0; ii<report.issues.length; ii++){ html += '<li style="margin-bottom:4px">' + healthEscape(report.issues[ii]) + '</li>'; }
+    html += '</ul></div>';
+  }
+  if (report.warnings.length > 0){
+    html += '<div style="background:#FFFBEB;border:1.5px solid #F59E0B;border-radius:10px;padding:16px 20px;margin-bottom:24px"><div style="font-weight:700;color:#92400E;margin-bottom:8px">⚠️ ' + report.warnings.length + ' 個警告（不影響運作但建議及早處理）</div><ul style="margin:0;padding-left:20px;font-size:0.85rem;color:#78350F">';
+    for (var jj=0; jj<report.warnings.length; jj++){ html += '<li style="margin-bottom:4px">' + healthEscape(report.warnings[jj]) + '</li>'; }
+    html += '</ul></div>';
+  }
+
+  html += '<div class="card" style="padding:20px;margin-bottom:20px"><h3 style="margin:0 0 14px;font-size:1rem">🌐 服務狀態</h3>';
+  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">';
+  var skeys = ['main','admin','n8n'];
+  for (var sk=0; sk<skeys.length; sk++){
+    var s = report.services[skeys[sk]]; if (!s) continue;
+    var bg = s.ok ? '#F0FDF4' : '#FEF2F2';
+    var bc = s.ok ? '#2B7A4B' : '#C0392B';
+    html += '<div style="background:' + bg + ';border:1.5px solid ' + bc + ';border-radius:8px;padding:14px;text-align:center"><div style="font-size:0.78rem;color:#666;margin-bottom:4px">' + healthEscape(s.label) + '</div><div style="font-size:1.5rem">' + s.status + '</div></div>';
+  }
+  html += '</div></div>';
+
+  html += '<div class="card" style="padding:20px;margin-bottom:20px"><h3 style="margin:0 0 14px;font-size:1rem">📊 Google Sheets 分頁檢查</h3>';
+  html += '<table style="width:100%;font-size:0.85rem;border-collapse:collapse"><thead><tr style="border-bottom:2px solid #E8E8E8"><th style="padding:8px;text-align:left">分頁</th><th style="padding:8px;text-align:center;width:60px">狀態</th><th style="padding:8px;text-align:left">詳情</th></tr></thead><tbody>';
+  var skNames = Object.keys(report.sheets);
+  for (var sn=0; sn<skNames.length; sn++){
+    var n = skNames[sn]; var info = report.sheets[n];
+    html += '<tr style="border-bottom:1px solid #F0F0F0"><td style="padding:10px 8px;font-weight:600">' + healthEscape(n) + '</td><td style="padding:10px 8px;text-align:center;font-size:1.1rem">' + info.status + '</td><td style="padding:10px 8px;font-size:0.78rem;color:#555">';
+    if (info.error){ html += '<span style="color:#C0392B">' + healthEscape(info.error) + '</span>'; }
+    else if (info.missing && info.missing.length){
+      html += '<span style="color:#C0392B">缺：' + healthEscape(info.missing.join(', ')) + '</span>';
+    } else if (info.polluted && info.polluted.length){
+      html += '<span style="color:#92400E">中繼欄位污染 ' + info.polluted.length + ' 個：' + healthEscape(info.polluted.slice(0,3).join(', ')) + (info.polluted.length>3?'…':'') + '</span>';
+    } else if (info.extra && info.extra.length){
+      html += '<span style="color:#92400E">多出：' + healthEscape(info.extra.slice(0,3).join(', ')) + (info.extra.length>3?'…':'') + '</span>';
+    } else {
+      html += '<span style="color:#2B7A4B">欄位一致</span>';
+    }
+    html += '</td></tr>';
+  }
+  html += '</tbody></table></div>';
+
+  if (report.warnings.length > 0 || report.issues.length > 0){
+    html += '<div class="card" style="padding:20px"><h3 style="margin:0 0 14px;font-size:1rem">🛠️ 修復指引</h3>';
+    html += '<div style="font-size:0.85rem;line-height:1.7;color:#444">';
+    html += '<div style="background:#F7FAFC;border-radius:8px;padding:14px;margin-bottom:12px"><strong>📝 中繼欄位污染 / 多出欄位</strong><ol style="margin:8px 0 0;padding-left:24px;font-size:0.83rem"><li>這是 n8n workflow 「寫入 Sheets」誤寫進標題列造成。</li><li>可直接到 Google Sheets 手動刪除 row 1 多出欄位，或聯絡系統管理員協助清理。</li><li>長期修復：匯入最新版 <code>01-instant-notify v2</code> 與 <code>03-line-event-receiver v2</code>（已加入 sanitize 節點避免再污染）。</li></ol></div>';
+    html += '<div style="background:#FEF2F2;border-radius:8px;padding:14px"><strong>⚠️ 分頁讀取失敗 / 服務不可達</strong><ol style="margin:8px 0 0;padding-left:24px;font-size:0.83rem"><li>確認分頁沒被重命名或刪除。</li><li>確認試算表权限為「任何人可查看」。</li><li>n8n 可能重啟中，隔幾分鐘再試。</li></ol></div>';
+    html += '</div></div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+async function checkHealthInBackground(){
+  try {
+    var last = parseInt(localStorage.getItem('lastHealthCheckTs')||'0',10);
+    if (Date.now() - last < 3600000) return;
+    var report = await runHealthCheck();
+    var totalProblems = (report.issues||[]).length + (report.warnings||[]).length;
+    var badge = document.getElementById('badge-health');
+    if (badge){
+      if (totalProblems > 0){ badge.textContent = totalProblems; badge.style.display=''; }
+      else { badge.style.display='none'; }
+    }
+    localStorage.setItem('lastHealthCheckTs', String(Date.now()));
+    window.healthState.lastReport = report;
+  } catch(e){ console.warn('background health check failed', e); }
+}
+setTimeout(checkHealthInBackground, 5000);
+
 function renderDocuments(el){
   var today = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
   el.innerHTML = `
