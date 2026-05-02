@@ -185,6 +185,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('students')" id="nav-students">
         🎓 學生管理
       </div>
+    <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
+        📅 開班資訊
+      </div>
     <div class="sidebar-item" onclick="switchSection('pickup')" id="nav-pickup">
         🚐 接送排程
       </div>
@@ -472,6 +475,7 @@ function switchSection(sec) {
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
     trial:'🗓️ 體驗課排班', documents:'📎 說明會簡報',
     students:'🎓 學生管理',
+    classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
     health:'🩺 系統健檢'
@@ -492,6 +496,7 @@ function switchSection(sec) {
   else if(sec === 'transfer') { if(typeof renderTransferAdmin==='function') renderTransferAdmin(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'stats') { if(typeof renderTeacherStats==='function') renderTeacherStats(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'health') { if(typeof renderHealth==='function') renderHealth(content); else content.innerHTML='<div style="padding:40px">健檢模組未載入</div>'; }
+  else if(sec === 'classes') { if(typeof renderClasses==='function') renderClasses(content); else content.innerHTML='<div style="padding:40px">開班資訊模組未載入</div>'; }
 }
 
 // ── 說明會簡報下載區 ──────────────────────────────────────────────────────
@@ -696,6 +701,109 @@ async function checkHealthInBackground(){
   } catch(e){ console.warn('background health check failed', e); }
 }
 setTimeout(checkHealthInBackground, 5000);
+
+// ===== 開班資訊模組 =====
+window.SEMESTER_CLASSES = {
+  slot1: {
+    title: '時段一 · 14:00–16:00',
+    tag: '國小低年級／銜接班',
+    color: '#10b981',
+    rows: [
+      ['SA', '14:00–16:00', '週一、三、四、五', ''],
+      ['1A', '14:00–16:00', '週一、三、四、五', ''],
+      ['G1', '13:30–16:15', '週一、三、四、五', '']
+    ]
+  },
+  slot2: {
+    title: '時段二 · 16:30–19:00',
+    tag: '★ 中高年級 3 天班 · 每次 2.5h × 3 天',
+    color: '#f59e0b',
+    rows: [
+      ['1A', '16:30–19:00', '週二、三、四', ''],
+      ['3A', '16:30–19:00', '週一、三、五', '週三改 R102'],
+      ['1C', '16:30–19:00', '週一、三、四', ''],
+      ['4A', '16:30–19:00', '週二、四、五', '週四改 R102'],
+      ['G2', '16:30–18:45', '週一至週五', '浸潤班'],
+      ['2B', '16:30–19:00', '週一、二、四', ''],
+      ['3C', '16:30–19:00', '週一、三、五', '週一改 R102']
+    ]
+  },
+  slot3: {
+    title: '時段三 · 19:00–21:00',
+    tag: '全民英檢備考／幼兒美語',
+    color: '#3b82f6',
+    rows: [
+      ['4B 中級初試', '19:00–21:00', '週一、四', ''],
+      ['中級複試',     '19:00–21:00', '週二、五', ''],
+      ['3B 初級初試', '19:00–21:00', '週二、五', ''],
+      ['初級複試',     '19:00–21:00', '週一、三', ''],
+      ['ES 幼兒美語',   '19:00–20:30', '週一、二、五', '']
+    ]
+  }
+};
+
+function renderClasses(el){
+  var s = window.SEMESTER_CLASSES;
+
+  function renderSlot(slotKey){
+    var slot = s[slotKey];
+    var html = '<div style="background:#fff;border-radius:14px;padding:22px;border:1.5px solid #E5E7EB;box-shadow:0 2px 8px rgba(0,0,0,0.04)">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + slot.color + '"></span><h4 style="margin:0;font-size:1.05rem;font-weight:800;color:#0D1B2A">' + healthEscape(slot.title) + '</h4></div>';
+    html += '<p style="font-size:0.78rem;color:#666;margin:0 0 16px 18px">' + healthEscape(slot.tag) + '</p>';
+    html += '<table style="width:100%;font-size:0.85rem;border-collapse:collapse">';
+    html += '<thead><tr style="background:#F9FAFB"><th style="padding:8px 10px;text-align:left;font-size:0.72rem;color:#6B7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1.5px solid #E5E7EB">班別</th><th style="padding:8px 10px;text-align:left;font-size:0.72rem;color:#6B7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1.5px solid #E5E7EB">時間</th><th style="padding:8px 10px;text-align:left;font-size:0.72rem;color:#6B7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1.5px solid #E5E7EB">上課日</th><th style="padding:8px 10px;text-align:left;font-size:0.72rem;color:#6B7280;text-transform:uppercase;letter-spacing:0.06em;border-bottom:1.5px solid #E5E7EB">備註</th></tr></thead><tbody>';
+    for (var i=0; i<slot.rows.length; i++){
+      var row = slot.rows[i];
+      var isHighlight = /G2|ES 幼兒/.test(row[0]);
+      html += '<tr style="border-bottom:1px solid #F3F4F6">';
+      html += '<td style="padding:10px;font-weight:700;color:' + (isHighlight ? '#2B7A4B' : '#111827') + '">' + healthEscape(row[0]) + '</td>';
+      html += '<td style="padding:10px;color:#374151">' + healthEscape(row[1]) + '</td>';
+      html += '<td style="padding:10px;color:#374151">' + healthEscape(row[2]) + '</td>';
+      var note = row[3];
+      if (note){
+        var bg = /浸潤/.test(note) ? '#DBEAFE' : '#FEF3C7';
+        var fg = /浸潤/.test(note) ? '#1E40AF' : '#92400E';
+        html += '<td style="padding:10px"><span style="font-size:0.74rem;color:' + fg + ';background:' + bg + ';padding:2px 8px;border-radius:4px;font-weight:600;display:inline-block">' + healthEscape(note) + '</span></td>';
+      } else {
+        html += '<td style="padding:10px;color:#9CA3AF">—</td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    return html;
+  }
+
+  var html = '<div style="max-width:1100px;margin:0 auto">';
+
+  // 頭部
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">';
+  html += '<div><h2 style="margin:0;font-size:1.2rem">📅 本學期開班資訊</h2><div style="font-size:0.78rem;color:#6B7280;margin-top:4px">太平新光分校 · 班別、上課時段與上課日</div></div>';
+  html += '<div style="display:flex;gap:8px">';
+  html += '<button onclick="window.print()" style="padding:8px 16px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:600">🖨️ 列印</button>';
+  html += '<a href="https://taipingxinguang.org/#classes" target="_blank" style="padding:8px 16px;background:#2B7A4B;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:600;text-decoration:none">🔗 看家長端</a>';
+  html += '</div></div>';
+
+  // 說明卡
+  html += '<div style="background:linear-gradient(135deg,#0D1B2A 0%,#1A2B40 100%);color:#fff;border-radius:12px;padding:18px 22px;margin-bottom:22px"><div style="font-size:0.86rem;font-weight:700;color:#7DFFB3;margin-bottom:6px">⚡ 學期班別調整 · 週時數 7.5 小時不變</div><div style="font-size:0.85rem;line-height:1.7;color:rgba(255,255,255,0.85)"><strong style="color:#FFD86B">時段二（16:30–19:00）</strong>中高年級以 <strong style="color:#FFD86B">3 天班</strong> 為主（G2 為浸潤班），每次 2.5 小時 × 3 天，每週維持 7.5 小時的扎實學習，同教材、同進度、同師資。</div></div>';
+
+  // 三個時段
+  html += '<div style="display:grid;grid-template-columns:1fr;gap:16px">';
+  html += renderSlot('slot1');
+  html += renderSlot('slot2');
+  html += renderSlot('slot3');
+  html += '</div>';
+
+  // 足部備註
+  html += '<div style="margin-top:20px;background:#F9FAFB;border-radius:10px;padding:14px 18px;font-size:0.78rem;color:#52606D;line-height:1.7">';
+  html += '<div style="font-weight:700;color:#374151;margin-bottom:4px">備註</div>';
+  html += '· 資料來源：《太平新光分校 · 學期班別調整公告》<br>';
+  html += '· 其中、夏令營期間另行公告，以該公告為準<br>';
+  html += '· 有班別調整請聯絡老師手動更新';
+  html += '</div>';
+
+  html += '</div>';
+  el.innerHTML = html;
+}
 
 function renderDocuments(el){
   var today = new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
