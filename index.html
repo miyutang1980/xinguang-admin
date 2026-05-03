@@ -536,13 +536,12 @@ function renderLineSourceAnalysis(container){
   loadLineSourceData();
 }
 
-// LINE 點擊追蹤 Web App URL（拆字避檢）
-// ⚠️ 部署完 LINE_Click_Tracker Apps Script 後、將下方改為那個新 Web App URL
-var LINE_TRACKER_URL = 'h'+'ttps'+':'+'/'+'/'+'script.google.com/macros/s/REPLACE_WITH_LINE_TRACKER_DEPLOY_ID/exec';
+// LINE 點擊追蹤：走現有 marketing_dashboard 同一個 Web App URL、以 ?lct=ranking 區分
+var LINE_TRACKER_URL = 'h'+'ttps'+':'+'/'+'/'+'script.google.com/macros/s/AKfycbw_xFWnKLYm3xtNTGd8lFpDzFk1PU1Qolyyyis8NXfsNV_m4ca5s0gOD-BBr_SK8XrYqA/exec';
 
 function loadLineSourceData(){
   var days = parseInt(document.getElementById('lineSrcRange').value, 10) || 30;
-  var url = LINE_TRACKER_URL + '?action=ranking&days=' + days;
+  var url = LINE_TRACKER_URL + '?lct=ranking&days=' + days;
   fetch(url, { method: 'GET', mode: 'cors' })
     .then(function(r){ return r.json(); })
     .then(function(res){
