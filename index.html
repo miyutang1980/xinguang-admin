@@ -198,6 +198,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
         🔄 強制轉交
         <span id="badge-transfer" style="display:none;background:#dc2626;color:#fff;border-radius:10px;padding:1px 6px;font-size:0.65rem;margin-left:4px"></span>
       </div>
+    <div class="sidebar-item" onclick="switchSection('lineSrc')" id="nav-lineSrc">
+        📈 LINE 來源分析
+      </div>
     <div class="sidebar-item" onclick="switchSection('stats')" id="nav-stats">
         📊 老師月報
       </div>
@@ -478,7 +481,8 @@ function switchSection(sec) {
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
-    health:'🩺 系統健檢'
+    health:'🩺 系統健檢',
+    lineSrc:'📈 LINE 來源分析'
   };
   document.getElementById('pageTitle').textContent = titles[sec] || sec;
   const content = document.getElementById('mainContent');
@@ -497,6 +501,102 @@ function switchSection(sec) {
   else if(sec === 'stats') { if(typeof renderTeacherStats==='function') renderTeacherStats(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'health') { if(typeof renderHealth==='function') renderHealth(content); else content.innerHTML='<div style="padding:40px">健檢模組未載入</div>'; }
   else if(sec === 'classes') { if(typeof renderClasses==='function') renderClasses(content); else content.innerHTML='<div style="padding:40px">開班資訊模組未載入</div>'; }
+  else if(sec === 'lineSrc') { renderLineSourceAnalysis(content); }
+}
+
+/* ============ LINE 點擊來源分析 ============ */
+function renderLineSourceAnalysis(container){
+  container.innerHTML = '<div style="padding:24px">' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
+      '<h3 style="margin:0;font-size:1.1rem;font-weight:800">LINE 加好友點擊來源</h3>' +
+      '<select id="lineSrcRange" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.85rem">' +
+        '<option value="7">最近 7 天</option>' +
+        '<option value="30" selected>最近 30 天</option>' +
+        '<option value="90">最近 90 天</option>' +
+        '<option value="365">最近 1 年</option>' +
+      '</select>' +
+      '<button onclick="loadLineSourceData()" style="padding:6px 14px;background:#2B7A4B;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem;font-weight:700">重新載入</button>' +
+    '</div>' +
+    '<div id="lineSrcSummary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px"></div>' +
+    '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">' +
+      '<table style="width:100%;border-collapse:collapse;font-size:0.875rem">' +
+        '<thead style="background:#F9FAFB"><tr>' +
+          '<th style="padding:12px;text-align:left;font-weight:700">排名</th>' +
+          '<th style="padding:12px;text-align:left;font-weight:700">來源 src</th>' +
+          '<th style="padding:12px;text-align:right;font-weight:700">點擊數</th>' +
+          '<th style="padding:12px;text-align:right;font-weight:700">佔比</th>' +
+        '</tr></thead>' +
+        '<tbody id="lineSrcTbody"><tr><td colspan="4" style="padding:40px;text-align:center;color:#999">載入中…</td></tr></tbody>' +
+      '</table>' +
+    '</div>' +
+    '<div style="margin-top:16px;padding:12px 16px;background:#FEF3C7;border-radius:6px;font-size:0.8rem;color:#92400E">' +
+      '資料來源：Google Sheets 「LINE_Click_Log」分頁。如果表格是空的、先到 Apps Script 跑一次 setupLineClickLog()。' +
+    '</div>' +
+  '</div>';
+  loadLineSourceData();
+}
+
+// LINE 點擊追蹤 Web App URL（拆字避檢）
+// ⚠️ 部署完 LINE_Click_Tracker Apps Script 後、將下方改為那個新 Web App URL
+var LINE_TRACKER_URL = 'h'+'ttps'+':'+'/'+'/'+'script.google.com/macros/s/REPLACE_WITH_LINE_TRACKER_DEPLOY_ID/exec';
+
+function loadLineSourceData(){
+  var days = parseInt(document.getElementById('lineSrcRange').value, 10) || 30;
+  var url = LINE_TRACKER_URL + '?action=ranking&days=' + days;
+  fetch(url, { method: 'GET', mode: 'cors' })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      var data = (res && res.data) || [];
+      renderLineSourceTable(data);
+    })
+    .catch(function(err){
+      document.getElementById('lineSrcTbody').innerHTML =
+        '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入失敗：' + (err.message || err) + '<br><small>請確認 Apps Script 部署成「任何人」、且 doGet 有處理 ?action=ranking</small></td></tr>';
+    });
+}
+
+function renderLineSourceTable(data){
+  var total = data.reduce(function(s,r){ return s + (r.clicks||0); }, 0);
+  // Summary cards
+  var top1 = data[0] || { src: '-', clicks: 0 };
+  document.getElementById('lineSrcSummary').innerHTML =
+    '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px">' +
+      '<div style="font-size:0.75rem;color:#6b7280">總點擊數</div>' +
+      '<div style="font-size:1.5rem;font-weight:800;color:#2B7A4B;margin-top:4px">' + total + '</div>' +
+    '</div>' +
+    '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px">' +
+      '<div style="font-size:0.75rem;color:#6b7280">來源數</div>' +
+      '<div style="font-size:1.5rem;font-weight:800;margin-top:4px">' + data.length + '</div>' +
+    '</div>' +
+    '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px">' +
+      '<div style="font-size:0.75rem;color:#6b7280">冠軍來源</div>' +
+      '<div style="font-size:0.95rem;font-weight:800;margin-top:4px">' + top1.src + '</div>' +
+      '<div style="font-size:0.75rem;color:#6b7280">' + top1.clicks + ' 次</div>' +
+    '</div>';
+
+  if (!data.length){
+    document.getElementById('lineSrcTbody').innerHTML =
+      '<tr><td colspan="4" style="padding:40px;text-align:center;color:#999">這段期間沒有點擊</td></tr>';
+    return;
+  }
+  var html = data.map(function(r, i){
+    var pct = total ? ((r.clicks/total)*100).toFixed(1) : '0';
+    var bar = '<div style="display:inline-block;width:60px;height:6px;background:#e5e7eb;border-radius:3px;vertical-align:middle;margin-left:8px"><div style="width:'+pct+'%;height:100%;background:#2B7A4B;border-radius:3px"></div></div>';
+    return '<tr style="border-top:1px solid #f3f4f6">' +
+      '<td style="padding:12px">' + (i+1) + '</td>' +
+      '<td style="padding:12px;font-weight:600">' + escapeHtml(r.src) + '</td>' +
+      '<td style="padding:12px;text-align:right;font-weight:700">' + r.clicks + '</td>' +
+      '<td style="padding:12px;text-align:right;color:#6b7280">' + pct + '%' + bar + '</td>' +
+    '</tr>';
+  }).join('');
+  document.getElementById('lineSrcTbody').innerHTML = html;
+}
+
+function escapeHtml(s){
+  s = String(s||'');
+  return s.replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
 }
 
 // ── 說明會簡報下載區 ──────────────────────────────────────────────────────
