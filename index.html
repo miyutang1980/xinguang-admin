@@ -251,7 +251,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <script>
 // ── 設定 ──────────────────────────────────────────────────
 const ADMIN_USERS = {
-  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts','students','pickup','assignments','transfer','stats'] },
+  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts','students','pickup','assignments','transfer','stats','lineSrc'] },
   'teacher': { password: 'Tcm5XM0x0z', role: 'teacher', name: '教師', permissions: ['dashboard','booking','assess','trial'] },
   'sales': { password: 'SlLl9lHf39', role: 'sales', name: '業務', permissions: ['dashboard','inquiry','booking','camp','register'] },
   'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial','students','pickup','assignments','stats'] }
@@ -370,7 +370,8 @@ function applyPermissions() {
     'pickup': 'nav-pickup',
     'assignments': 'nav-assignments',
     'transfer': 'nav-transfer',
-    'stats': 'nav-stats'
+    'stats': 'nav-stats',
+    'lineSrc': 'nav-lineSrc'
   };
   Object.keys(navMap).forEach(function(key) {
     var el = document.getElementById(navMap[key]);
