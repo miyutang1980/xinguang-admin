@@ -843,6 +843,10 @@ window.SEMESTER_CLASSES = {
 };
 
 function renderClasses(el){
+  try {
+    var saved = localStorage.getItem('xinguangSemesterClasses');
+    if (saved) window.SEMESTER_CLASSES = JSON.parse(saved);
+  } catch(e){}
   var s = window.SEMESTER_CLASSES;
 
   function renderSlot(slotKey){
@@ -880,6 +884,7 @@ function renderClasses(el){
   html += '<div><h2 style="margin:0;font-size:1.2rem">📅 本學期開班資訊</h2><div style="font-size:0.78rem;color:#6B7280;margin-top:4px">太平新光分校 · 班別、上課時段與上課日</div></div>';
   html += '<div style="display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="padding:8px 16px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:600">🖨️ 列印</button>';
+  html += '<button onclick="openClassEditModal()" style="padding:8px 16px;background:#fff;color:#2B7A4B;border:1.5px solid #2B7A4B;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:700">✏️ 編輯班別</button>';
   html += '<a href="https://taipingxinguang.org/#classes" target="_blank" style="padding:8px 16px;background:#2B7A4B;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:600;text-decoration:none">🔗 看家長端</a>';
   html += '</div></div>';
 
@@ -948,6 +953,19 @@ function renderDocuments(el){
              onmouseover="this.style.background='#F0FDF4'" onmouseout="this.style.background='#fff'">
             <span style="font-size:1.4rem">👁️</span>
             <span>直接開啟預覽</span>
+          </a>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+          <a href="https://github.com/miyutang1980/xinguang-admin/upload/main" target="_blank"
+             style="display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#374151;padding:14px;border-radius:10px;font-weight:600;text-decoration:none;border:1.5px solid #D1D5DB">
+            <span style="font-size:1.2rem">⬆️</span>
+            <span>上傳新 PPT 或文件</span>
+          </a>
+          <a href="https://github.com/miyutang1980/xinguang-admin/blob/main/parent-presentation.pptx" target="_blank"
+             style="display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#374151;padding:14px;border-radius:10px;font-weight:600;text-decoration:none;border:1.5px solid #D1D5DB">
+            <span style="font-size:1.2rem">⚙️</span>
+            <span>管理 / 改名 / 刪除</span>
           </a>
         </div>
 
@@ -1048,6 +1066,9 @@ function renderInquiry(el) {
   const rows = d.inquiries;
   const statusOpts = ['待回電','已回電','已安排檢測','已報名','不感興趣'];
   el.innerHTML = `
+    <div style="margin-bottom:12px;display:flex;gap:10px">
+      <button class="btn btn-green" onclick="openInquiryForm()">＋ 手動新增問課</button>
+    </div>
     <div class="table-wrap">
       <div class="table-toolbar">
         <input type="text" id="searchInquiry" placeholder="搜尋姓名、電話、Email…" oninput="renderInquiry(document.getElementById('mainContent'))">
@@ -1058,7 +1079,7 @@ function renderInquiry(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>Email</th><th>孩子/預判程度</th><th>感興趣班型</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>Email</th><th>孩子/預判程度</th><th>感興趣班型</th><th>狀態</th><th>操作</th><th>編輯</th><th>刪除</th></tr></thead>
         <tbody id="inquiryTbody"></tbody>
       </table>
     </div>`;
@@ -1073,7 +1094,7 @@ function renderInquiry(el) {
 
   const tbody = document.getElementById('inquiryTbody');
   if(!filtered.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="empty-state"><div class="icon">📋</div><p>尚無資料</p></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="empty-state"><div class="icon">📋</div><p>尚無資料</p></td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -1096,7 +1117,8 @@ function renderInquiry(el) {
         </select>
       </td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showInquiryDetail(${realIdx})">查看</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('inquiries',${realIdx})" title="刪除這筆問課諮詢">❌</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openInquiryForm(${realIdx})" title="編輯這筆問課">✏️</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('inquiries',${realIdx})" title="刪除這筆問課諮詢">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -1153,6 +1175,9 @@ function renderBooking(el) {
   const rows = d.bookings;
   const statusOpts = ['待確認','已確認','已完成','已取消'];
   el.innerHTML = `
+    <div style="margin-bottom:12px;display:flex;gap:10px">
+      <button class="btn btn-green" onclick="openBookingForm()">＋ 手動新增預約</button>
+    </div>
     <div class="table-wrap">
       <div class="table-toolbar">
         <input type="text" placeholder="搜尋…" oninput="renderBooking(document.getElementById('mainContent'))" id="searchBooking">
@@ -1163,7 +1188,7 @@ function renderBooking(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>預約類型</th><th>日期</th><th>時段</th><th>孩子</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>預約類型</th><th>日期</th><th>時段</th><th>孩子</th><th>狀態</th><th>操作</th><th>編輯</th><th>刪除</th></tr></thead>
         <tbody id="bookingTbody"></tbody>
       </table>
     </div>`;
@@ -1177,7 +1202,7 @@ function renderBooking(el) {
 
   const tbody = document.getElementById('bookingTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無預約紀錄</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted)">尚無預約紀錄</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -1201,7 +1226,8 @@ function renderBooking(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">❌</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openBookingForm(${realIdx})" title="編輯預約">✏️</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -1399,13 +1425,16 @@ function renderCamp(el) {
   const rows = d.camp;
   const statusOpts = ['待確認','已確認','已繳費','已取消'];
   el.innerHTML = `
+    <div style="margin-bottom:12px;display:flex;gap:10px">
+      <button class="btn btn-green" onclick="openCampForm()">＋ 手動新增夏令營</button>
+    </div>
     <div class="table-wrap">
       <div class="table-toolbar">
         <input type="text" placeholder="搜尋…" id="searchCamp" oninput="renderCamp(document.getElementById('mainContent'))">
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th><th>刪除</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th><th>編輯</th><th>刪除</th></tr></thead>
         <tbody id="campTbody"></tbody>
       </table>
     </div>`;
@@ -1414,7 +1443,7 @@ function renderCamp(el) {
   let filtered = rows.filter(r => !kw || [r.pname,r.phone,r.sname].join(' ').includes(kw));
   const tbody = document.getElementById('campTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -1435,7 +1464,8 @@ function renderCamp(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showCampDetail(${realIdx})">查看</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('camp',${realIdx})" title="刪除這筆夏令營報名">❌</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openCampForm(${realIdx})" title="編輯夏令營">✏️</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('camp',${realIdx})" title="刪除這筆夏令營報名">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -1583,7 +1613,7 @@ function renderAssess(el) {
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>學生</th><th>年級</th><th>口說級數</th><th>口說分數</th><th>閱讀停止</th><th>筆試卷</th><th>筆試分數</th><th>分班結果</th><th>操作</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>學生</th><th>年級</th><th>口說級數</th><th>口說分數</th><th>閱讀停止</th><th>筆試卷</th><th>筆試分數</th><th>分班結果</th><th>操作</th><th>刪除</th></tr></thead>
         <tbody id="assessTbody"></tbody>
       </table>
     </div>`;
@@ -1592,7 +1622,7 @@ function renderAssess(el) {
   let filtered = rows.filter(r => !kw || [r.studentName,r.grade].join(' ').includes(kw));
   const tbody = document.getElementById('assessTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted)">尚無檢測紀錄</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted)">尚無檢測紀錄</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
@@ -1612,6 +1642,7 @@ function renderAssess(el) {
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_assessDelete(${realIdx})" title="刪除這筆檢測紀錄">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -5706,6 +5737,295 @@ function _adminPayload(extra) {
     admin_username: u.username || '',
     admin_role: u.role || ''
   }, extra || {});
+}
+
+// ===== v2026.05.06 全頁通用 CRUD helpers =====
+var SHEETS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/sheets';
+async function sheetsApi(action, sheet, opts) {
+  opts = opts || {};
+  try {
+    var res = await fetch(SHEETS_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(_adminPayload(Object.assign({ action: action, sheet: sheet }, opts)))
+    });
+    return await res.json();
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+// 軟刪 localStorage key prefix
+function _softDelKey(coll){ return 'xinguangSoft_' + coll; }
+function softDeleteAdd(coll, id) {
+  var k = _softDelKey(coll);
+  var arr = JSON.parse(localStorage.getItem(k) || '[]');
+  if (arr.indexOf(id) === -1) arr.push(id);
+  localStorage.setItem(k, JSON.stringify(arr));
+}
+function softDeleteRemove(coll, id) {
+  var k = _softDelKey(coll);
+  var arr = JSON.parse(localStorage.getItem(k) || '[]');
+  arr = arr.filter(function(x){ return x !== id; });
+  localStorage.setItem(k, JSON.stringify(arr));
+}
+function softDeleteList(coll) {
+  return JSON.parse(localStorage.getItem(_softDelKey(coll)) || '[]');
+}
+function softDeleteHas(coll, id) {
+  return softDeleteList(coll).indexOf(id) >= 0;
+}
+
+// 雙重確認硬刪 (要求輸入名稱)
+function confirmHardDelete(label, expectedName, onConfirm) {
+  var typed = prompt('警告：這個動作會从 Sheets 永久刪除。\n\n請輸入「' + expectedName + '」以確認刪除 ' + label + '：');
+  if (typed === null) return;
+  if (typed.trim() !== expectedName.trim()) {
+    alert('名稱不符，取消刪除');
+    return;
+  }
+  onConfirm();
+}
+
+// 通用表單 modal。fields = [{key, label, type: text|number|select|textarea|checkbox, options, required}]
+var _formModalCb = null;
+function openFormModal(title, fields, initial, onSave) {
+  var bodyHtml = '<form id="_genForm" onsubmit="return _genFormSubmit(event)">';
+  fields.forEach(function(f){
+    var v = (initial && initial[f.key] != null) ? initial[f.key] : '';
+    bodyHtml += '<div style="margin-bottom:12px">';
+    bodyHtml += '<label style="display:block;font-size:0.82rem;color:#444;margin-bottom:4px;font-weight:600">' + f.label + (f.required?' <span style="color:#c00">*</span>':'') + '</label>';
+    if (f.type === 'select') {
+      bodyHtml += '<select name="' + f.key + '" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"' + (f.required?' required':'') + '>';
+      (f.options||[]).forEach(function(o){
+        var ov = typeof o === 'string' ? o : o.value;
+        var ol = typeof o === 'string' ? o : o.label;
+        bodyHtml += '<option value="' + ov + '"' + (String(v)===String(ov)?' selected':'') + '>' + ol + '</option>';
+      });
+      bodyHtml += '</select>';
+    } else if (f.type === 'textarea') {
+      bodyHtml += '<textarea name="' + f.key + '" rows="3" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"' + (f.required?' required':'') + '>' + (v||'') + '</textarea>';
+    } else if (f.type === 'checkbox') {
+      bodyHtml += '<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="' + f.key + '"' + (v===true||v==='TRUE'||v==='true'?' checked':'') + '> 啟用</label>';
+    } else {
+      bodyHtml += '<input type="' + (f.type||'text') + '" name="' + f.key + '" value="' + String(v).replace(/"/g,'&quot;') + '" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"' + (f.required?' required':'') + '>';
+    }
+    bodyHtml += '</div>';
+  });
+  bodyHtml += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+  bodyHtml += '<button type="button" class="btn btn-outline" onclick="closeModal()">取消</button>';
+  bodyHtml += '<button type="submit" class="btn btn-green">儲存</button>';
+  bodyHtml += '</div></form>';
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').innerHTML = bodyHtml;
+  document.getElementById('modalOverlay').classList.add('open');
+  _formModalCb = function(formData){
+    var out = {};
+    fields.forEach(function(f){
+      if (f.type === 'checkbox') {
+        out[f.key] = formData.get(f.key) ? 'TRUE' : 'FALSE';
+      } else {
+        out[f.key] = formData.get(f.key);
+      }
+    });
+    onSave(out);
+  };
+}
+function _genFormSubmit(ev) {
+  ev.preventDefault();
+  var form = ev.target;
+  var fd = new FormData(form);
+  if (_formModalCb) _formModalCb(fd);
+  return false;
+}
+
+// ====================================================================
+// v2026.05.06 各表單通用 新增 / 編輯 / 刪除 (本地 + 嘗試寫回 Sheets)
+// ====================================================================
+// 嘗試寫回 HQ Sheets — 失敗給警告但不擋
+async function _formsDataWrite(action, collection, payload, rowIndex) {
+  try {
+    var body = {
+      action: action,
+      admin_username: (_currentUser && _currentUser.username) || 'admin',
+      admin_role: (_currentUser && _currentUser.role) || 'admin',
+      collection: collection,
+      data: payload
+    };
+    if (rowIndex) body.row_index = rowIndex;
+    var res = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    var r = {};
+    try { r = await res.json(); } catch(e){}
+    return { ok: res.ok && r.success !== false, msg: r.error || '' };
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
+// 問課諮詢 新增 / 編輯
+function openInquiryForm(idx) {
+  var d = loadData();
+  var initial = (idx != null && d.inquiries[idx]) ? d.inquiries[idx] : {};
+  var fields = [
+    { key:'parent', label:'家長姓名', type:'text', required:true },
+    { key:'phone',  label:'電話',     type:'text', required:true },
+    { key:'email',  label:'Email',    type:'text' },
+    { key:'line',   label:'LINE',     type:'text' },
+    { key:'classes',label:'感興趣班型', type:'text' },
+    { key:'question',label:'補充說明', type:'textarea' },
+    { key:'status', label:'狀態',     type:'select', options:['待回電','已回電','已安排檢測','已報名','不感興趣'] }
+  ];
+  openFormModal((idx!=null?'編輯':'新增')+'問課諮詢', fields, initial, async function(out){
+    var d2 = loadData();
+    if (idx != null) {
+      Object.assign(d2.inquiries[idx], out);
+    } else {
+      out.ts = new Date().toLocaleString('zh-TW');
+      d2.inquiries.push(out);
+    }
+    saveData(d2);
+    closeModal();
+    showToast('已儲存（本地）');
+    var rowIdx = (idx!=null && d2.inquiries[idx]._rowIndex) ? d2.inquiries[idx]._rowIndex : null;
+    var r = await _formsDataWrite(idx!=null?'update':'create', 'inquiries', out, rowIdx);
+    if (!r.ok) showToast('已存本地，雲端寫入未啟用'); else showToast('已同步雲端');
+    renderInquiry(document.getElementById('mainContent'));
+  });
+}
+
+// 預約 新增 / 編輯
+function openBookingForm(idx) {
+  var d = loadData();
+  var initial = (idx != null && d.bookings[idx]) ? d.bookings[idx] : {};
+  var fields = [
+    { key:'parent', label:'家長姓名', type:'text', required:true },
+    { key:'phone',  label:'電話',     type:'text', required:true },
+    { key:'child',  label:'孩子姓名', type:'text' },
+    { key:'bookingType', label:'預約類型', type:'select', options:['參訪校區','英文程度檢測','課程體驗','參訪校區 + 英文程度檢測'] },
+    { key:'date',   label:'日期 (YYYY-MM-DD)', type:'text', required:true },
+    { key:'slot',   label:'時段',     type:'text', required:true },
+    { key:'cls',    label:'感興趣班型', type:'text' },
+    { key:'note',   label:'備註',     type:'textarea' },
+    { key:'status', label:'狀態',     type:'select', options:['待確認','已確認','已完成','已取消'] }
+  ];
+  openFormModal((idx!=null?'編輯':'新增')+'預約紀錄', fields, initial, async function(out){
+    var d2 = loadData();
+    if (idx != null) {
+      Object.assign(d2.bookings[idx], out);
+    } else {
+      out.ts = new Date().toLocaleString('zh-TW');
+      d2.bookings.push(out);
+    }
+    saveData(d2);
+    closeModal();
+    showToast('已儲存（本地）');
+    var rowIdx = (idx!=null && d2.bookings[idx]._rowIndex) ? d2.bookings[idx]._rowIndex : null;
+    var r = await _formsDataWrite(idx!=null?'update':'create', 'bookings', out, rowIdx);
+    if (!r.ok) showToast('已存本地，雲端寫入未啟用'); else showToast('已同步雲端');
+    renderBooking(document.getElementById('mainContent'));
+  });
+}
+
+// 夏令營 新增 / 編輯
+function openCampForm(idx) {
+  var d = loadData();
+  var initial = (idx != null && d.camp[idx]) ? d.camp[idx] : {};
+  var fields = [
+    { key:'pname',  label:'家長姓名', type:'text', required:true },
+    { key:'phone',  label:'電話',     type:'text', required:true },
+    { key:'line',   label:'LINE',     type:'text' },
+    { key:'sname',  label:'學生姓名', type:'text', required:true },
+    { key:'grade',  label:'年級',     type:'text' },
+    { key:'courses',label:'報名期別 (如: 7/1-7/14)', type:'textarea' },
+    { key:'diet',   label:'飲食需求', type:'text' },
+    { key:'earlyBird', label:'早鳥 (TRUE/FALSE)', type:'text' },
+    { key:'status', label:'狀態',     type:'select', options:['待確認','已確認','已繳費','已取消'] }
+  ];
+  openFormModal((idx!=null?'編輯':'新增')+'夏令營報名', fields, initial, async function(out){
+    var d2 = loadData();
+    if (idx != null) {
+      Object.assign(d2.camp[idx], out);
+    } else {
+      out.ts = new Date().toLocaleString('zh-TW');
+      d2.camp.push(out);
+    }
+    saveData(d2);
+    closeModal();
+    showToast('已儲存（本地）');
+    var rowIdx = (idx!=null && d2.camp[idx]._rowIndex) ? d2.camp[idx]._rowIndex : null;
+    var r = await _formsDataWrite(idx!=null?'update':'create', 'camp', out, rowIdx);
+    if (!r.ok) showToast('已存本地，雲端寫入未啟用'); else showToast('已同步雲端');
+    renderCamp(document.getElementById('mainContent'));
+  });
+}
+
+// 課程班別 編輯 modal（本地變更 SEMESTER_CLASSES，持久化收近 localStorage）
+function openClassEditModal() {
+  // 讀取 localStorage 或預設值
+  try {
+    var saved = localStorage.getItem('xinguangSemesterClasses');
+    if (saved) window.SEMESTER_CLASSES = JSON.parse(saved);
+  } catch(e){}
+  var s = window.SEMESTER_CLASSES;
+  var jsonText = JSON.stringify(s, null, 2);
+  var html = '<div style="max-width:760px">';
+  html += '<div style="background:#FFF7ED;border-left:4px solid #E8863A;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:0.84rem;color:#78350F;line-height:1.6">';
+  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存於本機（該資料未備份到云端）。以下為原始資料可直接修改，儲存後頁面會重新讀取。';
+  html += '</div>';
+  html += '<textarea id="_classesJson" rows="22" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
+  html += '<div id="_classesMsg" style="font-size:0.82rem;color:#DC2626;margin-top:8px;min-height:18px"></div>';
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">';
+  html += '<button class="btn btn-outline" onclick="closeModal()">取消</button>';
+  html += '<button class="btn btn-green" onclick="_saveClassesJson()">儲存班別</button>';
+  html += '</div></div>';
+  document.getElementById('modalTitle').textContent = '編輯課程班別';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+function _saveClassesJson() {
+  var msg = document.getElementById('_classesMsg');
+  var txt = (document.getElementById('_classesJson')||{}).value || '';
+  try {
+    var obj = JSON.parse(txt);
+    if (typeof obj !== 'object' || !obj) throw new Error('資料格式錯誤');
+    window.SEMESTER_CLASSES = obj;
+    localStorage.setItem('xinguangSemesterClasses', JSON.stringify(obj));
+    closeModal();
+    showToast('班別已更新');
+    renderClasses(document.getElementById('mainContent'));
+  } catch(e) {
+    msg.textContent = 'JSON 格式錯誤：' + e.message;
+  }
+}
+
+// 分級檢測 軟刪 / 硬刪
+async function _assessDelete(idx) {
+  var d = loadData();
+  var r = d.assessments[idx];
+  if (!r) return;
+  var name = r.studentName || '（無姓名）';
+  var choice = await _confirmDialog({
+    title: '刪除檢測紀錄：' + name,
+    message: '請選擇刪除方式：',
+    options: [
+      { label: '軟刪除（隱藏，可回復）', value: 'soft', color: '#0EA5E9' },
+      { label: '硬刪除（從本機永久移除）', value: 'hard', color: '#DC2626' },
+      { label: '取消', value: '', color: '#6B7280' }
+    ]
+  });
+  if (!choice) return;
+  if (choice === 'hard') {
+    var typed = prompt('硬刪除無法復原。請輸入「' + name + '」確認：');
+    if (typed !== name) { alert('姓名不符'); return; }
+  }
+  d.assessments.splice(idx, 1);
+  saveData(d);
+  showToast('已' + (choice==='soft'?'軟':'硬') + '刪除');
+  renderAssess(document.getElementById('mainContent'));
 }
 
 async function _pickupCall(url, payload) {
