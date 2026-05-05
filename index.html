@@ -5967,8 +5967,12 @@ async function renderPickupSchedule(el) {
             5 條路線 × 每日中午/下午班次 · 假日週末自動標休 · 編輯後自動儲存
           </div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select id="ps-filter-week" style="padding:6px 10px;border:1px solid #d4d1ca;border-radius:4px"></select>
+          <button id="ps-add-day" style="padding:6px 12px;background:#0F766E;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">＋ 新增日期</button>
+          <button id="ps-add-route" style="padding:6px 12px;background:#7C3AED;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">＋ 新增單一路線</button>
+          <button id="ps-copy-week" style="padding:6px 12px;background:#D97706;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">複製整週</button>
+          <button id="ps-mark-rest" style="padding:6px 12px;background:#9CA3AF;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">整週設休</button>
           <button id="ps-refresh" style="padding:6px 14px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer">🔄 重新載入</button>
         </div>
       </div>
@@ -6213,6 +6217,118 @@ async function renderPickupSchedule(el) {
   }
 
   document.getElementById('ps-refresh').onclick = loadAll;
+
+  // ─── A1: 新增日期(一鍵加 5 條路線) ───
+  document.getElementById('ps-add-day').onclick = async () => {
+    const dateStr = prompt('新增日期 (YYYY-MM-DD)
+依該日週幾自動套用週一~五班表:', new Date().toISOString().slice(0,10));
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    if (allRows.some(r => r.date === dateStr)) {
+      alert('該日期已存在排班，請到表格重新編輯。');
+      return;
+    }
+    const d = new Date(dateStr + 'T00:00:00');
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) {
+      if (!confirm('該日為週末，仍要加嗎?')) return;
+    }
+    const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
+    const routes = [
+      {name:'走路接送', cap:''},
+      {name:'交通車A (RDW-5365)', cap:'6'},
+      {name:'交通車B (RDW-1655)', cap:'4'},
+      {name:'交通車C (RFD-9763)', cap:'4'},
+      {name:'小巴', cap:'8'},
+    ];
+    const status = (dow === 0 || dow === 6) ? '休' : '上';
+    const newRows = routes.map(rt => ({
+      row_index: 99999,
+      fields: {
+        date: dateStr, weekday: wdMap[dow], status, route: rt.name, capacity: rt.cap,
+        noon_vehicle:'', noon_driver:'', noon_driver2:'', noon_school:'', noon_count:'', noon_time:'',
+        pm_vehicle:'', pm_driver:'', pm_driver2:'', pm_school:'', pm_count:'', pm_time:'',
+        remark:''
+      }
+    }));
+    document.getElementById('ps-status').textContent = '新增中…';
+    const r = await api({action:'append', rows: newRows});
+    if (r && r.success) { showToast('✅ 新增 ' + dateStr + ' × 5 條路線'); await loadAll(); }
+    else alert('新增失敗: ' + ((r&&r.error)||'未知錯誤'));
+  };
+
+  // ─── A2: 新增單一路線 ───
+  document.getElementById('ps-add-route').onclick = async () => {
+    const dateStr = prompt('日期 (YYYY-MM-DD)?', new Date().toISOString().slice(0,10));
+    if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    const routeName = prompt('路線名稱?例: 臨時交通車 / 越野車 / B車認加', '');
+    if (!routeName || !routeName.trim()) return;
+    const cap = prompt('載客上限 (可留空)', '');
+    const d = new Date(dateStr + 'T00:00:00');
+    const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
+    const r = await api({action:'append', rows:[{
+      row_index:99999,
+      fields:{date:dateStr, weekday:wdMap[d.getDay()], status:'上', route:routeName.trim(), capacity:cap.trim(),
+        noon_vehicle:'', noon_driver:'', noon_driver2:'', noon_school:'', noon_count:'', noon_time:'',
+        pm_vehicle:'', pm_driver:'', pm_driver2:'', pm_school:'', pm_count:'', pm_time:'', remark:''}
+    }]});
+    if (r && r.success) { showToast('✅ 新增路線完成'); await loadAll(); }
+    else alert('新增失敗: ' + ((r&&r.error)||'未知錯誤'));
+  };
+
+  // ─── A3: 複製整週 ───
+  document.getElementById('ps-copy-week').onclick = async () => {
+    const srcMon = prompt('來源週次(週一日期, YYYY-MM-DD)?', document.getElementById('ps-filter-week').value || '');
+    if (!srcMon || !/^\d{4}-\d{2}-\d{2}$/.test(srcMon)) return;
+    const dstMon = prompt('目標週次(週一日期, YYYY-MM-DD)?', '');
+    if (!dstMon || !/^\d{4}-\d{2}-\d{2}$/.test(dstMon)) return;
+    const srcD = new Date(srcMon + 'T00:00:00');
+    const dstD = new Date(dstMon + 'T00:00:00');
+    const offset = Math.round((dstD - srcD) / 86400000);
+    if (offset === 0) { alert('來源與目標同週'); return; }
+    const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
+    const newRows = [];
+    allRows.forEach(r => {
+      const rd = new Date(r.date + 'T00:00:00');
+      if (rd < srcD || rd > new Date(srcD.getTime() + 4*86400000)) return;
+      const newD = new Date(rd.getTime() + offset*86400000);
+      const newDate = newD.toISOString().slice(0,10);
+      if (allRows.some(x => x.date === newDate && x.route === r.route)) return; // 已存在跳過
+      newRows.push({row_index:99999, fields:{
+        date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
+        noon_vehicle:r.noon_vehicle||'', noon_driver:r.noon_driver||'', noon_driver2:r.noon_driver2||'',
+        noon_school:r.noon_school||'', noon_count:String(r.noon_count||''), noon_time:r.noon_time||'',
+        pm_vehicle:r.pm_vehicle||'', pm_driver:r.pm_driver||'', pm_driver2:r.pm_driver2||'',
+        pm_school:r.pm_school||'', pm_count:String(r.pm_count||''), pm_time:r.pm_time||'',
+        remark:r.remark||''
+      }});
+    });
+    if (newRows.length === 0) { alert('來源週無資料 或 目標週已存在'); return; }
+    if (!confirm('將複製 ' + newRows.length + ' 筆排班到 ' + dstMon + ' 那週，確定?')) return;
+    document.getElementById('ps-status').textContent = '複製中…';
+    const r = await api({action:'append', rows:newRows});
+    if (r && r.success) { showToast('✅ 已複製 ' + newRows.length + ' 筆'); await loadAll(); }
+    else alert('複製失敗: ' + ((r&&r.error)||'未知錯誤'));
+  };
+
+  // ─── A4: 整週設休 ───
+  document.getElementById('ps-mark-rest').onclick = async () => {
+    const week = document.getElementById('ps-filter-week').value;
+    if (!week) { alert('請先選週次'); return; }
+    if (!confirm('將 ' + week + ' 那週所有路線設為「休」?適用於國定假日、毕業學期。')) return;
+    const wkStart = new Date(week + 'T00:00:00');
+    const wkEnd = new Date(wkStart.getTime() + 4*86400000);
+    const targets = allRows.filter(r => {
+      const d = new Date(r.date + 'T00:00:00');
+      return d >= wkStart && d <= wkEnd && r.status !== '休';
+    });
+    const batch = targets.map(r => ({row_index:r.row_index, fields:{status:'休'}}));
+    if (batch.length === 0) { alert('本週已全部為休'); return; }
+    document.getElementById('ps-status').textContent = '設休中…';
+    const r = await api({action:'batch_save', rows:batch});
+    if (r && r.success) { showToast('✅ 已設 ' + r.updated + ' 筆為休'); await loadAll(); }
+    else alert('失敗: ' + ((r&&r.error)||'未知錯誤'));
+  };
+
   await loadAll();
 }
 
