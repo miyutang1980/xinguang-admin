@@ -2128,35 +2128,43 @@ function importJSON() {
 }
 
 
-// ── 體驗課排班 ────────────────────────────────────────────
-var _trialSchedule = {}; // { 'YYYY-MM-DD': { 'HH:MM-HH:MM': '班級' } }
+// ── 體驗課排班(v2026.05.05 重寫,串 Sheets 後端 W18)─────────
+var TRIAL_API = 'https://miyutang.app.n8n.cloud/webhook/admin/trial-schedule';
+var _trialTpl = [];          // 固定班表(從 Sheets 讀)
+var _trialOverrides = [];    // 個別日期覆寫
+
+async function _trialApi(payload) {
+  try {
+    const res = await fetch(TRIAL_API, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(_adminPayload(payload))
+    });
+    return await res.json();
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
 
 function getTrialDatesAdmin(){
   var dates=[];
-  // 國定假日（每年固定，依需要擴充）
   var holidays=[
-    // 2026
     '2026-01-01','2026-01-27','2026-01-28','2026-01-29','2026-01-30',
     '2026-01-31','2026-02-01','2026-02-02',
     '2026-04-03','2026-04-04','2026-04-05','2026-04-06',
     '2026-04-25','2026-05-01','2026-06-12','2026-06-19',
     '2026-05-27','2026-06-15','2026-06-26',
     '2026-09-25','2026-09-26','2026-09-27','2026-09-28',
-    '2026-10-09','2026-10-10','2026-10-11',
-    '2026-12-25',
-    // 2027（預留）
+    '2026-10-09','2026-10-10','2026-10-11','2026-12-25',
     '2027-01-01','2027-02-15','2027-02-16','2027-02-17','2027-02-18',
     '2027-02-19','2027-02-20','2027-02-21',
-    '2027-04-05','2027-04-04',
-    '2027-05-01','2027-06-09','2027-09-17','2027-10-01','2027-10-10',
-    '2027-12-25'
+    '2027-04-05','2027-04-04','2027-05-01','2027-06-09',
+    '2027-09-17','2027-10-01','2027-10-10','2027-12-25'
   ];
-  // 範圍：今天起 3 個月（90 天）
   var today=new Date();
   var startMs=Date.UTC(today.getUTCFullYear(),today.getUTCMonth(),today.getUTCDate());
-  var endMs=startMs+180*24*60*60*1000; // 半年
-  var _cur=new Date(startMs);
-  var _end=new Date(endMs);
+  var endMs=startMs+90*24*60*60*1000;
+  var _cur=new Date(startMs), _end=new Date(endMs);
   while(_cur<=_end){
     var dow=_cur.getUTCDay();
     var ds=_cur.toISOString().slice(0,10);
@@ -2166,157 +2174,220 @@ function getTrialDatesAdmin(){
   return dates;
 }
 
-// 體驗課預設班次：由後台設定，預設空
-function getDefaultTrialClass(ds,slot){ return []; }
+async function renderTrial(el) {
+  el.innerHTML = '<div style="padding:24px;text-align:center;color:#888">載入中…</div>';
+  // 並行讀兩個來源
+  var [tplResp, ovrResp] = await Promise.all([
+    _trialApi({action:'list_template'}),
+    _trialApi({action:'list_overrides'})
+  ]);
+  if (!tplResp.success) { el.innerHTML = '<div style="padding:24px;color:#c00">載入失敗:'+(tplResp.error||'未知')+'</div>'; return; }
+  _trialTpl = tplResp.rows || [];
+  _trialOverrides = (ovrResp && ovrResp.rows) || [];
 
-function renderTrial(el) {
-  var slots3=['14:00-15:00','16:30-17:30','18:30-19:30'];
-  var dates=getTrialDatesAdmin();
-  var dowCn=['','一','二','三','四','五','六','日'];
-  var customCount=Object.values(_trialSchedule).reduce(function(a,v){return a+Object.keys(v).length;},0);
-
-  el.innerHTML=`
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
       <div>
-        <p style="font-size:0.85rem;color:var(--text-muted);margin-top:4px">直接在格子輸入班級名稱，留空沿用白板預設。設定後按「發布到主網站」。</p>
+        <h2 style="margin:0;font-size:1.4rem">體驗課排班管理</h2>
+        <p style="font-size:0.82rem;color:var(--text-muted);margin:4px 0 0">
+          固定班表 = 每週通用範本 / 當日覆寫 = 個別日期特例(取消、換班、加班)
+        </p>
       </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-outline" onclick="clearTrialSchedule()">清除全部自訂</button>
-        <button class="btn btn-green" onclick="publishTrialSchedule()">🚀 套用到主網站</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="renderTrial(document.getElementById('mainContent'))">重新載入</button>
       </div>
     </div>
-    <div style="background:#F0FDF4;border:1.5px solid var(--green);border-radius:10px;padding:12px 16px;margin-bottom:20px;font-size:0.85rem" id="trialPublishInfo" style="display:none">
-      <strong style="color:var(--green-dark)">📋 已自訂 ${customCount} 個時段班次</strong>
-      <span style="color:var(--text-muted);margin-left:8px">灰色格子 = 白板預設，綠色 = 你設定的</span>
+
+    <div style="display:flex;gap:6px;border-bottom:2px solid #e5e7eb;margin-bottom:14px">
+      <button id="trial-tab-tpl" class="trial-tab-btn" data-tab="tpl"
+        style="padding:8px 16px;border:none;background:#01696F;color:#fff;border-radius:6px 6px 0 0;cursor:pointer">固定班表(${_trialTpl.length})</button>
+      <button id="trial-tab-ovr" class="trial-tab-btn" data-tab="ovr"
+        style="padding:8px 16px;border:none;background:#e5e7eb;color:#333;border-radius:6px 6px 0 0;cursor:pointer">個別日期覆寫(${_trialOverrides.length})</button>
+      <button id="trial-tab-cal" class="trial-tab-btn" data-tab="cal"
+        style="padding:8px 16px;border:none;background:#e5e7eb;color:#333;border-radius:6px 6px 0 0;cursor:pointer">日曆檢視</button>
     </div>
-    <div class="table-wrap" style="overflow-x:auto">
-      <table class="data-table" id="trialTable" style="min-width:650px">
-        <thead>
+    <div id="trial-panel"></div>
+  `;
+
+  document.querySelectorAll('.trial-tab-btn').forEach(b => b.onclick = () => {
+    document.querySelectorAll('.trial-tab-btn').forEach(x => { x.style.background='#e5e7eb'; x.style.color='#333'; });
+    b.style.background = '#01696F'; b.style.color = '#fff';
+    var tab = b.dataset.tab;
+    if (tab === 'tpl') renderTrialTplPanel();
+    else if (tab === 'ovr') renderTrialOvrPanel();
+    else renderTrialCalPanel();
+  });
+  renderTrialTplPanel();
+}
+
+function renderTrialTplPanel() {
+  var p = document.getElementById('trial-panel');
+  var weekdayCn = ['每週通用','週一','週二','週三','週四','週五','週六','週日'];
+  var rows = _trialTpl.map(s => `
+    <tr data-row="${s.row_index}">
+      <td style="padding:6px"><input data-f="weekday" type="number" min="0" max="7" value="${s.weekday||'0'}" style="width:50px"></td>
+      <td style="padding:6px;color:#888;font-size:0.78rem">${weekdayCn[parseInt(s.weekday||'0')]||''}</td>
+      <td style="padding:6px"><input data-f="time_start" value="${s.time_start||''}" style="width:70px"></td>
+      <td style="padding:6px"><input data-f="time_end" value="${s.time_end||''}" style="width:70px"></td>
+      <td style="padding:6px"><input data-f="class_name" value="${(s.class_name||'').replace(/"/g,'&quot;')}" style="width:200px"></td>
+      <td style="padding:6px"><input data-f="teacher" value="${s.teacher||''}" style="width:80px"></td>
+      <td style="padding:6px"><input data-f="classroom" value="${s.classroom||''}" style="width:60px"></td>
+      <td style="padding:6px"><input data-f="is_active" value="${s.is_active||'TRUE'}" style="width:60px"></td>
+      <td style="padding:6px"><input data-f="remarks" value="${(s.remarks||'').replace(/"/g,'&quot;')}" style="width:140px"></td>
+      <td style="padding:6px;text-align:center">
+        <button class="btn-tpl-save" data-slot-id="${s.slot_id}">存</button>
+        <button class="btn-tpl-del" data-row="${s.row_index}" style="color:#c00">刪</button>
+      </td>
+    </tr>`).join('');
+  p.innerHTML = `
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:0.85rem;color:#666">編輯後按「存」儲存。weekday: 0=每週通用 / 1-5=週一到五</div>
+      <button class="btn btn-green" id="trial-tpl-add">新增一筆</button>
+    </div>
+    <div style="overflow:auto;max-height:60vh;background:#fff;border:1px solid #d4d1ca;border-radius:6px">
+      <table style="width:100%;font-size:0.85rem">
+        <thead style="background:#f7faf9;position:sticky;top:0">
           <tr>
-            <th>日期</th>
-            ${slots3.map(s=>`<th style="text-align:center;min-width:180px">${s}<div style="font-size:0.7rem;font-weight:400;color:var(--text-muted);margin-top:2px">班1 | 班2 | 班3 | 班4（各1名額）</div></th>`).join('')}
+            <th style="padding:8px">週</th><th></th>
+            <th>開始</th><th>結束</th><th>班別名稱</th>
+            <th>老師</th><th>教室</th><th>啟用</th><th>備註</th><th>操作</th>
           </tr>
         </thead>
-        <tbody id="trialTbody"></tbody>
+        <tbody>${rows || '<tr><td colspan="10" style="padding:24px;text-align:center;color:#888">尚無班表,請按右上「新增一筆」</td></tr>'}</tbody>
       </table>
-    </div>
-    <div id="trialSyncBox" style="display:none;margin-top:20px;background:#F0FDF4;border:1.5px solid var(--green);border-radius:10px;padding:16px">
-      <div style="font-weight:700;color:var(--green-dark);margin-bottom:8px">✅ 班次已同步到主網站！</div>
-      <p style="font-size:0.85rem;color:var(--text);line-height:1.7;margin-bottom:10px">
-        主網站已自動開啟並套用新班次。<br>
-        <span style="color:var(--text-muted);font-size:0.8rem">如果主網站沒有自動開啟，請點下方按鈕手動開啟一次。</span>
-      </p>
-      <input type="hidden" id="trialSyncUrl">
-      <div style="margin-top:10px">
-        <a id="trialSyncLink" href="#" target="_blank" rel="noopener" class="btn btn-outline" style="font-size:0.82rem;text-decoration:none;display:inline-flex">🔗 手動開啟主網站同步</a>
-      </div>
-      <div style="margin-top:8px;font-size:0.78rem;color:var(--text-muted)">
-        或複製連結在瀏覽器開啟：<br>
-        <input id="trialSyncUrlDisplay" readonly onclick="this.select()" style="width:100%;margin-top:4px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:0.75rem;background:#F7FAFC">
-      </div>
     </div>
   `;
 
-  // 渲染表格
-  var tbody=document.getElementById('trialTbody');
-  dates.forEach(function(ds){
-    var d=new Date(ds+'T00:00:00');
-    var mm=d.getMonth()+1, dd=d.getDate(), wd=dowCn[d.getDay()];
-    var tr=document.createElement('tr');
-    // 日期欄
-    var dateTd=document.createElement('td');
-    dateTd.style.cssText='white-space:nowrap;font-weight:700;vertical-align:middle;padding:8px 12px 8px 0';
-    dateTd.textContent=mm+'/'+dd+'（'+wd+'）';
-    tr.appendChild(dateTd);
-    // 每個時段：4個班輸入格
-    slots3.forEach(function(slot){
-      var saved=(_trialSchedule[ds]&&_trialSchedule[ds][slot]);
-      // 支援陣列或舊字串格式
-      if(!saved) saved=['','','',''];
-      else if(!Array.isArray(saved)) saved=[saved,'','',''];
-      else { saved=saved.slice(); while(saved.length<4) saved.push(''); }
+  document.getElementById('trial-tpl-add').onclick = async () => {
+    var ts = prompt('開始時間 (HH:MM)?','14:00');
+    if (!ts) return;
+    var te = prompt('結束時間 (HH:MM)?','15:30');
+    if (!te) return;
+    var cn = prompt('班別名稱?','Immersion G2');
+    if (!cn) return;
+    var wd = prompt('週幾?(0=每週通用, 1-5=週一到五)','0');
+    var r = await _trialApi({action:'save_template_slot', weekday:wd||'0', time_start:ts, time_end:te, class_name:cn});
+    if (r.success) { showToast('已新增'); renderTrial(document.getElementById('mainContent')); }
+    else alert('新增失敗:'+(r.error||'未知'));
+  };
 
-      var td=document.createElement('td');
-      td.style.cssText='padding:6px 8px;vertical-align:middle';
-      var wrap=document.createElement('div');
-      wrap.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:4px';
-      for(var i=0;i<4;i++){
-        (function(idx){
-          var val=saved[idx]||'';
-          var inp=document.createElement('input');
-          inp.type='text';
-          inp.value=val;
-          inp.placeholder='班'+(idx+1);
-          inp.dataset.date=ds;
-          inp.dataset.slot=slot;
-          inp.dataset.idx=idx;
-          var hasVal=val&&val.trim();
-          inp.style.cssText='width:100%;padding:5px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:0.8rem;text-align:center;font-family:inherit;background:'+(hasVal?'#F0FDF4':'#fff')+';color:'+(hasVal?'var(--green-dark)':'var(--text)');
-          inp.addEventListener('change', function(){
-            var ds2=this.dataset.date, sl=this.dataset.slot, i2=parseInt(this.dataset.idx);
-            if(!_trialSchedule[ds2]) _trialSchedule[ds2]={};
-            var arr=Array.isArray(_trialSchedule[ds2][sl])?_trialSchedule[ds2][sl].slice():['','','',''];
-            while(arr.length<4) arr.push('');
-            arr[i2]=this.value.trim();
-            var anyVal=arr.some(function(v){return v&&v.trim();});
-            if(anyVal){
-              _trialSchedule[ds2][sl]=arr;
-              this.style.background=this.value.trim()?'#F0FDF4':'#fff';
-              this.style.color=this.value.trim()?'var(--green-dark)':'var(--text)';
-            } else {
-              delete _trialSchedule[ds2][sl];
-              if(Object.keys(_trialSchedule[ds2]).length===0) delete _trialSchedule[ds2];
-              this.style.background='#fff'; this.style.color='var(--text)';
-            }
-            var cnt=Object.values(_trialSchedule).reduce(function(a,v2){return a+Object.keys(v2).length;},0);
-            var info=document.getElementById('trialPublishInfo');
-            if(info) info.querySelector('strong').textContent='📋 已自訂 '+cnt+' 個時段';
-          });
-          inp.addEventListener('focus',function(){ this.style.borderColor='var(--green)'; });
-          inp.addEventListener('blur', function(){ this.style.borderColor='var(--border)'; });
-          wrap.appendChild(inp);
-        })(i);
-      }
-      td.appendChild(wrap);
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
+  document.querySelectorAll('.btn-tpl-save').forEach(btn => btn.onclick = async () => {
+    var tr = btn.closest('tr');
+    var data = { action:'save_template_slot', slot_id: btn.dataset.slotId };
+    tr.querySelectorAll('input[data-f]').forEach(inp => { data[inp.dataset.f] = inp.value; });
+    var r = await _trialApi(data);
+    if (r.success) showToast('已儲存');
+    else alert('失敗:'+(r.error||'未知'));
   });
 
-  document.getElementById('trialPublishInfo').style.display='block';
+  document.querySelectorAll('.btn-tpl-del').forEach(btn => btn.onclick = async () => {
+    if (!confirm('刪除這筆班表?')) return;
+    var r = await _trialApi({action:'delete_template_slot', row_index: parseInt(btn.dataset.row)});
+    if (r.success) { showToast('已刪除'); renderTrial(document.getElementById('mainContent')); }
+    else alert('失敗:'+(r.error||'未知'));
+  });
 }
 
-function clearTrialSchedule(){
-  if(!confirm('確定清除所有自訂班次？')) return;
-  _trialSchedule={};
-  renderTrial(document.getElementById('mainContent'));
-  showToast('🗑️ 已清除自訂班次');
+function renderTrialOvrPanel() {
+  var p = document.getElementById('trial-panel');
+  var actLabel = {cancel:'取消', replace:'換班', add:'加班'};
+  var rows = _trialOverrides.map(o => `
+    <tr>
+      <td style="padding:6px">${o.date||''}</td>
+      <td style="padding:6px">${o.time_start||''}-${o.time_end||''}</td>
+      <td style="padding:6px"><span style="padding:2px 6px;background:${o.action==='cancel'?'#fee2e2':o.action==='add'?'#dcfce7':'#fef3c7'};border-radius:4px;font-size:0.78rem">${actLabel[o.action]||o.action||''}</span></td>
+      <td style="padding:6px">${o.class_name||'-'}</td>
+      <td style="padding:6px">${o.teacher||''}</td>
+      <td style="padding:6px;color:#888;font-size:0.78rem">${o.remarks||''}</td>
+      <td style="padding:6px;text-align:center">
+        <button class="btn-ovr-del" data-row="${o.row_index}" style="color:#c00">刪</button>
+      </td>
+    </tr>`).join('');
+  p.innerHTML = `
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:0.85rem;color:#666">當日覆寫:取消(整個時段不開) / 換班(改班別/老師) / 加班(原本沒排,當天加開)</div>
+      <button class="btn btn-green" id="trial-ovr-add">新增覆寫</button>
+    </div>
+    <div style="overflow:auto;max-height:60vh;background:#fff;border:1px solid #d4d1ca;border-radius:6px">
+      <table style="width:100%;font-size:0.85rem">
+        <thead style="background:#f7faf9;position:sticky;top:0">
+          <tr><th style="padding:8px">日期</th><th>時段</th><th>動作</th><th>班別</th><th>老師</th><th>備註</th><th>操作</th></tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="7" style="padding:24px;text-align:center;color:#888">尚無覆寫</td></tr>'}</tbody>
+      </table>
+    </div>
+  `;
+
+  document.getElementById('trial-ovr-add').onclick = async () => {
+    var date = prompt('日期 (YYYY-MM-DD)?', new Date().toISOString().slice(0,10));
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    var act = prompt('動作? cancel(取消) / replace(換班) / add(加班)','replace');
+    if (!act || !['cancel','replace','add'].includes(act)) { alert('動作必須是 cancel/replace/add'); return; }
+    var ts = prompt('開始時間 (HH:MM)?','14:00');
+    var te = prompt('結束時間 (HH:MM)?','15:30');
+    var cn = (act === 'cancel') ? '' : prompt('班別名稱?','Immersion G1');
+    var teacher = (act === 'cancel') ? '' : prompt('老師?(可留空)','') || '';
+    var remarks = prompt('備註?','') || '';
+    var r = await _trialApi({action:'save_override', date, time_start:ts, time_end:te, class_name:cn, teacher, override_action:act, remarks});
+    if (r.success) { showToast('已新增覆寫'); renderTrial(document.getElementById('mainContent')); }
+    else alert('失敗:'+(r.error||'未知'));
+  };
+
+  document.querySelectorAll('.btn-ovr-del').forEach(btn => btn.onclick = async () => {
+    if (!confirm('刪除這筆覆寫?')) return;
+    var r = await _trialApi({action:'delete_override', row_index: parseInt(btn.dataset.row)});
+    if (r.success) { showToast('已刪除'); renderTrial(document.getElementById('mainContent')); }
+    else alert('失敗:'+(r.error||'未知'));
+  });
 }
 
-function publishTrialSchedule(){
-  var json=JSON.stringify(_trialSchedule);
-  if(Object.keys(_trialSchedule).length===0){alert('尚無自訂班次，請先填寫');return;}
-  var b64=btoa(unescape(encodeURIComponent(json)));
-  var syncUrl='https://www.perplexity.ai/computer/a/tai-ping-xin-guang-fen-xiao-4zHJD4DcTdaaBlVxnWwwjw?trialImport='+encodeURIComponent(b64);
-  var urlInput=document.getElementById('trialSyncUrl');
-  if(urlInput) urlInput.value=syncUrl;
-  var box=document.getElementById('trialSyncBox');
-  if(box) box.style.display='block';
-  // 直接跳轉（不靠 popup，避免被擋）
-  var a=document.createElement('a');
-  a.href=syncUrl;
-  a.target='_blank';
-  a.rel='noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  // 更新手動連結
-  var linkEl=document.getElementById('trialSyncLink');
-  if(linkEl) linkEl.href=syncUrl;
-  var displayEl=document.getElementById('trialSyncUrlDisplay');
-  if(displayEl) displayEl.value=syncUrl;
-  showToast('✅ 正在開啟主網站同步…');
+function renderTrialCalPanel() {
+  var p = document.getElementById('trial-panel');
+  var dates = getTrialDatesAdmin();
+  var dowCn = ['','一','二','三','四','五','六','日'];
+  // 把 override 依日期分組
+  var ovrByDate = {};
+  _trialOverrides.forEach(o => { if (!ovrByDate[o.date]) ovrByDate[o.date]=[]; ovrByDate[o.date].push(o); });
+  // 計算每日生效班表
+  function effectiveSlots(ds) {
+    var d = new Date(ds+'T00:00:00');
+    var dow = d.getDay(); // 1-5
+    var base = _trialTpl.filter(t => {
+      var w = parseInt(t.weekday||'0');
+      if (String(t.is_active).toUpperCase() === 'FALSE') return false;
+      return w === 0 || w === dow;
+    });
+    var result = base.map(b => Object.assign({src:'tpl'}, b));
+    var ovrs = ovrByDate[ds] || [];
+    ovrs.forEach(o => {
+      var match = result.findIndex(r => r.time_start === o.time_start);
+      if (o.action === 'cancel') {
+        if (match >= 0) result[match].cancelled = true;
+      } else if (o.action === 'replace') {
+        if (match >= 0) result[match] = Object.assign({}, result[match], o, {src:'ovr'});
+        else result.push(Object.assign({src:'ovr'}, o));
+      } else if (o.action === 'add') {
+        result.push(Object.assign({src:'ovr-add'}, o));
+      }
+    });
+    return result.sort((a,b) => (a.time_start||'').localeCompare(b.time_start||''));
+  }
+  var html = '<div style="background:#fff;border:1px solid #d4d1ca;border-radius:6px;overflow:auto;max-height:65vh"><table style="width:100%;font-size:0.82rem"><thead style="background:#f7faf9;position:sticky;top:0"><tr><th style="padding:8px;text-align:left">日期</th><th style="padding:8px;text-align:left">當日生效班表</th></tr></thead><tbody>';
+  dates.slice(0,30).forEach(ds => {
+    var d = new Date(ds+'T00:00:00');
+    var slots = effectiveSlots(ds);
+    var label = (d.getMonth()+1)+'/'+d.getDate()+'('+dowCn[d.getDay()]+')';
+    var slotsHtml = slots.map(s => {
+      var cls = s.cancelled ? 'text-decoration:line-through;color:#999' : (s.src==='ovr-add'?'color:#16a34a;font-weight:600' : (s.src==='ovr'?'color:#d97706;font-weight:600':''));
+      return `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;background:#f7faf9;border-radius:4px;${cls}">${s.time_start}-${s.time_end} ${s.class_name}${s.teacher?' / '+s.teacher:''}</span>`;
+    }).join('') || '<span style="color:#bbb">無</span>';
+    html += `<tr><td style="padding:6px;white-space:nowrap;font-weight:600">${label}</td><td style="padding:6px">${slotsHtml}</td></tr>`;
+  });
+  html += '</tbody></table></div>';
+  html += '<div style="margin-top:8px;font-size:0.78rem;color:#888">顯示未來 30 天 · 灰刪線=當日取消 · 黃色=換班覆寫 · 綠色=當日加班</div>';
+  p.innerHTML = html;
 }
+
 
 function clearAllData() {
   if(!canDelete()){alert('只有管理員可以刪除資料');return;}
@@ -6220,8 +6291,7 @@ async function renderPickupSchedule(el) {
 
   // ─── A1: 新增日期(一鍵加 5 條路線) ───
   document.getElementById('ps-add-day').onclick = async () => {
-    const dateStr = prompt('新增日期 (YYYY-MM-DD)
-依該日週幾自動套用週一~五班表:', new Date().toISOString().slice(0,10));
+    const dateStr = prompt('新增日期 (YYYY-MM-DD)\n依該日週幾自動套用週一~五班表:', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
     if (allRows.some(r => r.date === dateStr)) {
       alert('該日期已存在排班，請到表格重新編輯。');
