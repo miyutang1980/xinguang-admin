@@ -7077,7 +7077,13 @@ function _renderStudentsView(el) {
       const tr = ev.target.closest('tr');
       const row_index = parseInt(tr.getAttribute('data-row'), 10);
       const field = ev.target.getAttribute('data-f');
-      const value = ev.target.value;
+      let value = ev.target.value;
+      // 電話欄位：若 9 碼且開頭 9 (常見漏 0)，自動補 0
+      if ((field === 'parent1_phone' || field === 'parent2_phone' || field === 'emergency_contact')
+          && /^9\d{8}$/.test(value)) {
+        value = '0' + value;
+        ev.target.value = value;
+      }
       ev.target.style.background = '#FFFBEB';
       const res = await _studentsCall('save', { row_index, field, value });
       if (res.success) {
