@@ -5850,7 +5850,7 @@ async function _formsDataWrite(action, collection, payload, rowIndex) {
       admin_username: (_currentUser && _currentUser.username) || 'admin',
       admin_role: (_currentUser && _currentUser.role) || 'admin',
       collection: collection,
-      data: payload
+      fields: payload
     };
     if (rowIndex) body.row_index = rowIndex;
     var res = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
