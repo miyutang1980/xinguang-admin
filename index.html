@@ -701,17 +701,38 @@ var LINE_TRACKER_URL = 'h'+'ttps'+':'+'/'+'/'+'script.google.com/macros/s/AKfycb
 
 function loadLineSourceData(){
   var days = parseInt(document.getElementById('lineSrcRange').value, 10) || 30;
-  var url = LINE_TRACKER_URL + '?lct=ranking&days=' + days;
-  fetch(url, { method: 'GET', mode: 'cors' })
-    .then(function(r){ return r.json(); })
-    .then(function(res){
-      var data = (res && res.data) || [];
-      renderLineSourceTable(data);
-    })
-    .catch(function(err){
-      document.getElementById('lineSrcTbody').innerHTML =
-        '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入失敗：' + (err.message || err) + '<br><small>請確認 Apps Script 部署成「任何人」、且 doGet 有處理 ?action=ranking</small></td></tr>';
-    });
+  // 用 JSONP 繞 CORS：Apps Script 不支援 CORS、但支援 ?callback= 包成 JSONP
+  var cbName = '__lineSrcCb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
+  var url = LINE_TRACKER_URL + '?lct=ranking&days=' + days + '&callback=' + cbName;
+  document.getElementById('lineSrcTbody').innerHTML =
+    '<tr><td colspan="4" style="padding:40px;text-align:center;color:#999">載入中...</td></tr>';
+  var done = false;
+  var s = document.createElement('script');
+  var timer = setTimeout(function(){
+    if(done) return; done = true;
+    cleanup();
+    document.getElementById('lineSrcTbody').innerHTML =
+      '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入逾時，請稍後再試<br><small>若一直失敗，可能是 Apps Script 部署權限沒設成「任何人」</small></td></tr>';
+  }, 15000);
+  function cleanup(){
+    try{ delete window[cbName]; }catch(e){ window[cbName] = undefined; }
+    if(s && s.parentNode) s.parentNode.removeChild(s);
+    clearTimeout(timer);
+  }
+  window[cbName] = function(res){
+    if(done) return; done = true;
+    cleanup();
+    var data = (res && res.data) || [];
+    renderLineSourceTable(data);
+  };
+  s.onerror = function(){
+    if(done) return; done = true;
+    cleanup();
+    document.getElementById('lineSrcTbody').innerHTML =
+      '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入失敗，請確認 Apps Script 部署為「任何人」</td></tr>';
+  };
+  s.src = url;
+  document.head.appendChild(s);
 }
 
 function renderLineSourceTable(data){
@@ -5026,10 +5047,12 @@ function renderAccountsPage(){
   var h='<div style="max-width:900px">';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
   h+='<h3 style="margin:0;font-size:1.1rem">👥 帳號管理</h3>';
+  h+='<div style="display:flex;gap:8px">';
+  h+='<button id="btnNewAcc" style="background:#2B7A4B;color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">＋ 新增帳號</button>';
   h+='<button id="btnReloadAcc" style="background:#F3F4F6;border:1px solid #ddd;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.8rem">🔄 重新載入</button>';
-  h+='</div>';
+  h+='</div></div>';
   h+='<div style="background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.82rem;color:#92400E">';
-  h+='💡 <strong>說明</strong>：帳號資料儲存於 Google Sheets「員工帳號」分頁。此處可<strong>改密碼</strong>、<strong>停用/啟用</strong>、<strong>刪除帳號</strong>；新增/改角色請直接到 Google Sheets 操作。刪除為永久操作。';
+  h+='💡 <strong>說明</strong>：帳號資料同步存於 Google Sheets「員工帳號」分頁。此處可<strong>新增帳號</strong>、<strong>改密碼</strong>、<strong>停用/啟用</strong>、<strong>刪除帳號</strong>。刪除為永久操作，建議離職用「停用」即可。';
   h+='</div>';
   h+='<div style="display:flex;flex-direction:column;gap:10px" id="accountList">';
   _cloudAccounts.forEach(function(u){
@@ -5085,6 +5108,8 @@ function renderAccountsPage(){
       var ok = await reloadCloudAccounts();
       if(ok) switchSection('accounts');
     };
+    var nb=document.getElementById('btnNewAcc');
+    if(nb)nb.onclick=function(){ showCreateAccountModal(); };
     var cl=document.getElementById('btnClearLogs');
     if(cl)cl.onclick=function(){if(confirm('確定清除所有操作紀錄？')){localStorage.removeItem(ACCOUNT_LOG_KEY);switchSection('accounts')}};
     document.querySelectorAll('.acc-btn2').forEach(function(btn){
@@ -5219,18 +5244,74 @@ function showDeleteAccountModal(account, name){
   }, 50);
 }
 
+// 新增帳號 modal
+function showCreateAccountModal(){
+  var h='<div style="max-width:460px">';
+  h+='<div style="margin-bottom:14px;padding:12px 14px;background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;color:#166534;font-size:0.85rem">請填寫新人員資料，送出後會同步寫入 Google Sheets「員工帳號」分頁。</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
+  h+='<div><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">姓名 *</label>';
+  h+='<input id="newAccName" type="text" placeholder="如：王老師" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box"></div>';
+  h+='<div><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">職稱</label>';
+  h+='<input id="newAccTitle" type="text" placeholder="如：主任老師" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box"></div>';
+  h+='</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
+  h+='<div><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">帳號 *</label>';
+  h+='<input id="newAccUser" type="text" placeholder="英數字，如 wang01" autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box;font-family:monospace"></div>';
+  h+='<div><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">角色</label>';
+  h+='<select id="newAccRole" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box">';
+  h+='<option value="teacher">老師</option>';
+  h+='<option value="sales">業務</option>';
+  h+='<option value="staff">行政</option>';
+  h+='<option value="admin">管理員</option>';
+  h+='</select></div>';
+  h+='</div>';
+  h+='<div style="margin-bottom:10px"><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">密碼 * (至少 4 字元)</label>';
+  h+='<input id="newAccPwd" type="text" placeholder="建議英數字混合" autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box;font-family:monospace"></div>';
+  h+='<div id="newAccMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>';
+  h+='<div style="display:flex;gap:10px">';
+  h+='<button id="btnSaveNewAcc" style="flex:1;background:#2B7A4B;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">➕ 建立帳號</button>';
+  h+='<button id="btnCancelNewAcc" style="flex:1;background:#F3F4F6;border:1px solid #ddd;padding:12px;border-radius:8px;cursor:pointer">取消</button>';
+  h+='</div></div>';
+  document.getElementById('modalTitle').textContent='＋ 新增帳號';
+  document.getElementById('modalBody').innerHTML=h;
+  document.getElementById('modalOverlay').classList.add('open');
+  setTimeout(function(){
+    var nm=document.getElementById('newAccName'); if(nm) nm.focus();
+    document.getElementById('btnCancelNewAcc').onclick=function(){closeModal()};
+    document.getElementById('btnSaveNewAcc').onclick=async function(){
+      var name=(document.getElementById('newAccName').value||'').trim();
+      var title=(document.getElementById('newAccTitle').value||'').trim();
+      var account=(document.getElementById('newAccUser').value||'').trim().toLowerCase();
+      var role=document.getElementById('newAccRole').value;
+      var pwd=document.getElementById('newAccPwd').value;
+      var msg=document.getElementById('newAccMsg');
+      msg.style.color='#DC2626';
+      if(!name){msg.textContent='請填姓名';return;}
+      if(!account||!/^[a-z0-9_.-]{2,}$/.test(account)){msg.textContent='帳號需為 2 字以上英數字';return;}
+      if(!pwd||pwd.length<4){msg.textContent='密碼至少 4 字元';return;}
+      var btn=document.getElementById('btnSaveNewAcc');
+      btn.disabled=true; btn.textContent='⏳ 寫入 Sheets...';
+      var r=await callAccountApi('createAccount', { newAccount: { account: account, name: name, password: pwd, role: role, title: title } });
+      if(r.success){
+        markUnsaved('新增帳號');
+        addAccountLog('新增', account, '已新增帳號（'+name+' / '+role+'）');
+        closeModal();
+        if(typeof showToast==='function') showToast('✅ ' + (r.message || '已新增帳號'));
+        _cloudAccounts=[];
+        await reloadCloudAccounts();
+        switchSection('accounts');
+      } else {
+        msg.textContent='❌ ' + (r.error || '新增失敗');
+        btn.disabled=false; btn.textContent='➕ 建立帳號';
+      }
+    };
+  },50);
+}
+
 // 舊函數保留為 stub，避免其他地方呼叫炸掉
 function loadAccounts(){}
 function saveAccounts(){}
-function showAccModal(){
-  if(typeof showToast==='function'){
-    showToast('新增帳號請到 Sheets 「員工帳號」分頁', '開 Sheets', function(){
-      window.open('https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit#gid=165990505', '_blank');
-    });
-  } else {
-    alert('新增帳號請到 Google Sheets「員工帳號」分頁操作。');
-  }
-}
+function showAccModal(){ showCreateAccountModal(); }
 function saveAcc(){}
 function toggleSuspend(un){
   var u=_cloudAccounts.find(function(x){return x.account.toLowerCase()===String(un).toLowerCase()});
@@ -6151,15 +6232,18 @@ function openClassEditModal() {
   var s = window.SEMESTER_CLASSES;
   var jsonText = JSON.stringify(s, null, 2);
   var html = '<div style="max-width:760px">';
-  html += '<div style="background:#FFF7ED;border-left:4px solid #E8863A;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:0.84rem;color:#78350F;line-height:1.6">';
-  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存於本機（該資料未備份到云端）。以下為原始資料可直接修改，儲存後頁面會重新讀取。';
+  html += '<div style="background:#F0FDF4;border-left:4px solid #2B7A4B;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:0.84rem;color:#166534;line-height:1.6">';
+  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存。選「儲存班別」寫入本機；要在其他裝置/帳號同步，請用「匯出 JSON」下載檔案，再到另一台「匯入 JSON」。';
   html += '</div>';
-  html += '<textarea id="_classesJson" rows="22" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
+  html += '<textarea id="_classesJson" rows="20" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
   html += '<div id="_classesMsg" style="font-size:0.82rem;color:#DC2626;margin-top:8px;min-height:18px"></div>';
-  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">';
+  html += '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap">';
+  html += '<div style="display:flex;gap:6px"><button class="btn btn-outline" onclick="_exportClassesJson()" style="padding:8px 14px">📤 匯出 JSON</button>';
+  html += '<button class="btn btn-outline" onclick="_importClassesJson()" style="padding:8px 14px">📥 匯入 JSON</button></div>';
+  html += '<div style="display:flex;gap:8px">';
   html += '<button class="btn btn-outline" onclick="closeModal()">取消</button>';
-  html += '<button class="btn btn-green" onclick="_saveClassesJson()">儲存班別</button>';
-  html += '</div></div>';
+  html += '<button class="btn btn-green" onclick="_saveClassesJson()">💾 儲存班別</button>';
+  html += '</div></div></div>';
   document.getElementById('modalTitle').textContent = '編輯課程班別';
   document.getElementById('modalBody').innerHTML = html;
   document.getElementById('modalOverlay').classList.add('open');
@@ -6172,12 +6256,46 @@ function _saveClassesJson() {
     if (typeof obj !== 'object' || !obj) throw new Error('資料格式錯誤');
     window.SEMESTER_CLASSES = obj;
     localStorage.setItem('xinguangSemesterClasses', JSON.stringify(obj));
+    if(typeof markUnsaved === 'function') markUnsaved('更新班別設定');
     closeModal();
-    showToast('班別已更新');
+    showToast('班別已更新到本機');
     renderClasses(document.getElementById('mainContent'));
   } catch(e) {
     msg.textContent = 'JSON 格式錯誤：' + e.message;
   }
+}
+function _exportClassesJson(){
+  var txt = (document.getElementById('_classesJson')||{}).value || '';
+  try { JSON.parse(txt); } catch(e){ alert('請先修正 JSON 格式錯誤'); return; }
+  var blob = new Blob([txt], {type:'application/json'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  var stamp = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = '太平新光_班別_' + stamp + '.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(url); }, 500);
+  if(typeof showToast==='function') showToast('✅ 已匯出班別 JSON');
+}
+function _importClassesJson(){
+  var input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json,application/json';
+  input.onchange = function(e){
+    var file = e.target.files && e.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      try {
+        var obj = JSON.parse(ev.target.result);
+        document.getElementById('_classesJson').value = JSON.stringify(obj, null, 2);
+        var msg = document.getElementById('_classesMsg');
+        if(msg){ msg.style.color='#16A34A'; msg.textContent='✅ 已載入 ' + file.name + '，請按「儲存班別」套用'; }
+      } catch(err){
+        var m=document.getElementById('_classesMsg'); if(m){ m.style.color='#DC2626'; m.textContent='匯入失敗：' + err.message; }
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
 }
 
 // 分級檢測 軟刪 / 硬刪
@@ -6543,6 +6661,36 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   await renderBody();
 }
 
+// ─── 學生名單 cell　(中午/下午 各幾人 + 選學生按鈕) ───
+function _renderRouteStudentNames(r){
+  // 舊資料 r.remark 裡常裝「noon: Joyce206,…」這種垃圾字串，直接不顯示
+  var rk = String(r.remark || '').trim();
+  var looksLikeGarbage = /^(noon|pm|am)\s*[:：]/i.test(rk) || /\d{2,},/.test(rk);
+  var noonN = parseInt(r.noon_count, 10) || 0;
+  var pmN = parseInt(r.pm_count, 10) || 0;
+  var html = '';
+  if(noonN > 0){
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px">'
+         +    '<span><span style="color:#01696F;font-weight:600">中午</span> ' + noonN + ' 人</span>'
+         +    '<button type="button" class="btn-detail-mini" data-session="noon" data-row="' + r.row_index + '" style="padding:1px 6px;background:#fff;border:1px solid #01696F;color:#01696F;border-radius:3px;cursor:pointer;font-size:0.72rem">查看</button>'
+         + '</div>';
+  }
+  if(pmN > 0){
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:4px;margin-top:2px">'
+         +    '<span><span style="color:#7c3aed;font-weight:600">下午</span> ' + pmN + ' 人</span>'
+         +    '<button type="button" class="btn-detail-mini" data-session="pm" data-row="' + r.row_index + '" style="padding:1px 6px;background:#fff;border:1px solid #7c3aed;color:#7c3aed;border-radius:3px;cursor:pointer;font-size:0.72rem">查看</button>'
+         + '</div>';
+  }
+  if(noonN === 0 && pmN === 0){
+    html += '<div style="color:#9ca3af;font-style:italic">尚未選學生</div>';
+  }
+  // 只顯示不是垃圾的備註 (例如手寫「班車漏氣」這類)
+  if(rk && !looksLikeGarbage){
+    html += '<div style="color:#9ca3af;font-size:0.7rem;margin-top:3px">📝 ' + _esc(rk) + '</div>';
+  }
+  return html;
+}
+
 // ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
 async function renderPickupSchedule(el) {
   const ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
@@ -6674,7 +6822,7 @@ async function renderPickupSchedule(el) {
           <button class="btn-detail" data-session="pm" title="選學校 + 學生" style="margin-left:2px;padding:1px 5px;background:#01696F;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:0.85rem" ${isHoliday?'disabled':''}>📋</button>
         </td>
         <td style="padding:6px"><input data-field="pm_time" type="time" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
-        <td style="padding:6px;font-size:0.85rem;color:${isHoliday?'#a12c7b':'#7a7974'}">${r.remark||''}</td>
+        <td style="padding:6px;font-size:0.8rem;color:${isHoliday?'#a12c7b':'#374151'};max-width:180px;line-height:1.4">${_renderRouteStudentNames(r)}</td>
         <td style="padding:6px;text-align:center">
           <button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button>
         </td>
@@ -6692,7 +6840,7 @@ async function renderPickupSchedule(el) {
             <th style="padding:8px;border:1px solid #1b474d;width:50px">上限</th>
             <th style="padding:8px;border:1px solid #1b474d" colspan="6" style="background:#205058">中午班</th>
             <th style="padding:8px;border:1px solid #1b474d" colspan="6" style="background:#1f4047">下午班</th>
-            <th style="padding:8px;border:1px solid #1b474d;width:80px">備註</th>
+            <th style="padding:8px;border:1px solid #1b474d;width:180px">學生名單</th>
             <th style="padding:8px;border:1px solid #1b474d;width:50px">刪除</th>
           </tr>
           <tr>
@@ -6745,6 +6893,26 @@ async function renderPickupSchedule(el) {
         } catch (err) {
           alert('網路錯誤：' + err.message);
         }
+      };
+    });
+
+    // 學生名單 cell 裡的「查看」迷你鈕
+    document.querySelectorAll('#ps-table-wrap .btn-detail-mini').forEach(btn => {
+      btn.onclick = (e) => {
+        e.preventDefault();
+        const row_index = parseInt(btn.dataset.row);
+        const session = btn.dataset.session;
+        const r = allRows.find(x => x.row_index === row_index);
+        if (!r) return;
+        openRouteDetailsModal(r, session, auth_payload, async (newTotal) => {
+          const field = session === 'noon' ? 'noon_count' : 'pm_count';
+          try {
+            await api({action: 'save', row_index, field, value: String(newTotal)});
+            const local = allRows.find(x => x.row_index === row_index);
+            if (local) local[field] = newTotal;
+            renderTable();
+          } catch (err) { console.error(err); }
+        });
       };
     });
 
@@ -6923,42 +7091,99 @@ async function renderPickupSchedule(el) {
 }
 
 // ========================================================================
-// 2. 今日接送 (pickup-today)
+// 2. 今日接送 (pickup-today) —— 今日路線表 + 待處理轉交
 // ========================================================================
 async function renderPickupToday(el) {
   el.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:#888">載入中...</div>';
   try {
-    // 沒有專屬 list assignments webhook,我們用 transfer-requests 列表 + schedule list 組合
-    // 簡單做法:呼叫 schedule list 暫時當預覽。完整版需另建 W14 list-assignments webhook
-    var d = await _pickupCall(PICKUP_API.requests, _adminPayload({ action: 'list', filter: 'all' }));
-    var requests = d.requests || [];
-    el.innerHTML = _renderTodayUI(requests);
+    var ROUTE_API_T = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
+    var auth = JSON.parse(sessionStorage.getItem('user') || '{}');
+    var auth_payload = { admin_username: auth.username || 'admin', admin_role: auth.role || 'admin' };
+    var listResp = await fetch(ROUTE_API_T, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({action:'list'}, auth_payload))
+    });
+    var listJson = await listResp.json();
+    var allRows = listJson.rows || [];
+    var reqResp = await _pickupCall(PICKUP_API.requests, _adminPayload({ action:'list', filter:'all' }));
+    var requests = reqResp.requests || [];
+    el.innerHTML = _renderTodayUI(allRows, requests);
   } catch (e) {
-    el.innerHTML = '<div class="card" style="padding:24px;color:#c00">載入失敗：' + e.message + '</div>';
+    el.innerHTML = '<div class="card" style="padding:24px;color:#c00">載入失敗：' + (e.message||e) + '</div>';
   }
 }
 
-function _renderTodayUI(requests) {
+function _renderTodayUI(allRows, requests) {
   var todayStr = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
-  var html = '<div style="max-width:1200px;margin:0 auto">';
-  html += '<div class="card" style="padding:20px;margin-bottom:16px"><h3 style="margin:0">今日接送 · ' + todayStr + '</h3>';
-  html += '<p style="margin:6px 0 0;color:#777;font-size:0.85rem">展開的指派由系統每日 05:00 自動產生 · 週末/假日不展開</p></div>';
+  var todayRows = allRows.filter(function(r){ return r.date === todayStr; });
+  var working = todayRows.filter(function(r){ return r.status !== '休'; });
+  var resting = todayRows.filter(function(r){ return r.status === '休'; });
+  var noonTotal = working.reduce(function(s,r){ return s + (parseInt(r.noon_count,10)||0); }, 0);
+  var pmTotal = working.reduce(function(s,r){ return s + (parseInt(r.pm_count,10)||0); }, 0);
+  var pending = (requests||[]).filter(function(r){ return r.status === 'pending'; });
 
-  // 待處理轉交申請 (W12 收到的)
-  var pending = requests.filter(function(r) { return r.status === 'pending'; });
+  var html = '<div style="max-width:1200px;margin:0 auto">';
+  // 標題 + 概況卡
+  html += '<div class="card" style="padding:20px;margin-bottom:16px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">';
+  html += '<div><h3 style="margin:0;font-size:1.2rem">🚚 今日接送 · ' + todayStr + '</h3>';
+  html += '<div style="color:#777;font-size:0.85rem;margin-top:4px">今日上班 ' + working.length + ' 條路線 · 休 ' + resting.length + ' 條</div></div>';
+  html += '<button id="todayRefresh" style="padding:7px 14px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:0.85rem">🔄 重新載入</button>';
+  html += '</div></div>';
+
+  // 3 個 KPI 卡
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">';
+  html += '<div class="card" style="padding:16px;border-left:4px solid #01696F"><div style="font-size:0.78rem;color:#6b7280">上班路線</div><div style="font-size:1.6rem;font-weight:800;color:#01696F;margin-top:4px">' + working.length + '</div></div>';
+  html += '<div class="card" style="padding:16px;border-left:4px solid #2563EB"><div style="font-size:0.78rem;color:#6b7280">中午接送人數</div><div style="font-size:1.6rem;font-weight:800;color:#2563EB;margin-top:4px">' + noonTotal + ' 人</div></div>';
+  html += '<div class="card" style="padding:16px;border-left:4px solid #7C3AED"><div style="font-size:0.78rem;color:#6b7280">下午接送人數</div><div style="font-size:1.6rem;font-weight:800;color:#7C3AED;margin-top:4px">' + pmTotal + ' 人</div></div>';
+  html += '<div class="card" style="padding:16px;border-left:4px solid ' + (pending.length>0?'#DC2626':'#9CA3AF') + '"><div style="font-size:0.78rem;color:#6b7280">待處理轉交</div><div style="font-size:1.6rem;font-weight:800;color:' + (pending.length>0?'#DC2626':'#9CA3AF') + ';margin-top:4px">' + pending.length + ' 件</div></div>';
+  html += '</div>';
+
+  // 待處理提醒
   if (pending.length > 0) {
-    html += '<div class="card" style="margin-bottom:16px;border-left:4px solid #dc2626"><div style="padding:14px 20px"><strong style="color:#dc2626">⚠️ ' + pending.length + ' 件待處理轉交申請</strong> <a href="javascript:switchSection(\'transfer\')" style="margin-left:10px;color:#1e90ff">前往處理 →</a></div></div>';
+    html += '<div class="card" style="margin-bottom:16px;border-left:4px solid #dc2626"><div style="padding:14px 20px"><strong style="color:#dc2626">⚠️ 有 ' + pending.length + ' 件轉交申請待處理</strong> <a href="javascript:switchSection(\'transfer\')" style="margin-left:10px;color:#1e90ff;font-weight:600">前往處理 →</a></div></div>';
   }
 
-  // 顯示說明:目前只能透過 LIFF 看 assignments 細節,後台暫時引導到強制轉交頁
-  html += '<div class="card" style="padding:24px"><h4 style="margin:0 0 12px">📊 今日接送概況</h4>';
-  html += '<p style="color:#555;line-height:1.7">如需查看當日各班次完整狀態,請使用 LINE LIFF 接送名單;後台目前提供:</p>';
-  html += '<ul style="color:#555;line-height:1.9">';
-  html += '<li>排程管理:<a href="javascript:switchSection(\'pickup\')" style="color:#1e90ff">接送排程</a></li>';
-  html += '<li>轉交處理:<a href="javascript:switchSection(\'transfer\')" style="color:#1e90ff">強制轉交</a> (' + pending.length + ' 件待處理)</li>';
-  html += '<li>老師統計:<a href="javascript:switchSection(\'stats\')" style="color:#1e90ff">月度報表</a></li>';
-  html += '</ul></div>';
+  // 今日路線詳細表
+  html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">';
+  html += '<div style="padding:14px 20px;background:#F9FAFB;border-bottom:1px solid #eee;font-weight:700;display:flex;justify-content:space-between;align-items:center">';
+  html += '<span>📋 今日路線詳細</span>';
+  html += '<a href="javascript:switchSection(\'pickup\')" style="color:#1e90ff;font-size:0.85rem;text-decoration:none">設定排程 →</a>';
   html += '</div>';
+  if (working.length === 0) {
+    html += '<div style="padding:40px;text-align:center;color:#9CA3AF">今日無上班路線。可能是假日或週末，或尚未在<a href="javascript:switchSection(\'pickup\')" style="color:#1e90ff">接送排程</a>設定。</div>';
+  } else {
+    html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+    html += '<thead><tr style="background:#F3F4F6"><th style="padding:10px 12px;text-align:left;border-bottom:1px solid #eee">路線</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午車輛/司機</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午人數</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午出發</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午車輛/司機</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午人數</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午出發</th></tr></thead><tbody>';
+    working.forEach(function(r){
+      html += '<tr style="border-bottom:1px solid #f3f4f6">';
+      html += '<td style="padding:10px 12px;font-weight:600">' + (r.route||'-') + '<div style="font-size:0.72rem;color:#9CA3AF;font-weight:400">上限 ' + (r.capacity||'-') + ' 人</div></td>';
+      html += '<td style="padding:10px 12px;text-align:center">' + (r.noon_vehicle||'-') + '<div style="font-size:0.78rem;color:#6B7280">' + (r.noon_driver||'-') + (r.noon_driver2?' / '+r.noon_driver2:'') + '</div></td>';
+      html += '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + (parseInt(r.noon_count,10)>0?'#01696F':'#9CA3AF') + '">' + (r.noon_count||0) + '</td>';
+      html += '<td style="padding:10px 12px;text-align:center;font-family:monospace">' + (r.noon_time||'-') + '</td>';
+      html += '<td style="padding:10px 12px;text-align:center">' + (r.pm_vehicle||'-') + '<div style="font-size:0.78rem;color:#6B7280">' + (r.pm_driver||'-') + (r.pm_driver2?' / '+r.pm_driver2:'') + '</div></td>';
+      html += '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + (parseInt(r.pm_count,10)>0?'#7C3AED':'#9CA3AF') + '">' + (r.pm_count||0) + '</td>';
+      html += '<td style="padding:10px 12px;text-align:center;font-family:monospace">' + (r.pm_time||'-') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+  html += '</div>';
+
+  html += '<div class="card" style="padding:16px 20px;background:#F0FDF4;border-left:4px solid #16A34A;color:#166534;font-size:0.85rem">💡 <strong>提示</strong>：指派細節名單可在<a href="javascript:switchSection(\'pickup\')" style="color:#01696F;font-weight:600">接送排程</a>表格點「學生名單 · 查看」查詢；老師端名單請走 LINE LIFF。</div>';
+  html += '</div>';
+
+  // bind refresh
+  setTimeout(function(){
+    var rb = document.getElementById('todayRefresh');
+    if(rb) rb.onclick = function(){ switchSection('assignments'); };
+  }, 50);
   return html;
 }
 
@@ -6972,7 +7197,9 @@ async function renderTransferAdmin(el) {
       _pickupCall(PICKUP_API.requests, _adminPayload({ action: 'list', filter: 'all' })),
       _pickupCall(PICKUP_API.schedule, _adminPayload({ action: 'list' }))
     ]);
-    var requests = reqData.requests || [];
+    // 清掉本機軟刪的紀錄
+    var deletedSet = new Set(JSON.parse(localStorage.getItem('xg_transfer_deleted') || '[]'));
+    var requests = (reqData.requests || []).filter(function(r){ return !deletedSet.has(r.request_id); });
     var schedules = schData.schedules || [];
     el.innerHTML = _renderTransferUI(requests, schedules);
     window._currentSchedules = schedules;
@@ -7021,7 +7248,14 @@ function _renderTransferUI(requests, schedules) {
   // 直接強制轉交區
   html += '<div class="card" style="margin-bottom:16px"><div style="padding:14px 20px;background:#f9fafb;border-bottom:1px solid #eee;font-weight:700">🔄 直接強制轉交</div>';
   html += '<div style="padding:20px"><div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">指派 ID *</label><input type="text" id="ft_aid" class="form-control" placeholder="如 PA20260426_SC1 (從 LIFF 或排程查)" /></div>';
+  // 指派 ID 改為下拉：從所有 schedules 生成選項（不要老師手動打長格式）
+  var aidOptions = '<option value="">選擇接送任務</option>';
+  schedules.forEach(function(s){
+    if (!s.assignment_id) return;
+    var label = (s.date || '') + ' ' + (s.depart_time || '') + ' · ' + (s.route || '') + ' · ' + (s.assigned_teacher || '未指派');
+    aidOptions += '<option value="' + s.assignment_id + '">' + label + '</option>';
+  });
+  html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">指派任務 *</label><select id="ft_aid" class="form-control">' + aidOptions + '</select></div>';
   html += '<div><label style="font-size:0.82rem;color:#555;display:block;margin-bottom:4px">新接送老師 *</label><select id="ft_teacher" class="form-control"><option value="">選擇老師</option>';
   teachers.forEach(function(t) { html += '<option value="' + t + '">' + t + '</option>'; });
   html += '</select></div>';
@@ -7039,7 +7273,7 @@ function _renderTransferUI(requests, schedules) {
   if (handled.length === 0) {
     html += '<div style="padding:24px;text-align:center;color:#aaa">無歷史紀錄</div>';
   } else {
-    html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem"><thead><tr style="background:#fafafa;text-align:left"><th style="padding:10px 14px">日期</th><th style="padding:10px 14px">老師</th><th style="padding:10px 14px">路線</th><th style="padding:10px 14px">原因</th><th style="padding:10px 14px">處理人</th><th style="padding:10px 14px">處理時間</th></tr></thead><tbody>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem"><thead><tr style="background:#fafafa;text-align:left"><th style="padding:10px 14px">日期</th><th style="padding:10px 14px">老師</th><th style="padding:10px 14px">路線</th><th style="padding:10px 14px">原因</th><th style="padding:10px 14px">處理人</th><th style="padding:10px 14px">處理時間</th><th style="padding:10px 14px;width:60px">刪除</th></tr></thead><tbody>';
     handled.slice(0, 20).forEach(function(r) {
       html += '<tr style="border-top:1px solid #eee">';
       html += '<td style="padding:10px 14px">' + r.date + '</td>';
@@ -7048,6 +7282,7 @@ function _renderTransferUI(requests, schedules) {
       html += '<td style="padding:10px 14px">' + (REASON_LABEL[r.reason] || r.reason) + '</td>';
       html += '<td style="padding:10px 14px">' + (r.handled_by || '-') + '</td>';
       html += '<td style="padding:10px 14px;color:#888">' + (r.handled_at || '-') + '</td>';
+      html += '<td style="padding:10px 14px;text-align:center"><button onclick="_deleteTransferRecord(\'' + r.request_id + '\', \'' + (r.requester_name||'') + '\')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1.1rem" title="刪除這筆紀錄">×</button></td>';
       html += '</tr>';
     });
     html += '</tbody></table>';
@@ -7120,6 +7355,30 @@ async function markRequestHandled(reqId, eventId) {
   }
 }
 
+// 刪除轉交紀錄：本機軟刪除（存 localStorage）來隱藏。要永久刪請到 Sheets 手動。
+async function _deleteTransferRecord(requestId, requesterName) {
+  if (!requestId) return;
+  if (!confirm('刪除這筆轉交紀錄（' + (requesterName||'') + '）？\n\n本機不再顯示。要永久刪除請到 Google Sheets。')) return;
+  try {
+    var deletedSet = new Set(JSON.parse(localStorage.getItem('xg_transfer_deleted') || '[]'));
+    deletedSet.add(requestId);
+    localStorage.setItem('xg_transfer_deleted', JSON.stringify([...deletedSet]));
+    if (window._currentRequests){
+      window._currentRequests = window._currentRequests.filter(function(r){ return r.request_id !== requestId; });
+    }
+    if (typeof markUnsaved === 'function') markUnsaved('刪除轉交紀錄');
+    if (typeof showToast === 'function') showToast('已刪除 ' + (requesterName||''), '復原', function(){
+      var s = new Set(JSON.parse(localStorage.getItem('xg_transfer_deleted') || '[]'));
+      s.delete(requestId);
+      localStorage.setItem('xg_transfer_deleted', JSON.stringify([...s]));
+      renderTransferAdmin(document.getElementById('mainContent'));
+    });
+    renderTransferAdmin(document.getElementById('mainContent'));
+  } catch(e){
+    alert('刪除失敗：' + e.message);
+  }
+}
+
 // ========================================================================
 // 4. 老師月報 (stats)
 // ========================================================================
@@ -7164,11 +7423,19 @@ function _renderStatsUI() {
 const STUDENTS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/students';
 let _studentsRows = [];
 let _schoolsList = [];
-let _studentsFilter = { keyword: '', school: '', status: '' };
+// 預設只顯示「在籍」與「暫停」學生，隱藏「離校」。老師可從下拉選「離校」看已刪除的學生。
+let _studentsFilter = { keyword: '', school: '', status: '_active_paused' };
 
 async function _studentsCall(action, extra) {
-  const u = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const body = Object.assign({ action: action, admin_username: u.username || '', admin_role: u.role || '' }, extra || {});
+  // 先試 _currentUser（主要來源）、備援 sessionStorage 以免舊 code 還在用
+  const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : (function(){
+    try { return JSON.parse(sessionStorage.getItem('user') || '{}'); } catch(e){ return {}; }
+  })();
+  const body = Object.assign({
+    action: action,
+    admin_username: (u && u.username) || 'admin',
+    admin_role: (u && u.role) || 'admin'
+  }, extra || {});
   const res = await fetch(STUDENTS_API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
   return await res.json();
 }
@@ -7193,7 +7460,12 @@ function _renderStudentsView(el) {
   const f = _studentsFilter;
   const filtered = _studentsRows.filter(r => {
     if (f.school && r.school_name !== f.school) return false;
-    if (f.status && r.status !== f.status) return false;
+    // status 特殊值「_active_paused」＝隱藏「離校」（預設視為刪除）
+    if (f.status === '_active_paused'){
+      if (r.status === 'left' || r.status === 'deleted') return false;
+      // 預設也隱藏「殘留資料」（只有學號、中文姓名空白）
+      if (!r.chinese_name && !r.english_name) return false;
+    } else if (f.status && r.status !== f.status) return false;
     if (f.keyword) {
       const k = f.keyword.toLowerCase();
       const hay = ((r.chinese_name||'') + (r.english_name||'') + (r.student_id||'') + (r.parent1_name||'') + (r.parent1_phone||'') + (r.class_code||'')).toLowerCase();
@@ -7210,10 +7482,11 @@ function _renderStudentsView(el) {
         <option value="">全部學校</option>${schoolOptions}
       </select>
       <select id="stuStatusFilter" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
-        <option value="">全部狀態</option>
-        <option value="active">在籍</option>
-        <option value="paused">暫停</option>
-        <option value="left">離校</option>
+        <option value="_active_paused" ${f.status==='_active_paused'?'selected':''}>在籍 + 暫停（預設）</option>
+        <option value="active" ${f.status==='active'?'selected':''}>只看在籍</option>
+        <option value="paused" ${f.status==='paused'?'selected':''}>只看暫停</option>
+        <option value="left" ${f.status==='left'?'selected':''}>只看已離校</option>
+        <option value="" ${f.status===''?'selected':''}>全部狀態</option>
       </select>
       <button class="btn btn-green" onclick="_studentsAddNew()">＋ 新增學生</button>
       <button class="btn btn-outline" onclick="renderStudents(document.getElementById('mainContent'))">🔄 重新整理</button>
