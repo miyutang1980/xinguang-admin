@@ -138,12 +138,16 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <p>後台管理系統 · 請登入</p>
     <div class="login-field">
       <label>帳號</label>
-      <input type="text" id="loginUser" placeholder="admin" onkeydown="if(event.key==='Enter')doLogin()">
+      <input type="text" id="loginUser" autocomplete="username" placeholder="admin" onkeydown="if(event.key==='Enter')doLogin()">
     </div>
     <div class="login-field">
       <label>密碼</label>
-      <input type="password" id="loginPass" placeholder="••••••" onkeydown="if(event.key==='Enter')doLogin()">
+      <input type="password" id="loginPass" autocomplete="current-password" placeholder="••••••" onkeydown="if(event.key==='Enter')doLogin()">
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin:14px 0 4px;font-size:0.88rem;color:#52606D;cursor:pointer;user-select:none">
+      <input type="checkbox" id="loginRemember" style="width:18px;height:18px;cursor:pointer;accent-color:#2B7A4B">
+      <span>記住我，下次自動登入（24 小時內）</span>
+    </label>
     <button class="login-btn" onclick="doLogin()">登入</button>
     <div class="login-err" id="loginErr">帳號或密碼錯誤</div>
   </div>
@@ -421,6 +425,19 @@ async function doLogin() {
         // 暫存密碼到 sessionStorage（帳號管理頁面需要驗證 admin 身份）
         // sessionStorage 關掛瀏覽器就清除，比 localStorage 安全
         try { sessionStorage.setItem('xg_session_pwd', p); localStorage.setItem('xg_admin_pwd', p); } catch(e){}
+        // 「記住我」：勾了就存一個 24 小時內有效的自動登入 token
+        try {
+          var rememberCb = document.getElementById('loginRemember');
+          if (rememberCb && rememberCb.checked){
+            localStorage.setItem('xg_remember', JSON.stringify({
+              username: u, password: p,
+              user: _currentUser,
+              expires: Date.now() + 24*60*60*1000
+            }));
+          } else {
+            localStorage.removeItem('xg_remember');
+          }
+        } catch(e){}
         errEl.style.display = 'none';
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appScreen').style.display = 'flex';
@@ -509,14 +526,52 @@ function applyPermissions() {
 function doLogout() {
   _loggedIn = false;
   _currentUser = null;
-  try { sessionStorage.removeItem('xg_session_pwd'); localStorage.removeItem('xg_admin_pwd'); } catch(e){}
+  // 登出時連「記住我」token 一起清，以免下次又自動登入
+  try { 
+    sessionStorage.removeItem('xg_session_pwd'); 
+    localStorage.removeItem('xg_admin_pwd'); 
+    localStorage.removeItem('xg_remember');
+  } catch(e){}
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  // 登出後清空輸入欄、勾選狀態
+  var u = document.getElementById('loginUser');
+  var p = document.getElementById('loginPass');
+  var cb = document.getElementById('loginRemember');
+  if (u) u.value = '';
+  if (p) p.value = '';
+  if (cb) cb.checked = false;
   _DB = emptyData();
 }
 function checkSession() {
-  // No persistent session - always show login
+  // 「記住我」：頁面載入時檢查是否有有效 token、有則自動填入並跳過登入
+  try {
+    var raw = localStorage.getItem('xg_remember');
+    if (!raw) return;
+    var saved = JSON.parse(raw);
+    if (!saved || !saved.expires || Date.now() > saved.expires){
+      localStorage.removeItem('xg_remember');
+      return;
+    }
+    // token 還在有效期內——自動填入並點「登入」
+    var userInput = document.getElementById('loginUser');
+    var passInput = document.getElementById('loginPass');
+    var cbInput = document.getElementById('loginRemember');
+    if (userInput) userInput.value = saved.username || '';
+    if (passInput) passInput.value = saved.password || '';
+    if (cbInput) cbInput.checked = true;
+    // 延遲一下讓頁面載完、AUTH_API_URL 設好後再跳登入
+    setTimeout(function(){
+      if (typeof doLogin === 'function') doLogin();
+    }, 200);
+  } catch(e){
+    console.warn('auto-login 失敗', e);
+  }
 }
+// 頁面載入後跰 checkSession 動作自動登入
+document.addEventListener('DOMContentLoaded', function(){
+  setTimeout(checkSession, 100);
+});
 
 // ── 初始化 ────────────────────────────────────────────────
 let currentSection = 'dashboard';
