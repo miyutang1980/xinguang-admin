@@ -212,7 +212,12 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       </div>
     </div>
     <div class="sidebar-bottom">
-      <button onclick="doLogout()">登出</button>
+      <button id="btnSaveSidebar" onclick="saveAndSync()" style="background:#2B7A4B;color:#fff;font-weight:700;font-size:0.9rem;padding:12px;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:6px;transition:all 0.3s">
+        <span id="saveBtnIcon">✅</span>
+        <span id="saveBtnLabel">已存檔</span>
+      </button>
+      <div id="saveBtnHint" style="font-size:0.7rem;color:rgba(255,255,255,0.55);text-align:center;margin-bottom:10px">資料已同步 Google Sheets</div>
+      <button onclick="doLogout()" style="background:rgba(255,255,255,0.08)">登出</button>
     </div>
   </nav>
 
@@ -265,6 +270,105 @@ var _DB = {"inquiries": [], "bookings": [], "camp": [], "assessments": [], "regi
 
 function loadData() { return _DB; }
 function saveData(data) { _DB = data; updateBadges(data); }
+
+// ===== 「未存檔變更」狀態追蹤 =====
+// 每次寫入操作（新增/刪除/編輯）都呼叫 markUnsaved()、
+// 給存檔按鈕變橙色提醒「還有未同步變更」。
+window._unsavedChanges = 0;
+window._lastSyncAt = null;
+
+function markUnsaved(label){
+  window._unsavedChanges = (window._unsavedChanges || 0) + 1;
+  if (label) console.log('[unsaved]', label, '· total:', window._unsavedChanges);
+  updateSaveButtonUI();
+}
+
+function updateSaveButtonUI(){
+  var btn = document.getElementById('btnSaveSidebar');
+  var icon = document.getElementById('saveBtnIcon');
+  var label = document.getElementById('saveBtnLabel');
+  var hint = document.getElementById('saveBtnHint');
+  if (!btn) return;
+
+  var n = window._unsavedChanges || 0;
+  if (n > 0){
+    // 還有未存檔 → 橙色 + 軝動提醒
+    btn.style.background = '#F59E0B';
+    btn.style.boxShadow = '0 0 0 0 rgba(245,158,11,0.6)';
+    btn.style.animation = 'pulseSave 1.5s infinite';
+    icon.textContent = '💾';
+    label.textContent = '存檔 · ' + n + ' 筆未同步';
+    hint.textContent = '點存檔確認雲端資料同步';
+    hint.style.color = '#FCD34D';
+  } else {
+    // 都同步了 → 綠色透光
+    btn.style.background = '#2B7A4B';
+    btn.style.boxShadow = '';
+    btn.style.animation = '';
+    icon.textContent = '✅';
+    label.textContent = '已存檔';
+    if (window._lastSyncAt){
+      var t = new Date(window._lastSyncAt);
+      var ago = Math.round((Date.now() - window._lastSyncAt)/1000);
+      var agoStr = ago < 5 ? '剛剛' : ago < 60 ? (ago + ' 秒前') : ago < 3600 ? (Math.round(ago/60) + ' 分鐘前') : '已久';
+      hint.textContent = '最後同步：' + agoStr;
+    } else {
+      hint.textContent = '資料已同步 Google Sheets';
+    }
+    hint.style.color = 'rgba(255,255,255,0.55)';
+  }
+}
+
+// 「存檔」按鈕主動作：跳 syncFromSheets() 重拉雲端 + 重設計數
+async function saveAndSync(){
+  var btn = document.getElementById('btnSaveSidebar');
+  var icon = document.getElementById('saveBtnIcon');
+  var label = document.getElementById('saveBtnLabel');
+  if (!btn) return;
+
+  // 顯示 loading
+  btn.disabled = true;
+  btn.style.background = '#6B7280';
+  btn.style.animation = '';
+  icon.textContent = '⏳';
+  label.textContent = '存檔中...';
+
+  try {
+    if (typeof window.syncFromSheets === 'function'){
+      await window.syncFromSheets();
+    }
+    window._unsavedChanges = 0;
+    window._lastSyncAt = Date.now();
+    if (typeof showToast === 'function') showToast('✅ 已存檔、已同步 Google Sheets');
+  } catch(e){
+    if (typeof showToast === 'function') showToast('❌ 存檔失敗：' + (e.message || e));
+    else alert('存檔失敗：' + (e.message || e));
+  } finally {
+    btn.disabled = false;
+    setTimeout(updateSaveButtonUI, 300);
+  }
+}
+
+// 定期更新「多久以前同步」文字
+setInterval(updateSaveButtonUI, 30000);
+
+// 離開頁面提醒未存檔變更
+window.addEventListener('beforeunload', function(e){
+  if ((window._unsavedChanges || 0) > 0){
+    e.preventDefault();
+    e.returnValue = '您還有 ' + window._unsavedChanges + ' 筆未存檔的變更，確定要離開嗎？';
+    return e.returnValue;
+  }
+});
+
+// 軝動動畫設定
+(function(){
+  if (document.getElementById('savePulseCSS')) return;
+  var style = document.createElement('style');
+  style.id = 'savePulseCSS';
+  style.textContent = '@keyframes pulseSave{0%{box-shadow:0 0 0 0 rgba(245,158,11,0.6)}70%{box-shadow:0 0 0 10px rgba(245,158,11,0)}100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}}';
+  document.head.appendChild(style);
+})();
 function emptyData() {
   return { inquiries:[], bookings:[], camp:[], assessments:[], registrations:[] };
 }
@@ -316,7 +420,7 @@ async function doLogin() {
         };
         // 暫存密碼到 sessionStorage（帳號管理頁面需要驗證 admin 身份）
         // sessionStorage 關掛瀏覽器就清除，比 localStorage 安全
-        try { sessionStorage.setItem('xg_session_pwd', p); } catch(e){}
+        try { sessionStorage.setItem('xg_session_pwd', p); localStorage.setItem('xg_admin_pwd', p); } catch(e){}
         errEl.style.display = 'none';
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appScreen').style.display = 'flex';
@@ -405,7 +509,7 @@ function applyPermissions() {
 function doLogout() {
   _loggedIn = false;
   _currentUser = null;
-  try { sessionStorage.removeItem('xg_session_pwd'); } catch(e){}
+  try { sessionStorage.removeItem('xg_session_pwd'); localStorage.removeItem('xg_admin_pwd'); } catch(e){}
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
   _DB = emptyData();
@@ -4810,10 +4914,15 @@ async function callAccountApi(action, extra){
   if(!_currentUser || _currentUser.role !== 'admin') {
     return { success:false, error:'只有管理員可以操作' };
   }
-  // 從 sessionStorage 取 admin 密碼（登入時暫存）
-  var adminPass = sessionStorage.getItem('xg_session_pwd');
+  // 先從 sessionStorage 取 admin 密碼，session 遺失則備援 localStorage（加長 session 避免繽重登）
+  var adminPass = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
   if(!adminPass){
-    return { success:false, error:'登入憑證遺失，請重新登入' };
+    // 動態向使用者要密碼一次，不幫重新跳登入頁
+    adminPass = prompt('需要確認您的管理者密碼以繼續操作：');
+    if(!adminPass) return { success:false, error:'未提供密碼' };
+    // 寫回兩個倉存，後續不再問
+    sessionStorage.setItem('xg_session_pwd', adminPass);
+    localStorage.setItem('xg_admin_pwd', adminPass);
   }
   var payload = Object.assign({
     action: action,
@@ -4969,6 +5078,7 @@ function showPasswordModal(account, name){
       btn.disabled=true;btn.textContent='⏳ 寫入 Google Sheets...';
       var r=await callAccountApi('changePassword',{ targetUser: account, newPassword: p1 });
       if(r.success){
+        markUnsaved('帳號改密碼');
         addAccountLog('改密碼', account, '密碼已更新（'+name+'）');
         closeModal();
         if(typeof showToast==='function')showToast('✅ '+(r.message||'密碼已更新'));
@@ -4989,6 +5099,7 @@ function showStatusModal(account, name, newStatus){
   if(!confirm('確定要將「'+name+'」('+account+') '+newStatus+'？')) return;
   (async function(){
     var r=await callAccountApi('changeStatus',{ targetUser: account, newStatus: newStatus });
+    if(r.success) markUnsaved('帳號狀態變更');
     if(r.success){
       addAccountLog(newStatus, account, '帳號已'+newStatus+'（'+name+'）');
       if(typeof showToast==='function')showToast('✅ '+(r.message||'狀態已更新'));
@@ -5038,6 +5149,7 @@ function showDeleteAccountModal(account, name){
       btn.disabled = true; btn.textContent = '⏳ 刪除中…';
       var r = await callAccountApi('deleteAccount', { targetUser: account });
       if(r.success){
+        markUnsaved('刪除帳號');
         addAccountLog('刪除', account, '帳號已刪除（' + dispName + '）');
         closeModal();
         if(typeof showToast === 'function') showToast('✅ ' + (r.message || '帳號已刪除'));
@@ -7086,6 +7198,7 @@ function _renderStudentsView(el) {
       }
       ev.target.style.background = '#FFFBEB';
       const res = await _studentsCall('save', { row_index, field, value });
+      if (res && res.success) markUnsaved('學生編輯');
       if (res.success) {
         ev.target.style.background = '#D1FAE5';
         // 同步本地快取
@@ -7156,6 +7269,7 @@ async function _studentsDoCreate() {
   };
   if (!data.chinese_name) { alert('中文姓名必填'); return; }
   const res = await _studentsCall('create', { data });
+  if (res && res.success) markUnsaved('新增學生');
   if (res.success) {
     if (typeof closeModal === 'function') closeModal();
     alert('已建立學生 ' + res.student_id);
@@ -7165,44 +7279,57 @@ async function _studentsDoCreate() {
   }
 }
 
-// 刪除學生：軟刪除 (status=left/deleted) 或 硬刪除 (整列刪)
+// 刪除學生：預設軟刪除（改為離校，保留資料）、附上 undo toast。
+// 要永久刪除請到 Google Sheets 手動處理（不介面上提供，避免誤點）
 async function _studentsDelete(row_index, name, sid) {
-  const choice = await _confirmDialog({
-    title: '刪除學生：' + name + ' (' + sid + ')',
-    message: '請選擇刪除方式：',
-    options: [
-      { label: '軟刪除 (改為離校，保留資料)', value: 'soft', color: '#0EA5E9' },
-      { label: '硬刪除 (永久從 Sheets 刪掉整列)', value: 'hard', color: '#DC2626' },
-      { label: '取消', value: '', color: '#6B7280' }
-    ]
-  });
-  if (!choice) return;
-  if (choice === 'soft') {
-    const res = await _studentsCall('save', { row_index, field: 'status', value: 'left' });
-    if (res.success) {
-      const local = _studentsRows.find(x => x.row_index === row_index);
-      if (local) local.status = 'left';
-      _renderStudentsView(document.getElementById('mainContent'));
-      alert('已軟刪除 (改為離校)');
-    } else {
-      alert('刪除失敗：' + (res.error || ''));
-    }
-    return;
-  }
-  // 硬刪除 雙重確認
-  const confirm2 = prompt('硬刪除無法復原。\n\n請輸入學生姓名「' + name + '」以確認：');
-  if (confirm2 !== name) { alert('姓名不符，已取消刪除'); return; }
-  const res = await _studentsCall('hard_delete', { row_index });
-  // n8n hard_delete 成功時回 respond；失敗時可能無回應
-  if (res && res.success) {
-    alert('已永久刪除 ' + name);
-    renderStudents(document.getElementById('mainContent'));
-  } else if (res && res.error) {
-    alert('刪除失敗：' + res.error);
+  // 一鍵軟刪除，不再關軟/硬選擇、不要打學生姓名
+  if (!confirm('刪除學生「' + name + '」？\n\n該生會被設為「離校」、不再顯示在名單，\n但資料仍保留可以復原。')) return;
+  
+  const res = await _studentsCall('save', { row_index, field: 'status', value: 'left' });
+  if (res.success) {
+    markUnsaved('刪除學生');
+    const local = _studentsRows.find(x => x.row_index === row_index);
+    if (local) local.status = 'left';
+    _renderStudentsView(document.getElementById('mainContent'));
+    showToast('已刪除 ' + name, '復原', async function(){
+      const r = await _studentsCall('save', { row_index, field: 'status', value: 'active' });
+      if (r.success) {
+        if (local) local.status = 'active';
+        _renderStudentsView(document.getElementById('mainContent'));
+        showToast('已復原 ' + name);
+      } else {
+        showToast('復原失敗：' + (r.error||''));
+      }
+    });
   } else {
-    alert('已送出刪除請求。請重新載入確認。');
-    renderStudents(document.getElementById('mainContent'));
+    alert('刪除失敗：' + (res.error || ''));
   }
+}
+
+// 右下角 toast，帶可選 undo 按鈕。5 秒後自動消失。
+function showToast(message, undoLabel, undoFn) {
+  let toast = document.getElementById('xg-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'xg-toast';
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:#0D1B2A;color:#fff;padding:14px 20px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.25);font-size:0.92rem;font-weight:600;z-index:99999;display:flex;align-items:center;gap:14px;max-width:360px;transform:translateY(20px);opacity:0;transition:all 0.3s ease;pointer-events:none';
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = '<span>' + message + '</span>';
+  if (undoLabel && undoFn) {
+    const btn = document.createElement('button');
+    btn.textContent = undoLabel;
+    btn.style.cssText = 'background:#7DFFB3;color:#0D1B2A;border:none;border-radius:6px;padding:6px 12px;font-weight:700;cursor:pointer;font-size:0.85rem';
+    btn.onclick = function(){ toast.style.opacity='0'; setTimeout(function(){ toast.style.pointerEvents='none'; }, 300); undoFn(); };
+    toast.appendChild(btn);
+  }
+  // 顟示
+  setTimeout(function(){ toast.style.transform='translateY(0)'; toast.style.opacity='1'; toast.style.pointerEvents='auto'; }, 10);
+  // 5 秒後消失
+  if (window._xg_toast_timer) clearTimeout(window._xg_toast_timer);
+  window._xg_toast_timer = setTimeout(function(){
+    toast.style.transform='translateY(20px)'; toast.style.opacity='0'; toast.style.pointerEvents='none';
+  }, 5000);
 }
 
 // ── 4 表（問課/預約/夏令營/正式報名）刪除工具 ─────────────────────────
@@ -7221,6 +7348,7 @@ function _addToDeletedFormsSet(collection, ts) {
   var s = getDeletedFormsSet();
   s.add(collection + ':' + (ts||''));
   _saveDeletedFormsSet(s);
+  if (typeof markUnsaved === 'function') markUnsaved('表單刪除: ' + collection);
 }
 
 // 對應 collection → render 函數 + 顯示名稱
@@ -7231,7 +7359,8 @@ var _FORM_META = {
   registrations: { name: '正式報名',   render: function(){ if(typeof renderRegister==='function') renderRegister(document.getElementById('mainContent')); } }
 };
 
-// 主入口：選擇刪除方式
+// 主入口：預設軟刪除（隱藏此筆、Sheets 仍保留）、附 toast undo。
+// 要永久刪除請到 Google Sheets 手動處理。
 async function _formDelete(collection, idx) {
   var d = loadData();
   var arr = (d[collection] || []);
@@ -7240,67 +7369,28 @@ async function _formDelete(collection, idx) {
   var displayName = r.parent || r.pname || r.studentName || r.sname || '（無姓名）';
   var meta = _FORM_META[collection] || { name: collection, render: function(){} };
 
-  var choice = await _confirmDialog({
-    title: '刪除' + meta.name + '：' + displayName,
-    message: '請選擇刪除方式：\n\n軟刪除 = 隱藏此筆，Sheets 仍保留\n硬刪除 = 永久從 Google Sheets 刪掉整列',
-    options: [
-      { label: '軟刪除 (隱藏，可至設定回復)', value: 'soft', color: '#0EA5E9' },
-      { label: '硬刪除 (永久從 Sheets 刪掉)',   value: 'hard', color: '#DC2626' },
-      { label: '取消',                         value: '',     color: '#6B7280' }
-    ]
-  });
-  if (!choice) return;
+  // 一鍵軟刪除，不再關軟/硬選擇、不要打家長姓名
+  if (!confirm('刪除' + meta.name + '「' + displayName + '」？\n\n這筆資料會被隱藏、不再顯示。\n原始資料仍在 Google Sheets，可以復原。')) return;
 
-  if (choice === 'soft') {
-    _addToDeletedFormsSet(collection, r.ts);
-    // 從目前 _DB 移除一筆
+  _addToDeletedFormsSet(collection, r.ts);
+  if (Array.isArray(_DB[collection])) {
+    _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+    if (typeof saveData === 'function') saveData(_DB);
+  }
+  meta.render();
+  
+  // toast 帶 undo
+  showToast('已刪除 ' + displayName, '復原', function(){
+    var s = getDeletedFormsSet();
+    s.delete(collection + ':' + (r.ts||''));
+    _saveDeletedFormsSet(s);
     if (Array.isArray(_DB[collection])) {
-      _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+      _DB[collection].push(r);
       if (typeof saveData === 'function') saveData(_DB);
     }
-    if (typeof showToast === 'function') showToast('✅ 已軟刪除');
-    else alert('已軟刪除');
     meta.render();
-    return;
-  }
-
-  // 硬刪除：雙重確認
-  if (!r._rowIndex || r._rowIndex < 2) {
-    alert('此筆資料缺 row_index（請先按「同步」按鈕重新從 Sheets 載入後再試）');
-    return;
-  }
-  var confirm2 = prompt('硬刪除無法復原。\n\n請輸入家長姓名「' + displayName + '」以確認：');
-  if (confirm2 !== displayName) { alert('姓名不符，已取消刪除'); return; }
-
-  try {
-    var resp = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'hard_delete',
-        admin_username: (_currentUser && _currentUser.username) || 'admin',
-        admin_role: (_currentUser && _currentUser.role) || 'admin',
-        collection: collection,
-        row_index: r._rowIndex
-      })
-    });
-    var result = {};
-    try { result = await resp.json(); } catch(e) {}
-    if (resp.ok && result && result.success !== false) {
-      _addToDeletedFormsSet(collection, r.ts);  // 同時加軟刪 set，避免下次同步又跑出來
-      if (Array.isArray(_DB[collection])) {
-        _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
-        if (typeof saveData === 'function') saveData(_DB);
-      }
-      if (typeof showToast === 'function') showToast('✅ 已永久刪除');
-      else alert('已永久刪除 ' + displayName);
-      meta.render();
-    } else {
-      alert('刪除失敗：' + (result.error || ('HTTP ' + resp.status)));
-    }
-  } catch(e) {
-    alert('網路錯誤：' + e.message);
-  }
+    showToast('已復原 ' + displayName);
+  });
 }
 
 // 三選一確認 dialog：返回 Promise<value>
