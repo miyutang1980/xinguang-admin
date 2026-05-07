@@ -7195,7 +7195,7 @@ async function _pickupCall(url, payload) {
 // ========================================================================
 // ─── W16 接送明細 webhook ───
 const PICKUP_DETAILS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/pickup-details';
-const SCHOOLS_LIST = [
+const _BUILTIN_SCHOOLS = [
   {code:'SCH-001', name:'新光國小'}, {code:'SCH-002', name:'新高國小'},
   {code:'SCH-003', name:'廍子國小'}, {code:'SCH-004', name:'軍功國小'},
   {code:'SCH-005', name:'新興國小'}, {code:'SCH-006', name:'成功國小'},
@@ -7203,6 +7203,16 @@ const SCHOOLS_LIST = [
   {code:'SCH-009', name:'力行國小'}, {code:'SCH-010', name:'北屯國小'},
   {code:'SCH-011', name:'新平國小'}
 ];
+// SCHOOLS_LIST = 內建 + 自訂 (localStorage)· 讀取時即時合併
+Object.defineProperty(window, 'SCHOOLS_LIST', {
+  get: function(){
+    var custom = [];
+    try { custom = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]'); } catch(e){}
+    var customObjs = custom.map(function(name, i){ return {code:'SCH-CUSTOM-' + (i+1).toString().padStart(3,'0'), name:name}; });
+    return _BUILTIN_SCHOOLS.concat(customObjs);
+  },
+  configurable: true
+});
 
 // 車輛清單(車型+座數;步行 = 無車)
 const VEHICLES_LIST = [
@@ -8552,7 +8562,13 @@ async function renderStudents(el) {
     ]);
     if (!listRes.success) { el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">讀取失敗:' + (listRes.error || '未知錯誤') + '</div>'; return; }
     _studentsRows = listRes.rows || [];
-    _schoolsList = (schoolsRes.schools || []).map(s => s.school_name);
+    // 合併：n8n 名單 + 手動新增 (localStorage)· 避免重複
+    var n8nSchools = (schoolsRes.schools || []).map(s => s.school_name);
+    var customSchools = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]');
+    var combined = n8nSchools.slice();
+    customSchools.forEach(function(s){ if (combined.indexOf(s) < 0) combined.push(s); });
+    _schoolsList = combined;
+    window._n8nSchools = n8nSchools;  // 讓學校管理彈窗區分「內建」與「自訂」
     _renderStudentsView(el);
   } catch (e) {
     el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">連線失敗:' + e.message + '</div>';
@@ -8592,6 +8608,7 @@ function _renderStudentsView(el) {
         <option value="" ${f.status===''?'selected':''}>全部狀態</option>
       </select>
       <button class="btn btn-green" onclick="_studentsAddNew()">＋ 新增學生</button>
+      <button class="btn btn-outline" onclick="_openSchoolsManager()" style="border-color:#0EA5E9;color:#0EA5E9">🏫 學校管理</button>
       <button class="btn btn-outline" onclick="renderStudents(document.getElementById('mainContent'))">🔄 重新整理</button>
       <span style="color:#777;font-size:0.82rem">共 ${filtered.length} / ${_studentsRows.length} 筆</span>
     </div>`;
@@ -8678,6 +8695,95 @@ function _renderStudentsView(el) {
 }
 
 function _esc(s) { if (s==null) return ''; return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// 學校管理彈窗
+function _openSchoolsManager() {
+  var n8n = window._n8nSchools || [];
+  var custom = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]');
+
+  var html = '<div style="max-width:560px">';
+  html += '<div style="background:#F0F9FF;border-left:4px solid #0EA5E9;padding:10px 14px;border-radius:6px;margin-bottom:14px">';
+  html += '<div style="font-weight:700;color:#0C4A6E;font-size:0.95rem">🏫 學校管理</div>';
+  html += '<div style="font-size:0.78rem;color:#075985;margin-top:3px">新增學校後，「學生管理」與「接送排程」的下拉選單會出現。資料存在本機瀏覽器、不同機需各自新增。</div>';
+  html += '</div>';
+
+  // 新增表單
+  html += '<div style="display:flex;gap:8px;margin-bottom:14px">';
+  html += '<input id="newSchoolName" type="text" placeholder="輸入新學校名稱 (如：太平國小)" '
+    + 'style="flex:1;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem" '
+    + 'onkeypress="if(event.key===\'Enter\') _addCustomSchool()">';
+  html += '<button class="btn btn-green" onclick="_addCustomSchool()" style="padding:8px 18px;white-space:nowrap">+ 新增</button>';
+  html += '</div>';
+
+  // 內建學校列表
+  html += '<div style="margin-bottom:14px"><div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:8px">📊 系統內建學校（' + n8n.length + ' 間）</div>';
+  html += '<div style="max-height:160px;overflow-y:auto;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:6px;padding:8px">';
+  if (n8n.length === 0) {
+    html += '<div style="color:#9CA3AF;text-align:center;padding:14px;font-size:0.85rem">未設定內建學校</div>';
+  } else {
+    n8n.forEach(function(s){
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;font-size:0.88rem"><span>🏫 ' + s + '</span><span style="color:#9CA3AF;font-size:0.72rem">內建</span></div>';
+    });
+  }
+  html += '</div></div>';
+
+  // 自訂學校列表
+  html += '<div><div style="font-size:0.85rem;font-weight:700;color:#374151;margin-bottom:8px">✨ 自訂學校（' + custom.length + ' 間）</div>';
+  html += '<div id="customSchoolsList" style="max-height:200px;overflow-y:auto;background:#FFFBEB;border:1px solid #FCD34D;border-radius:6px;padding:8px">';
+  if (custom.length === 0) {
+    html += '<div style="color:#9CA3AF;text-align:center;padding:14px;font-size:0.85rem">還沒有自訂學校，上面輸入名稱按「新增」</div>';
+  } else {
+    custom.forEach(function(s, i){
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#fff;border-radius:4px;margin-bottom:4px;font-size:0.88rem">'
+        + '<span style="font-weight:600">🏫 ' + _esc(s) + '</span>'
+        + '<button onclick="_removeCustomSchool(' + i + ')" style="padding:3px 10px;background:#fff;border:1px solid #DC2626;color:#DC2626;border-radius:4px;cursor:pointer;font-size:0.75rem">🗑️ 刪除</button></div>';
+    });
+  }
+  html += '</div></div>';
+
+  html += '<div style="display:flex;justify-content:flex-end;margin-top:16px;border-top:1px solid #eee;padding-top:12px">';
+  html += '<button class="btn btn-outline" onclick="closeModal()">關閉</button>';
+  html += '</div></div>';
+
+  document.getElementById('modalTitle').textContent = '🏫 學校管理';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _addCustomSchool() {
+  var input = document.getElementById('newSchoolName');
+  var name = (input.value || '').trim();
+  if (!name) { input.focus(); return; }
+  var n8n = window._n8nSchools || [];
+  var custom = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]');
+  if (n8n.indexOf(name) >= 0) { showToast('「' + name + '」已是內建學校'); return; }
+  if (custom.indexOf(name) >= 0) { showToast('「' + name + '」已在自訂列表裡'); return; }
+  custom.push(name);
+  localStorage.setItem('xg_custom_schools', JSON.stringify(custom));
+  // 同步更新全局名單
+  if (Array.isArray(_schoolsList) && _schoolsList.indexOf(name) < 0) _schoolsList.push(name);
+  showToast('✅ 已新增學校：' + name);
+  input.value = '';
+  _openSchoolsManager(); // 重繪彈窗
+}
+
+function _removeCustomSchool(idx) {
+  var custom = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]');
+  if (idx < 0 || idx >= custom.length) return;
+  var name = custom[idx];
+  // 檢查是否有學生使用這個學校
+  var inUse = (_studentsRows || []).filter(function(r){ return r.school_name === name; }).length;
+  var msg = '確定刪除「' + name + '」？';
+  if (inUse > 0) msg += '\n\n⚠️ 有 ' + inUse + ' 位學生註冊在這間學校，刪除後他們的「就讀學校」欄會變空。';
+  if (!confirm(msg)) return;
+  custom.splice(idx, 1);
+  localStorage.setItem('xg_custom_schools', JSON.stringify(custom));
+  // 同步更新全局名單
+  var pos = (_schoolsList || []).indexOf(name);
+  if (pos >= 0) _schoolsList.splice(pos, 1);
+  showToast('已刪除學校：' + name);
+  _openSchoolsManager(); // 重繪彈窗
+}
 
 function _studentsAddNew() {
   const schoolOpts = _schoolsList.map(s => '<option value="'+_esc(s)+'">'+_esc(s)+'</option>').join('');
