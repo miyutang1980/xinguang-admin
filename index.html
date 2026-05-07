@@ -8121,6 +8121,17 @@ function _renderTodayUI(allRows, requests) {
   }
 
   // 今日路線詳細表
+  // 收集所有出現過的老師 (供「轉交」下拉選單使用)
+  var allTeachers = new Set();
+  allRows.forEach(function(rr){
+    [rr.noon_driver, rr.noon_driver2, rr.pm_driver, rr.pm_driver2].forEach(function(t){
+      if (t && t.trim()) allTeachers.add(t.trim());
+    });
+  });
+  window._todayTeachers = Array.from(allTeachers).sort();
+  // 快取今日 working rows、供轉交彈窗用
+  window._todayWorkingRows = working;
+
   html += '<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">';
   html += '<div style="padding:14px 20px;background:#F9FAFB;border-bottom:1px solid #eee;font-weight:700;display:flex;justify-content:space-between;align-items:center">';
   html += '<span>📋 今日路線詳細</span>';
@@ -8131,28 +8142,36 @@ function _renderTodayUI(allRows, requests) {
   } else {
     html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
     html += '<thead><tr style="background:#F3F4F6"><th style="padding:10px 12px;text-align:left;border-bottom:1px solid #eee">路線</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午車輛/司機</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午人數</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">中午出發</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午車輛/司機</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午人數</th>';
-    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee">下午出發</th></tr></thead><tbody>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee;background:#E6F7F5" colspan="4">🔴 中午班</th>';
+    html += '<th style="padding:10px 12px;text-align:center;border-bottom:1px solid #eee;background:#F3EBFF" colspan="4">🟣 下午班</th></tr>';
+    html += '<tr style="background:#F9FAFB"><th style="border:none"></th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#01696F">車輛/司機</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#01696F">人數</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#01696F">出發</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#01696F">轉交</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#7C3AED">車輛/司機</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#7C3AED">人數</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#7C3AED">出發</th>';
+    html += '<th style="padding:6px 10px;text-align:center;font-size:0.78rem;color:#7C3AED">轉交</th></tr></thead><tbody>';
     working.forEach(function(r){
+      var rid = r.row_index;
       html += '<tr style="border-bottom:1px solid #f3f4f6">';
       html += '<td style="padding:10px 12px;font-weight:600">' + (r.route||'-') + '<div style="font-size:0.72rem;color:#9CA3AF;font-weight:400">上限 ' + (r.capacity||'-') + ' 人</div></td>';
       html += '<td style="padding:10px 12px;text-align:center">' + (r.noon_vehicle||'-') + '<div style="font-size:0.78rem;color:#6B7280">' + (r.noon_driver||'-') + (r.noon_driver2?' / '+r.noon_driver2:'') + '</div></td>';
       html += '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + (parseInt(r.noon_count,10)>0?'#01696F':'#9CA3AF') + '">' + (r.noon_count||0) + '</td>';
       html += '<td style="padding:10px 12px;text-align:center;font-family:monospace">' + (r.noon_time||'-') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:center">' + (r.noon_driver ? '<button onclick="_openTodayTransfer(' + rid + ',\'noon\')" style="padding:5px 10px;background:#fff;border:1.5px solid #01696F;color:#01696F;border-radius:5px;cursor:pointer;font-size:0.78rem;font-weight:600">🔄 轉交</button>' : '<span style="color:#cbd5e1">—</span>') + '</td>';
       html += '<td style="padding:10px 12px;text-align:center">' + (r.pm_vehicle||'-') + '<div style="font-size:0.78rem;color:#6B7280">' + (r.pm_driver||'-') + (r.pm_driver2?' / '+r.pm_driver2:'') + '</div></td>';
       html += '<td style="padding:10px 12px;text-align:center;font-weight:700;color:' + (parseInt(r.pm_count,10)>0?'#7C3AED':'#9CA3AF') + '">' + (r.pm_count||0) + '</td>';
       html += '<td style="padding:10px 12px;text-align:center;font-family:monospace">' + (r.pm_time||'-') + '</td>';
+      html += '<td style="padding:8px 10px;text-align:center">' + (r.pm_driver ? '<button onclick="_openTodayTransfer(' + rid + ',\'pm\')" style="padding:5px 10px;background:#fff;border:1.5px solid #7C3AED;color:#7C3AED;border-radius:5px;cursor:pointer;font-size:0.78rem;font-weight:600">🔄 轉交</button>' : '<span style="color:#cbd5e1">—</span>') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table></div>';
   }
   html += '</div>';
 
-  html += '<div class="card" style="padding:16px 20px;background:#F0FDF4;border-left:4px solid #16A34A;color:#166534;font-size:0.85rem">💡 <strong>提示</strong>：指派細節名單可在<a href="javascript:switchSection(\'pickup\')" style="color:#01696F;font-weight:600">接送排程</a>表格點「學生名單 · 查看」查詢；老師端名單請走 LINE LIFF。</div>';
+  html += '<div class="card" style="padding:16px 20px;background:#F0FDF4;border-left:4px solid #16A34A;color:#166534;font-size:0.85rem">💡 <strong>提示</strong>：老師請假或臨時變動 → 點那一班「🔄 轉交」選新老師 + 填原因· 一鍵打完收工。複雜狀況（師互換、多期轉）請到 <a href="javascript:switchSection(\'transfer\')" style="color:#01696F;font-weight:600">強制轉交</a> 處理。</div>';
   html += '</div>';
 
   // bind refresh
@@ -8161,6 +8180,114 @@ function _renderTodayUI(allRows, requests) {
     if(rb) rb.onclick = function(){ switchSection('assignments'); };
   }, 50);
   return html;
+}
+
+// 今日接送 · 快捷轉交彈窗 (不離開今日接送頁)
+function _openTodayTransfer(rowIndex, session) {
+  var r = (window._todayWorkingRows || []).find(function(x){ return x.row_index === rowIndex; });
+  if (!r) { alert('找不到這筆排程'); return; }
+  var teachers = window._todayTeachers || [];
+  var sessionLabel = session === 'noon' ? '中午班' : '下午班';
+  var color = session === 'noon' ? '#01696F' : '#7C3AED';
+  var lightBg = session === 'noon' ? '#E6F7F5' : '#F3EBFF';
+  var origDriver = session === 'noon' ? r.noon_driver : r.pm_driver;
+  var departTime = session === 'noon' ? r.noon_time : r.pm_time;
+  var vehicle = session === 'noon' ? r.noon_vehicle : r.pm_vehicle;
+
+  // 移除舊彈窗
+  document.getElementById('quick-transfer-overlay')?.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'quick-transfer-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var teacherOpts = '<option value="">請選新老師</option>'
+    + teachers.filter(function(t){ return t !== origDriver; })
+      .map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join('');
+  overlay.innerHTML = '<div style="background:#fff;border-radius:10px;width:520px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden">'
+    + '<div style="padding:16px 20px;background:' + color + ';color:#fff;display:flex;justify-content:space-between;align-items:center">'
+    +   '<div><div style="font-weight:700;font-size:1.05rem">🔄 轉交 · ' + sessionLabel + '</div>'
+    +       '<div style="font-size:0.78rem;opacity:0.9;margin-top:2px">' + (r.route||'') + ' · ' + (departTime||'') + '</div></div>'
+    +   '<button onclick="document.getElementById(\'quick-transfer-overlay\').remove()" style="background:transparent;color:#fff;border:none;font-size:1.6rem;cursor:pointer;padding:0;line-height:1">×</button>'
+    + '</div>'
+    + '<div style="padding:20px">'
+    +   '<div style="background:' + lightBg + ';border-left:3px solid ' + color + ';padding:10px 12px;border-radius:6px;margin-bottom:14px;font-size:0.85rem">'
+    +     '<div><strong>原老師：</strong>' + (origDriver||'(未設)') + '</div>'
+    +     '<div style="margin-top:2px"><strong>車輛：</strong>' + (vehicle||'-') + ' · <strong>出發：</strong>' + (departTime||'-') + '</div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:12px"><label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:5px">新接送老師 <span style="color:#dc2626">*</span></label>'
+    +     '<select id="qt-teacher" style="width:100%;padding:9px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">' + teacherOpts + '</select></div>'
+    +   '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">'
+    +     '<div><label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:5px">原因</label>'
+    +       '<select id="qt-reason" style="width:100%;padding:9px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.9rem">'
+    +         '<option value="sick">臨時請假</option>'
+    +         '<option value="late">遲到</option>'
+    +         '<option value="leave">排假代理</option>'
+    +         '<option value="emergency">緊急</option>'
+    +         '<option value="other">其他</option>'
+    +       '</select></div>'
+    +     '<div><label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:5px">緊急</label>'
+    +       '<select id="qt-emergency" style="width:100%;padding:9px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.9rem">'
+    +         '<option value="false">否</option><option value="true">是</option></select></div>'
+    +   '</div>'
+    +   '<div style="margin-bottom:14px"><label style="font-size:0.85rem;font-weight:600;color:#374151;display:block;margin-bottom:5px">說明 (可選)</label>'
+    +     '<input type="text" id="qt-detail" placeholder="例：感冒發燒、車票來不及…" style="width:100%;padding:9px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.9rem"></div>'
+    +   '<div id="qt-msg" style="font-size:0.82rem;color:#dc2626;margin-bottom:8px;min-height:18px"></div>'
+    +   '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +     '<button onclick="document.getElementById(\'quick-transfer-overlay\').remove()" style="padding:9px 16px;border:1.5px solid #d4d1ca;background:#fff;color:#374151;border-radius:6px;cursor:pointer">取消</button>'
+    +     '<button id="qt-submit" onclick="_doQuickTransfer(' + rowIndex + ',\'' + session + '\')" style="padding:9px 18px;background:' + color + ';color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">✅ 執行轉交</button>'
+    +   '</div>'
+    + '</div></div>';
+  document.body.appendChild(overlay);
+}
+
+async function _doQuickTransfer(rowIndex, session) {
+  var teacher = document.getElementById('qt-teacher').value;
+  var reason = document.getElementById('qt-reason').value;
+  var emergency = document.getElementById('qt-emergency').value === 'true';
+  var detail = document.getElementById('qt-detail').value.trim();
+  var msg = document.getElementById('qt-msg');
+  if (!teacher) { msg.textContent = '請選新老師'; return; }
+
+  var r = (window._todayWorkingRows || []).find(function(x){ return x.row_index === rowIndex; });
+  if (!r) { msg.textContent = '找不到排程資料'; return; }
+
+  var btn = document.getElementById('qt-submit');
+  btn.disabled = true; btn.textContent = '處理中…';
+
+  try {
+    var auth = JSON.parse(sessionStorage.getItem('user') || '{}');
+    var auth_payload = { admin_username: auth.username || 'admin', admin_role: auth.role || 'admin' };
+
+    // 1. 寫接送排程 Sheets：該 row 該 session 的 driver 改為新老師
+    var ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
+    var field = (session === 'noon' ? 'noon_driver' : 'pm_driver');
+    var saveResp = await fetch(ROUTE_API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(Object.assign({action:'save', row_index:rowIndex, field:field, value:teacher}, auth_payload))
+    });
+    var saveJson = await saveResp.json();
+    if (!saveJson.success) throw new Error(saveJson.error || '寫入失敗');
+
+    // 2. 記錄到 transfer events (供老師月報統計用)
+    try {
+      await _pickupCall(PICKUP_API.transfer, _adminPayload({
+        assignment_id: 'today-' + rowIndex + '-' + session + '-' + Date.now(),
+        new_teacher_name: teacher,
+        reason: reason,
+        reason_detail: detail || ('今日接送·' + (session==='noon'?'中午':'下午') + '·' + (r.route||'')),
+        is_emergency: emergency,
+        original_teacher: (session==='noon' ? r.noon_driver : r.pm_driver),
+        route: r.route, date: r.date, session: session
+      }));
+    } catch (e) { console.log('transfer event 記錄失敗 (忍受):', e); }
+
+    document.getElementById('quick-transfer-overlay').remove();
+    showToast('✅ 已轉交給 ' + teacher);
+    // 重新載入今日接送頁
+    renderPickupToday(document.getElementById('mainContent'));
+  } catch (e) {
+    msg.textContent = '失敗：' + e.message;
+    btn.disabled = false; btn.textContent = '✅ 執行轉交';
+  }
 }
 
 // ========================================================================
