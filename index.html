@@ -2458,6 +2458,18 @@ async function renderTrial(el) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '讀取失敗');
     _trialClasses = data.classes || [];
+    // 從第一班讀取體驗期間預設值
+    if(_trialClasses.length > 0){
+      var first = _trialClasses[0];
+      // 讀回來的可能是 trial_period 字串、也可能是 period_start/end 欄位、需要連繫看
+      var ps = first.period_start || (first.trial_period && first.trial_period.split('–')[0].trim()) || '';
+      var pe = first.period_end || (first.trial_period && first.trial_period.split('–')[1] && first.trial_period.split('–')[1].trim()) || '';
+      // trial_period 可能是 "5/8 · 6/18" 這種未帶年份、補上 2026/
+      if(ps && !/\d{4}/.test(ps)) ps = '2026/' + ps;
+      if(pe && !/\d{4}/.test(pe)) pe = '2026/' + pe;
+      _trialPeriodStart = _toDateInput(ps) || '2026-05-08';
+      _trialPeriodEnd = _toDateInput(pe) || '2026-06-18';
+    }
   } catch(e) {
     el.innerHTML = '<div style="padding:24px;color:#c00">載入失敗：' + e.message + '</div>';
     return;
@@ -2468,6 +2480,41 @@ async function renderTrial(el) {
 const GW_URL = 'https://script.google.com/macros/s/AKfycbyjXZExvejz1DAJX8boSyczq6ZH-qENJ_bFj0hkvkg7kwO6C17-GSYH-hiJgyC12y_Xpw/exec';
 let _trialClasses = [];
 let _trialDirty = false;
+let _trialPeriodStart = '2026-05-08';
+let _trialPeriodEnd = '2026-06-18';
+
+// 將 yyyy/m/d 轉為 <input type=date> 接受的 yyyy-mm-dd
+function _toDateInput(s){
+  if(!s) return '';
+  var m = String(s).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if(!m) return '';
+  return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+}
+// yyyy-mm-dd -> yyyy/m/d (Sheets 偏好這個格式)
+function _fromDateInput(s){
+  if(!s) return '';
+  var m = String(s).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+  if(!m) return '';
+  return m[1] + '/' + parseInt(m[2],10) + '/' + parseInt(m[3],10);
+}
+
+// 套用期間到所有班 (UI + state、需再按「儲存」寫入 Sheets)
+function _trialApplyPeriod(){
+  var s = (document.getElementById('trialPeriodStart')||{}).value;
+  var e = (document.getElementById('trialPeriodEnd')||{}).value;
+  if(!s || !e) { alert('請選開始與結束日期'); return; }
+  if(s > e) { alert('開始日期不能在結束日之後'); return; }
+  _trialPeriodStart = s;
+  _trialPeriodEnd = e;
+  var sFmt = _fromDateInput(s);
+  var eFmt = _fromDateInput(e);
+  _trialClasses.forEach(function(c){
+    c.period_start = sFmt;
+    c.period_end = eFmt;
+  });
+  if(typeof showToast==='function') showToast('✅ 已套用「'+sFmt+' · '+eFmt+'」到所有 '+_trialClasses.length+' 班，記得按「儲存」寫入主網站');
+  else alert('✅ 已套用到所有 '+_trialClasses.length+' 班，記得按「儲存到主網站」');
+}
 
 function _renderTrialUI(el) {
   var stats = '';
@@ -2500,6 +2547,22 @@ function _renderTrialUI(el) {
       💡 <strong>同步說明</strong>：改完一定要按「💾 儲存到主網站」才會生效。家長端會在 1-2 分鐘內看到更新。
     </div>
 
+    <div style="background:#F0FDF4;border:1.5px solid #BBF7D0;border-radius:10px;padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="font-weight:700;color:#166534">📅 體驗期間</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:0.82rem;color:#15803D">開始</span>
+          <input type="date" id="trialPeriodStart" value="${_trialPeriodStart}" style="padding:6px 10px;border:1.5px solid #BBF7D0;border-radius:6px;font-family:monospace">
+        </div>
+        <span style="color:#9CA3AF">→</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:0.82rem;color:#15803D">結束</span>
+          <input type="date" id="trialPeriodEnd" value="${_trialPeriodEnd}" style="padding:6px 10px;border:1.5px solid #BBF7D0;border-radius:6px;font-family:monospace">
+        </div>
+      </div>
+      <button id="trialApplyPeriodBtn" style="background:#2B7A4B;color:#fff;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:600;font-size:0.85rem">✨ 套用到所有班</button>
+    </div>
+
     <div class="table-wrap" style="overflow-x:auto">
       <table class="data-table" style="min-width:1100px">
         <thead>
@@ -2525,6 +2588,7 @@ function _renderTrialUI(el) {
   _renderTrialRows();
   document.getElementById('trialAddBtn').onclick = _trialAddRow;
   document.getElementById('trialSaveBtn').onclick = _trialSave;
+  document.getElementById('trialApplyPeriodBtn').onclick = _trialApplyPeriod;
 }
 
 function _renderTrialRows() {
@@ -2599,6 +2663,14 @@ async function _trialSave(){
   btn.disabled = true; btn.textContent = '⏳ 儲存中...';
   try {
     var classes = _collectTrialFromUI();
+    // 以 UI 上的期間覆蓋（避免使用者改期間但忘記按「套用到所有班」）
+    var sUI = (document.getElementById('trialPeriodStart')||{}).value;
+    var eUI = (document.getElementById('trialPeriodEnd')||{}).value;
+    if(sUI && eUI){
+      var sFmt = _fromDateInput(sUI);
+      var eFmt = _fromDateInput(eUI);
+      classes.forEach(function(c){ c.period_start = sFmt; c.period_end = eFmt; });
+    }
     if(classes.length === 0){
       if(!confirm('班表是空的，真的要把班表全部清掉嗎？')){ btn.disabled=false; btn.textContent='💾 儲存到主網站'; return; }
     }
