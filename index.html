@@ -183,6 +183,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       <div class="sidebar-item" onclick="switchSection('trial')" id="nav-trial">
         🗓️ 體驗課排班
       </div>
+      <div class="sidebar-item" onclick="switchSection('trialBookings')" id="nav-trialBookings">
+        📅 體驗預約 <span class="badge" id="badge-trialBookings">0</span>
+      </div>
     <div class="sidebar-item" onclick="switchSection('documents')" id="nav-documents">
         📎 說明會簡報
       </div>
@@ -480,6 +483,7 @@ function applyPermissions() {
     'dashboard': 'nav-dashboard',
     'inquiry': 'nav-inquiry',
     'booking': 'nav-booking',
+    'trialBookings': 'nav-trialBookings',
     'camp': 'nav-camp',
     'assess': 'nav-assess',
     'register': 'nav-register',
@@ -601,6 +605,10 @@ function updateBadges(data) {
   const counts = {
     inquiry: data.inquiries.filter(r=>r.status==='待回電'||!r.status).length,
     booking: data.bookings.filter(r=>r.status==='待確認').length,
+    trialBookings: data.bookings.filter(r=>{
+      const t = (r.bookingType||r.type||r.bk_type||'').toString();
+      return (t.includes('體驗')||t==='trial') && (r.status==='待確認'||r.status==='待回電'||!r.status);
+    }).length,
     camp: data.camp.filter(r=>r.status==='待確認').length,
     assess: data.assessments.filter(r=>!r.finalClass).length,
     register: data.registrations.filter(r=>r.status==='待處理').length,
@@ -636,7 +644,7 @@ function switchSection(sec) {
   const titles = {
     dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
-    trial:'🗓️ 體驗課排班', documents:'📎 說明會簡報',
+    trial:'🗓️ 體驗課排班', trialBookings:'📅 體驗預約一覽', documents:'📎 說明會簡報',
     students:'🎓 學生管理',
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
@@ -649,6 +657,7 @@ function switchSection(sec) {
   if(sec === 'dashboard') renderDashboard(content);
   else if(sec === 'inquiry') renderInquiry(content);
   else if(sec === 'booking') renderBooking(content);
+  else if(sec === 'trialBookings') renderTrialBookings(content);
   else if(sec === 'camp') renderCamp(content);
   else if(sec === 'assess') renderAssess(content);
   else if(sec === 'register') renderRegister(content);
@@ -1408,6 +1417,128 @@ function renderBooking(el) {
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openBookingForm(${realIdx})" title="編輯預約">✏️</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── 體驗預約一覽 ──────────────────────────────────────────
+// 顯示所有「體驗課」類型的預約、按日期+班分組、檢測重複
+function renderTrialBookings(el) {
+  const d = loadData();
+  // 過濾體驗課預約
+  const trialBookings = d.bookings.filter(r => {
+    const t = (r.bookingType || r.type || r.bk_type || '').toString();
+    return t.includes('體驗') || t === 'trial';
+  });
+  const statusOpts = ['待回電','待確認','已確認','已完成','已取消'];
+
+  // 按 日期+時段 分組偵測重複（同班同日 1 人原則）
+  const slotMap = {};
+  trialBookings.forEach(r => {
+    const key = (r.date || '') + '|' + (r.slot || r.time || '');
+    if (!slotMap[key]) slotMap[key] = [];
+    slotMap[key].push(r);
+  });
+  const conflicts = Object.keys(slotMap).filter(k => slotMap[k].length > 1).length;
+
+  // 統計
+  const total = trialBookings.length;
+  const pending = trialBookings.filter(r => (r.status||'')==='待確認' || (r.status||'')==='待回電').length;
+  const confirmed = trialBookings.filter(r => (r.status||'')==='已確認').length;
+  const done = trialBookings.filter(r => (r.status||'')==='已完成').length;
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+      <div>
+        <h2 style="margin:0;font-size:1.4rem">📅 體驗預約一覽</h2>
+        <p style="margin:4px 0 0;font-size:0.82rem;color:var(--text-muted)">所有家長報名的體驗課預約。同班同日只能 1 人預約 — 衝突會用紅色標示。</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline" onclick="renderTrialBookings(document.getElementById('mainContent'))">🔄 重新整理</button>
+      </div>
+    </div>
+
+    <!-- KPI 卡 -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+      <div class="card" style="padding:14px;border-left:4px solid #2B7A4B"><div style="font-size:0.75rem;color:var(--text-muted)">體驗總筆數</div><div style="font-size:1.5rem;font-weight:800;color:#2B7A4B;margin-top:2px">${total}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #F59E0B"><div style="font-size:0.75rem;color:var(--text-muted)">待回電/確認</div><div style="font-size:1.5rem;font-weight:800;color:#F59E0B;margin-top:2px">${pending}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #2563EB"><div style="font-size:0.75rem;color:var(--text-muted)">已確認</div><div style="font-size:1.5rem;font-weight:800;color:#2563EB;margin-top:2px">${confirmed}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #7C3AED"><div style="font-size:0.75rem;color:var(--text-muted)">已完成</div><div style="font-size:1.5rem;font-weight:800;color:#7C3AED;margin-top:2px">${done}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid ${conflicts>0?'#DC2626':'#10B981'}"><div style="font-size:0.75rem;color:var(--text-muted)">重複預約衝突</div><div style="font-size:1.5rem;font-weight:800;color:${conflicts>0?'#DC2626':'#10B981'};margin-top:2px">${conflicts}</div></div>
+    </div>
+
+    ${conflicts > 0 ? '<div style="background:#FEF2F2;border:1.5px solid #DC2626;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem;color:#991B1B">⚠️ <strong>有 ' + conflicts + ' 組重複預約</strong>：同一天同一時段被多人預約，需要聯繫家長重新安排。下表紅色標示。</div>' : ''}
+
+    <div class="table-wrap">
+      <div class="table-toolbar">
+        <input type="text" placeholder="搜尋家長/電話/孩子/日期…" oninput="renderTrialBookings(document.getElementById('mainContent'))" id="searchTrialBkg">
+        <select onchange="renderTrialBookings(document.getElementById('mainContent'))" id="filterTrialBkgStatus">
+          <option value="">全部狀態</option>
+          ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
+        </select>
+        <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${trialBookings.length} 筆</span>
+      </div>
+      <table class="data-table">
+        <thead><tr>
+          <th>#</th>
+          <th>送出時間</th>
+          <th>家長</th>
+          <th>電話</th>
+          <th>孩子</th>
+          <th>體驗日期</th>
+          <th>時段</th>
+          <th>衝突？</th>
+          <th>狀態</th>
+          <th>操作</th>
+        </tr></thead>
+        <tbody id="trialBkgTbody"></tbody>
+      </table>
+    </div>`;
+
+  const kw = (document.getElementById('searchTrialBkg')||{}).value || '';
+  const fs = (document.getElementById('filterTrialBkgStatus')||{}).value || '';
+  const filtered = trialBookings.filter(r => {
+    const hay = [r.parent, r.phone, r.child, r.date].filter(Boolean).join(' ');
+    return (!kw || hay.toLowerCase().includes(kw.toLowerCase())) && (!fs || r.status === fs);
+  });
+
+  const tbody = document.getElementById('trialBkgTbody');
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">尚無體驗預約</td></tr>`;
+    return;
+  }
+  // 排序：日期升序、時段升序
+  filtered.sort((a,b) => {
+    const dateA = (a.date || '9999-12-31');
+    const dateB = (b.date || '9999-12-31');
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return (a.slot || a.time || '').localeCompare(b.slot || b.time || '');
+  });
+
+  tbody.innerHTML = filtered.map((r, i) => {
+    const realIdx = d.bookings.indexOf(r);
+    const slot = r.slot || r.time || '—';
+    const key = (r.date || '') + '|' + slot;
+    const conflictRows = slotMap[key] || [];
+    const isConflict = conflictRows.length > 1;
+    const status = r.status || '待確認';
+    const sb = status==='待確認'||status==='待回電'?'badge-pending':status==='已確認'?'badge-contacted':status==='已完成'?'badge-arranged':'badge-cancelled';
+    return `<tr ${isConflict ? 'style="background:#FEF2F2"' : ''}>
+      <td>${i+1}</td>
+      <td>${(r.ts||'').substring(0,16)}</td>
+      <td><strong>${r.parent || r.pname || '—'}</strong></td>
+      <td>${r.phone ? `<a href="tel:${r.phone}" style="color:inherit;text-decoration:none">${r.phone.startsWith('0')?r.phone:'0'+r.phone}</a>` : '—'}</td>
+      <td>${r.child || r.sname || '—'}</td>
+      <td><strong style="color:#2B7A4B">${r.date || '—'}</strong></td>
+      <td><span style="background:#F0FDF4;padding:2px 8px;border-radius:50px;font-size:0.8rem;font-family:monospace;color:#166534">${slot}</span></td>
+      <td>${isConflict ? `<span style="color:#DC2626;font-weight:700">⚠️ ${conflictRows.length} 人</span>` : '<span style="color:#10B981">✓</span>'}</td>
+      <td><select class="status-select" onchange="updateStatus('bookings',${realIdx},this.value)">
+        ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
+      </select></td>
+      <td>
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button>
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
+      </td>
     </tr>`;
   }).join('');
 }
