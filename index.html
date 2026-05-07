@@ -1609,14 +1609,20 @@ function _campWeeksAndDays(r){
   };
   let weeks = [], days = 0, weekKeys = [];
 
-  // 新格式：children[].julyDates / augDates
+  // 新格式：children[].julyDates / augDates（個別週次，每週 5 天）
   if (r.children && Array.isArray(r.children)) {
     r.children.forEach(c => {
-      const j = (c.julyDates||[]).length;
-      const a = (c.augDates||[]).length;
-      days += j + a;
-      if (j) weeks.push(c.sname + ' 七月 ' + j + ' 天');
-      if (a) weeks.push(c.sname + ' 八月 ' + a + ' 天');
+      const jW = (c.julyDates||[]).length;
+      const aW = (c.augDates||[]).length;
+      days += (jW + aW) * 5;
+      if (jW) {
+        const labels = (c.julyDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
+        weeks.push(c.sname + ' 七月 ' + labels);
+      }
+      if (aW) {
+        const labels = (c.augDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
+        weeks.push(c.sname + ' 八月 ' + labels);
+      }
     });
   }
   // n8n payload 格式：courses: { july: { weeks: […], days: N }, aug: {…} }
@@ -6287,22 +6293,175 @@ function openBookingForm(idx) {
 }
 
 // 夏令營 新增 / 編輯
+// 夏令營週次表（2026 完整版）
+var CAMP_WEEKS_2026 = {
+  july: [
+    {key:'W1', label:'W1 · 7/6–7/10'},
+    {key:'W2', label:'W2 · 7/13–7/17'},
+    {key:'W3', label:'W3 · 7/20–7/24'},
+    {key:'W4', label:'W4 · 7/27–7/31'}
+  ],
+  aug: [
+    {key:'W5', label:'W5 · 8/3–8/7'},
+    {key:'W6', label:'W6 · 8/10–8/14'},
+    {key:'W7', label:'W7 · 8/17–8/21'},
+    {key:'W8', label:'W8 · 8/24–8/28'}
+  ]
+};
+
+// 從舊資料推變孩子陣列：讓葉佳慧那筆（sname='A/B'）能拆出兩個孩子
+function _campMigrateChildren(r) {
+  if (Array.isArray(r.children) && r.children.length) return r.children.map(function(c){
+    return {
+      sname: c.sname || c.name || '',
+      grade: c.grade || '',
+      uniform: c.uniform || '',
+      julyDates: Array.isArray(c.julyDates) ? c.julyDates.slice() : [],
+      augDates: Array.isArray(c.augDates) ? c.augDates.slice() : []
+    };
+  });
+  // 舊格式：sname 裡面包含 '/' 分隔多個孩子
+  var raw = r.sname || '';
+  if (!raw) return [{sname:'', grade:'', uniform:'', julyDates:[], augDates:[]}];
+  var parts = raw.split(/\s*[\/\u3001\uff0c,]\s*/);
+  return parts.map(function(p){
+    var m = p.match(/^([^()（]+)[\(（]?([^)）]*)[\)）]?$/);
+    var nm = (m ? m[1] : p).trim();
+    var meta = m ? m[2] : '';
+    var grade = '', uniform = '';
+    var gm = meta.match(/(國小\d+年級|幼稺中大班|[一-九十\d]+年級)/);
+    if (gm) grade = gm[1];
+    var um = meta.match(/(?:制服|uniform)[\s:：]*([A-Z0-9]+)/i);
+    if (um) uniform = um[1];
+    return {sname:nm, grade:grade, uniform:uniform, julyDates:[], augDates:[]};
+  });
+}
+
+function _renderCampChildBlock(idx, c) {
+  var jKeys = Array.isArray(c.julyDates) ? c.julyDates : [];
+  var aKeys = Array.isArray(c.augDates) ? c.augDates : [];
+  var html = '<div class="camp-child-block" data-cidx="' + idx + '" style="border:1.5px solid #2563EB;background:#F8FAFE;border-radius:10px;padding:14px;margin-bottom:14px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+  html += '<strong style="color:#1B474D;font-size:0.95rem">👦 孩子 #' + (idx+1) + '</strong>';
+  html += '<button type="button" class="btn btn-outline" style="padding:4px 10px;font-size:0.75rem;color:#DC2626;border-color:#DC2626" onclick="_removeCampChild(' + idx + ')">移除</button>';
+  html += '</div>';
+  html += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:10px">';
+  html += '<div><label style="font-size:0.75rem;color:#666;font-weight:600">姓名 <span style="color:#c00">*</span></label><input class="_camp-c-sname" type="text" value="' + (c.sname||'').replace(/"/g,'&quot;') + '" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '<div><label style="font-size:0.75rem;color:#666;font-weight:600">年級</label><input class="_camp-c-grade" type="text" value="' + (c.grade||'').replace(/"/g,'&quot;') + '" placeholder="如：國小3年級" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '<div><label style="font-size:0.75rem;color:#666;font-weight:600">制服</label><input class="_camp-c-uniform" type="text" value="' + (c.uniform||'').replace(/"/g,'&quot;') + '" placeholder="如：M/34" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '</div>';
+  // 七月週次
+  html += '<div style="margin-top:8px"><label style="font-size:0.78rem;color:#2B7A4B;font-weight:700">📅 七月週次 (可複選)</label>';
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px">';
+  CAMP_WEEKS_2026.july.forEach(function(w){
+    var ck = jKeys.indexOf(w.key) >= 0 ? ' checked' : '';
+    html += '<label style="display:flex;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #d1fae5;border-radius:6px;cursor:pointer;font-size:0.82rem"><input type="checkbox" class="_camp-c-july" value="' + w.key + '"' + ck + '> ' + w.label + '</label>';
+  });
+  html += '</div></div>';
+  // 八月週次
+  html += '<div style="margin-top:8px"><label style="font-size:0.78rem;color:#2563EB;font-weight:700">📅 八月週次 (可複選)</label>';
+  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px">';
+  CAMP_WEEKS_2026.aug.forEach(function(w){
+    var ck = aKeys.indexOf(w.key) >= 0 ? ' checked' : '';
+    html += '<label style="display:flex;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #dbeafe;border-radius:6px;cursor:pointer;font-size:0.82rem"><input type="checkbox" class="_camp-c-aug" value="' + w.key + '"' + ck + '> ' + w.label + '</label>';
+  });
+  html += '</div></div>';
+  html += '</div>';
+  return html;
+}
+
+var _campChildrenState = [];
+
+function _removeCampChild(i) {
+  // 先讀最新的 DOM 起來，避免重画掉使用者未儲存輸入
+  _syncCampChildrenFromDOM();
+  if (_campChildrenState.length <= 1) { showToast('至少保留一位孩子'); return; }
+  _campChildrenState.splice(i, 1);
+  _refreshCampChildrenUI();
+}
+
+function _addCampChild() {
+  _syncCampChildrenFromDOM();
+  _campChildrenState.push({sname:'', grade:'', uniform:'', julyDates:[], augDates:[]});
+  _refreshCampChildrenUI();
+}
+
+function _syncCampChildrenFromDOM() {
+  var blocks = document.querySelectorAll('.camp-child-block');
+  if (!blocks.length) return;
+  _campChildrenState = Array.from(blocks).map(function(b){
+    var jul = Array.from(b.querySelectorAll('._camp-c-july:checked')).map(function(x){ return x.value; });
+    var aug = Array.from(b.querySelectorAll('._camp-c-aug:checked')).map(function(x){ return x.value; });
+    return {
+      sname: (b.querySelector('._camp-c-sname')||{}).value || '',
+      grade: (b.querySelector('._camp-c-grade')||{}).value || '',
+      uniform: (b.querySelector('._camp-c-uniform')||{}).value || '',
+      julyDates: jul, augDates: aug
+    };
+  });
+}
+
+function _refreshCampChildrenUI() {
+  var host = document.getElementById('_campChildrenHost');
+  if (!host) return;
+  host.innerHTML = _campChildrenState.map(function(c, i){ return _renderCampChildBlock(i, c); }).join('');
+}
+
 function openCampForm(idx) {
   var d = loadData();
   var initial = (idx != null && d.camp[idx]) ? d.camp[idx] : {};
-  var fields = [
-    { key:'pname',  label:'家長姓名', type:'text', required:true },
-    { key:'phone',  label:'電話',     type:'text', required:true },
-    { key:'line',   label:'LINE',     type:'text' },
-    { key:'sname',  label:'學生姓名', type:'text', required:true },
-    { key:'grade',  label:'年級',     type:'text' },
-    { key:'courses',label:'報名期別 (如: 7/1-7/14)', type:'textarea' },
-    { key:'diet',   label:'飲食需求', type:'text' },
-    { key:'earlyBird', label:'早鳥 (TRUE/FALSE)', type:'text' },
-    { key:'status', label:'狀態',     type:'select', options:['待確認','已確認','已繳費','已取消'] }
-  ];
-  openFormModal((idx!=null?'編輯':'新增')+'夏令營報名', fields, initial, async function(out){
+  _campChildrenState = _campMigrateChildren(initial);
+
+  // 表頭：家長欄 + 狀態 + 早鳥 + 飲食
+  var html = '<form id="_campForm" onsubmit="return _campFormSubmit(event)">';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">家長姓名 <span style="color:#c00">*</span></label><input type="text" name="pname" value="' + (initial.pname||'').replace(/"/g,'&quot;') + '" required style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">電話 <span style="color:#c00">*</span></label><input type="text" name="phone" value="' + (initial.phone||'').replace(/"/g,'&quot;') + '" required style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">LINE</label><input type="text" name="line" value="' + (initial.line||'').replace(/"/g,'&quot;') + '" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">狀態</label><select name="status" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px">';
+  ['待確認','已確認','已繳費','已取消'].forEach(function(s){
+    html += '<option value="' + s + '"' + ((initial.status||'待確認')===s?' selected':'') + '>' + s + '</option>';
+  });
+  html += '</select></div>';
+  var ebOn = initial.earlyBird===true||initial.earlyBird==='TRUE'||initial.earlyBird==='true'||initial.earlyBird==='是';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">早鳥折扣</label><label style="display:flex;align-items:center;gap:6px;padding:7px;background:#FFF7ED;border:1px solid #FB923C;border-radius:6px"><input type="checkbox" name="earlyBird"' + (ebOn?' checked':'') + '> 適用早鳥</label></div>';
+  html += '<div><label style="font-size:0.78rem;color:#444;font-weight:600">飲食需求</label><input type="text" name="diet" value="' + (initial.diet||'').replace(/"/g,'&quot;') + '" placeholder="如：素食、牡蛋過敏" style="width:100%;padding:7px;border:1px solid #ccc;border-radius:6px"></div>';
+  html += '</div>';
+
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding:10px 12px;background:#F0F9FF;border-left:4px solid #0EA5E9;border-radius:6px"><div style="font-size:0.85rem;color:#0C4A6E;font-weight:700">👦‍👧 報名孩子與週次</div><button type="button" class="btn btn-green" style="padding:6px 12px;font-size:0.8rem" onclick="_addCampChild()">+ 新增孩子</button></div>';
+  html += '<div id="_campChildrenHost"></div>';
+
+  html += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;border-top:1px solid #eee;padding-top:14px">';
+  html += '<button type="button" class="btn btn-outline" onclick="closeModal()">取消</button>';
+  html += '<button type="submit" class="btn btn-green" style="padding:8px 18px;font-weight:700">💾 儲存</button>';
+  html += '</div></form>';
+
+  document.getElementById('modalTitle').textContent = (idx!=null?'編輯':'新增')+'夏令營報名';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+  _refreshCampChildrenUI();
+
+  window._campFormSaveCb = async function(out, children){
     var d2 = loadData();
+    // 組裝 children + courses summary
+    out.children = children;
+    out.sname = children.map(function(c){
+      var meta = [];
+      if (c.grade) meta.push(c.grade);
+      if (c.uniform) meta.push('制服' + c.uniform);
+      return c.sname + (meta.length ? '(' + meta.join(',') + ')' : '');
+    }).join('/');
+    out.grade = children.map(function(c){ return c.grade; }).filter(Boolean).join('/');
+    // courses 文字摘要（寫回 Sheets 用）
+    var summaryParts = [];
+    children.forEach(function(c){
+      var lines = [];
+      if ((c.julyDates||[]).length) lines.push('七月:' + c.julyDates.join(','));
+      if ((c.augDates||[]).length) lines.push('八月:' + c.augDates.join(','));
+      if (lines.length) summaryParts.push(c.sname + ' · ' + lines.join(' / '));
+    });
+    out.courses = summaryParts.join(' 【】 ') || (initial.courses || '');
+
     if (idx != null) {
       Object.assign(d2.camp[idx], out);
     } else {
@@ -6316,7 +6475,26 @@ function openCampForm(idx) {
     var r = await _formsDataWrite(idx!=null?'update':'create', 'camp', out, rowIdx);
     if (!r.ok) showToast('已存本地，雲端寫入未啟用'); else showToast('已同步雲端');
     renderCamp(document.getElementById('mainContent'));
-  });
+  };
+}
+
+function _campFormSubmit(ev) {
+  ev.preventDefault();
+  _syncCampChildrenFromDOM();
+  // 驗證：至少一位孩子有姓名
+  var validKids = _campChildrenState.filter(function(c){ return c.sname && c.sname.trim(); });
+  if (!validKids.length) { showToast('請至少填寫一位孩子姓名'); return false; }
+  var fd = new FormData(ev.target);
+  var out = {
+    pname: fd.get('pname') || '',
+    phone: fd.get('phone') || '',
+    line: fd.get('line') || '',
+    status: fd.get('status') || '待確認',
+    earlyBird: fd.get('earlyBird') ? 'TRUE' : 'FALSE',
+    diet: fd.get('diet') || ''
+  };
+  if (window._campFormSaveCb) window._campFormSaveCb(out, validKids);
+  return false;
 }
 
 // 課程班別 編輯 modal（本地變更 SEMESTER_CLASSES，持久化收近 localStorage）
