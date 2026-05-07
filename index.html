@@ -2973,13 +2973,147 @@ async function _trialSave(){
 
 
 
+// 清除資料 → 變成「選要刪哪幾筆」（按資料類、可多選、也能一鍵清空）
 function clearAllData() {
   if(!canDelete()){alert('只有管理員可以刪除資料');return;}
+  _openDeletePicker();
+}
 
-  if(!confirm('確定清除所有資料？此操作不可復原！')) return;
+// 進入進階刪除選單
+function _openDeletePicker() {
+  var d = loadData();
+  var COLLECTIONS = [
+    {key:'inquiries',     label:'問課諮詢',  color:'#0EA5E9'},
+    {key:'bookings',      label:'預約紀錄',  color:'#2B7A4B'},
+    {key:'camp',          label:'夏令營報名', color:'#E8863A'},
+    {key:'assessments',   label:'分級檢測',  color:'#7C3AED'},
+    {key:'registrations', label:'正式報名',  color:'#DC2626'}
+  ];
+  var html = '<div style="max-width:760px">';
+  html += '<div style="background:#FEF2F2;border-left:4px solid #DC2626;padding:10px 14px;border-radius:6px;margin-bottom:14px">';
+  html += '<div style="font-weight:700;color:#991B1B;font-size:0.95rem">⚠️ 請選要刪除的資料</div>';
+  html += '<div style="font-size:0.8rem;color:#7F1D1D;margin-top:3px">勾選某個類型 → 按「進入選單」逐筆勾選。本操作不會同步到 Sheets，只改本地快取。</div>';
+  html += '</div>';
+  html += '<div style="display:flex;flex-direction:column;gap:10px">';
+  COLLECTIONS.forEach(function(c){
+    var n = (d[c.key]||[]).length;
+    var disabled = n === 0;
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border:1.5px solid ' + (disabled?'#E5E7EB':c.color) + ';border-radius:8px;background:' + (disabled?'#FAFAFA':'#fff') + '">';
+    html += '<div><div style="font-weight:700;color:' + (disabled?'#9CA3AF':c.color) + ';font-size:0.95rem">' + c.label + '</div>';
+    html += '<div style="font-size:0.78rem;color:#6B7280;margin-top:2px">現有 ' + n + ' 筆資料</div></div>';
+    html += '<div style="display:flex;gap:6px">';
+    if (n > 0) {
+      html += '<button class="btn btn-outline" style="padding:6px 12px;font-size:0.82rem" onclick="_openDeletePickList(\'' + c.key + '\')">選要刪哪幾筆</button>';
+      html += '<button class="btn btn-outline" style="padding:6px 12px;font-size:0.82rem;color:#DC2626;border-color:#DC2626" onclick="_clearOneCollection(\'' + c.key + '\',\'' + c.label + '\')">清空本類</button>';
+    } else {
+      html += '<span style="font-size:0.78rem;color:#9CA3AF">無資料</span>';
+    }
+    html += '</div></div>';
+  });
+  html += '</div>';
+  html += '<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">';
+  html += '<button class="btn btn-outline" style="color:#DC2626;border-color:#DC2626" onclick="_clearEverything()">🗑️ 清空全部（5 個類型）</button>';
+  html += '<button class="btn btn-outline" onclick="closeModal()">關閉</button>';
+  html += '</div></div>';
+  document.getElementById('modalTitle').textContent = '🗑️ 刪除資料';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _clearEverything() {
+  if (!confirm('確定清空全部 5 個類型的資料？\n\n這個動作不可復原。')) return;
+  if (!confirm('再確認一次：真的要全部清空？')) return;
   _DB = emptyData();
-  showToast('🗑️ 資料已清除');
+  saveData(_DB);
+  closeModal();
+  showToast('🗑️ 全部資料已清除');
   switchSection('dashboard');
+}
+
+function _clearOneCollection(key, label) {
+  var d = loadData();
+  var n = (d[key]||[]).length;
+  if (!confirm('確定清空全部 ' + n + ' 筆「' + label + '」資料？\n\n這個動作不可復原。')) return;
+  d[key] = [];
+  saveData(d);
+  showToast('✅ 已清空' + label + '（' + n + ' 筆）');
+  _openDeletePicker(); // 重新繪製彈窗
+}
+
+// 進入某個類型的逐筆選單刪除
+function _openDeletePickList(key) {
+  var d = loadData();
+  var rows = d[key] || [];
+  var LABELS = {
+    inquiries: '問課諮詢', bookings: '預約紀錄', camp: '夏令營報名',
+    assessments: '分級檢測', registrations: '正式報名'
+  };
+  function _summary(r){
+    var ts = (r.ts||'').substring(0,16) || '未記錄時間';
+    var name = r.pname || r.parent || r.studentName || r.sname || '未填姓名';
+    var phone = r.phone ? (r.phone.startsWith('0') ? r.phone : '0'+r.phone) : '';
+    var extra = '';
+    if (key==='inquiries') extra = (r.classes||'') + (r.question?(' · '+r.question.substring(0,20)):'');
+    else if (key==='bookings') extra = ((r.bkType==='trial')?'體驗課':'參訪/檢測') + (r.bkDate?(' · '+r.bkDate):'');
+    else if (key==='camp') extra = r.sname||(r.children&&r.children.map(function(c){return c.sname||c.name;}).join(', ')||'');
+    else if (key==='assessments') extra = (r.studentName||'') + ' · ' + (r.predictedOralLevel||r.actualLevel||'');
+    else if (key==='registrations') extra = (r.sname||'') + ' · ' + (r.assignedClass||'');
+    return { ts: ts, name: name, phone: phone, extra: extra };
+  }
+  var html = '<div style="max-width:760px">';
+  html += '<div style="background:#FEF3C7;border-left:4px solid #F59E0B;padding:10px 14px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">';
+  html += '<div><div style="font-weight:700;color:#92400E">🗑️ ' + LABELS[key] + ' · 勾選要刪除的筆</div>';
+  html += '<div style="font-size:0.78rem;color:#78350F;margin-top:3px">可複選 · 刪除不會同步到 Sheets</div></div>';
+  html += '<div><label style="display:flex;align-items:center;gap:6px;font-size:0.85rem;cursor:pointer"><input type="checkbox" id="_delAllChk" onchange="_delToggleAll()"> 全選</label></div>';
+  html += '</div>';
+  if (!rows.length) {
+    html += '<div style="text-align:center;padding:40px;color:#9CA3AF">無資料</div>';
+  } else {
+    html += '<div style="max-height:50vh;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">';
+    rows.forEach(function(r, i){
+      var s = _summary(r);
+      html += '<label style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #F3F4F6;cursor:pointer" onmouseover="this.style.background=\'#FEF2F2\'" onmouseout="this.style.background=\'\'"><input type="checkbox" class="_delChk" value="' + i + '" style="width:18px;height:18px;cursor:pointer;flex-shrink:0">';
+      html += '<div style="flex:1;min-width:0"><div style="font-weight:700;color:#1F2937;font-size:0.9rem">#' + (i+1) + ' ' + s.name + (s.phone?(' · ' + s.phone):'') + '</div>';
+      html += '<div style="font-size:0.75rem;color:#6B7280;margin-top:2px">🕒 ' + s.ts + (s.extra?(' · ' + s.extra):'') + '</div></div></label>';
+    });
+    html += '</div>';
+  }
+  html += '<div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">';
+  html += '<div><button class="btn btn-outline" onclick="_openDeletePicker()">← 返回類型選單</button></div>';
+  html += '<div style="display:flex;gap:8px"><button class="btn btn-outline" onclick="closeModal()">取消</button>';
+  html += '<button class="btn" style="background:#DC2626;color:#fff;border:none;padding:8px 16px;border-radius:6px;font-weight:700;cursor:pointer" onclick="_doDeleteSelected(\'' + key + '\')">🗑️ 刪除選中項目</button></div>';
+  html += '</div></div>';
+  document.getElementById('modalTitle').textContent = '🗑️ 刪除 ' + LABELS[key];
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _delToggleAll() {
+  var all = document.getElementById('_delAllChk');
+  if (!all) return;
+  document.querySelectorAll('._delChk').forEach(function(cb){ cb.checked = all.checked; });
+}
+
+function _doDeleteSelected(key) {
+  var idxs = Array.from(document.querySelectorAll('._delChk:checked')).map(function(cb){ return parseInt(cb.value, 10); });
+  if (!idxs.length) { alert('請先勾選要刪除的資料'); return; }
+  if (!confirm('確定刪除這 ' + idxs.length + ' 筆資料？\n\n這個動作不可復原。')) return;
+  var d = loadData();
+  // 從後面往前刪，避免索引變動
+  idxs.sort(function(a,b){ return b-a; });
+  idxs.forEach(function(i){ d[key].splice(i, 1); });
+  saveData(d);
+  showToast('✅ 已刪除 ' + idxs.length + ' 筆');
+  // 清除之後重新開該類刪除頁，讓使用者可以繼續
+  setTimeout(function(){ _openDeletePickList(key); }, 200);
+  // 同時重繪主視圖
+  if (typeof switchSection === 'function') {
+    var section = (key==='inquiries')?'inquiry':(key==='bookings')?'booking':(key==='camp')?'camp':(key==='assessments')?'assess':'register';
+    var content = document.getElementById('mainContent');
+    if (content && typeof window['render' + section.charAt(0).toUpperCase() + section.slice(1)] === 'function') {
+      window['render' + section.charAt(0).toUpperCase() + section.slice(1)](content);
+    }
+  }
 }
 
 // ── URL 參數匯入（從主網站帶過來的資料）────────────────────
