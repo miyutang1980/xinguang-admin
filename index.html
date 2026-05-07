@@ -7057,6 +7057,12 @@ async function _saveRouteDetails(scheduleRow, session, date, route, details, aut
 }
 
 // 開啟班次明細編輯彈窗
+// 關閉接送詳情彈窗 (供「跳到學生管理」連結使用)
+function closeAllPickupModals() {
+  document.getElementById('rd-modal-overlay')?.remove();
+  document.getElementById('rd-school-picker')?.remove();
+}
+
 async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   // 移除舊 modal
   document.getElementById('rd-modal-overlay')?.remove();
@@ -7088,8 +7094,15 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   `;
   document.body.appendChild(overlay);
 
-  // 讀現有明細
-  const existing = await _getRouteDetails(rowData.row_index, session, authPayload);
+  // 讀現有明細 (加 try/catch 避免卡「載入中…」)
+  let existing;
+  try {
+    existing = await _getRouteDetails(rowData.row_index, session, authPayload);
+    if (!existing || typeof existing !== 'object') existing = { details: [], all_row_numbers: [] };
+  } catch (err) {
+    document.getElementById('rd-body').innerHTML = '<div style="text-align:center;padding:30px;color:#DC2626">⚠️ 讀取失敗：' + err.message + '<br><br><button onclick="openRouteDetailsModal(' + JSON.stringify(rowData).replace(/"/g,'&quot;') + ',&quot;' + session + '&quot;,JSON.parse(\'' + JSON.stringify(authPayload).replace(/'/g,"\\'") + '\'))" style="padding:6px 14px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer">重試</button></div>';
+    return;
+  }
   // 記住所有屬於這個班次的 sheet row 號 (含重複)，供「清空整筆」使用
   const allDetailRows = (existing.all_row_numbers || []).slice();
   // schoolMap: school_name -> { school_code, selected_ids:Set, students:[] }
@@ -7151,7 +7164,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
             </div>
           </div>
           <div style="padding:10px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px">
-            ${students.length === 0 ? '<div style="color:#999;font-size:0.85rem">該校無在學學生(students 表 status=active 且 has_pickup=TRUE)</div>' :
+            ${students.length === 0 ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:6px;padding:10px 14px;font-size:0.85rem;color:#92400E">⚠️ <strong>該校未建檔在籍學生</strong><br>請到 <a href="javascript:closeAllPickupModals();switchSection(&quot;students&quot;)" style="color:#01696F;font-weight:600;text-decoration:underline">🎓 學生管理</a> 頁新增學生，并勾選「接送方式 = 交通車」並設為「在籍」。</div>' :
               students.map(s => `
                 <label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:0.85rem">
                   <input type="checkbox" class="rd-stu" data-school="${name}" data-sid="${s.student_id}" data-sname="${s.chinese_name}" ${val.selected_ids.has(s.student_id)?'checked':''}>
