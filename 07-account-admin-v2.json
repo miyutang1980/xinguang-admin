@@ -1,0 +1,851 @@
+{
+  "name": "07 員工帳號管理 v2 (admin) - 含刪除/新增",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "account-admin",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook: Admin",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        200,
+        400
+      ],
+      "webhookId": "account-admin"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 解析請求\nconst body = $input.first().json.body || $input.first().json;\nconst action = String(body.action || '').trim();\nconst adminUser = String(body.adminUser || '').trim().toLowerCase();\nconst adminPass = String(body.adminPass || '');\nconst targetUser = String(body.targetUser || '').trim().toLowerCase();\nconst newPassword = body.newPassword !== undefined && body.newPassword !== null ? String(body.newPassword) : null;\nconst newStatus = body.newStatus !== undefined && body.newStatus !== null ? String(body.newStatus).trim() : null;\nconst newAccount = body.newAccount && typeof body.newAccount === 'object' ? body.newAccount : null;\n\nif (!action) return [{ json: { _stage: 'error', error: '缺少 action 參數' } }];\nif (!adminUser || !adminPass) return [{ json: { _stage: 'error', error: '缺少管理員帳密' } }];\n\nreturn [{ json: { _stage: 'ok', action, adminUser, adminPass, targetUser, newPassword, newStatus, newAccount } }];"
+      },
+      "id": "node-parse",
+      "name": "解析請求",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json._stage }}",
+              "rightValue": "error",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "node-if-parse-err",
+      "name": "輸入有錯?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":false,\"error\":{{ JSON.stringify($json.error) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-parse-err",
+      "name": "回傳輸入錯誤",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "員工帳號",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "node-read",
+      "name": "讀取員工帳號表",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        800,
+        520
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 取出原始輸入\nconst input = $('解析請求').first().json;\nconst rows = $input.all();\n\nconst { action, adminUser, adminPass, targetUser, newPassword, newStatus, newAccount } = input;\n\n// 找 admin 與 target\nlet adminRow = null;\nlet targetRow = null;\nlet targetRowNumber = null;\nlet maxEmpId = 0;\n\nfor (const r of rows) {\n  const j = r.json;\n  const account = String(j['帳號'] || '').trim().toLowerCase();\n  if (account === adminUser) adminRow = j;\n  if (account === targetUser) {\n    targetRow = j;\n    targetRowNumber = j.row_number;\n  }\n  // 計算員工編號最大值（純數字），用於自動產生新編號\n  const eid = String(j['員工編號'] || '').trim();\n  const m = eid.match(/(\\d+)/);\n  if (m) {\n    const n = parseInt(m[1], 10);\n    if (!isNaN(n) && n > maxEmpId) maxEmpId = n;\n  }\n}\n\n// 驗證 admin\nif (!adminRow) return [{ json: { _stage: 'error', error: '管理員帳號不存在' } }];\nif (String(adminRow['密碼'] || '') !== adminPass) return [{ json: { _stage: 'error', error: '管理員密碼錯誤' } }];\nif (String(adminRow['角色'] || '').trim().toLowerCase() !== 'admin') return [{ json: { _stage: 'error', error: '此帳號無管理員權限' } }];\nif (String(adminRow['狀態'] || '').trim() !== '啟用') return [{ json: { _stage: 'error', error: '管理員帳號已停用' } }];\n\n// list\nif (action === 'list') {\n  const list = rows.map(r => {\n    const x = r.json;\n    return {\n      account: String(x['帳號'] || '').trim(),\n      name: String(x['員工姓名'] || '').trim(),\n      role: String(x['角色'] || '').trim(),\n      title: String(x['職稱'] || '').trim(),\n      status: String(x['狀態'] || '').trim(),\n      lastLogin: String(x['最後登入'] || '').trim(),\n      note: String(x['備註'] || '').trim()\n    };\n  });\n  return [{ json: { _stage: 'list', list } }];\n}\n\n// createAccount\nif (action === 'createAccount') {\n  const a = newAccount || {};\n  const acct = String(a.account || '').trim().toLowerCase();\n  const nm = String(a.name || '').trim();\n  const pwd = String(a.password || '').trim();\n  const role = String(a.role || 'staff').trim().toLowerCase();\n  const title = String(a.title || '').trim();\n  if (!acct || !pwd || !nm) return [{ json: { _stage: 'error', error: '帳號、姓名、密碼皆為必填' } }];\n  if (pwd.length < 4) return [{ json: { _stage: 'error', error: '密碼至少 4 字元' } }];\n  // 重複檢查\n  for (const r of rows) {\n    if (String(r.json['帳號'] || '').trim().toLowerCase() === acct) {\n      return [{ json: { _stage: 'error', error: '帳號已存在：' + acct } }];\n    }\n  }\n  const newEmpId = 'E' + String(maxEmpId + 1).padStart(3, '0');\n  return [{ json: {\n    _stage: 'append',\n    targetName: nm,\n    field: '新增',\n    '員工編號': newEmpId,\n    '員工姓名': nm,\n    '帳號': acct,\n    '密碼': pwd,\n    '角色': role,\n    '職稱': title,\n    '狀態': '啟用',\n    '最後登入': '',\n    '備註': ''\n  } }];\n}\n\n// 以下動作都要 target\nif (!targetUser) return [{ json: { _stage: 'error', error: '缺少要修改的帳號' } }];\nif (!targetRow) return [{ json: { _stage: 'error', error: '找不到帳號：' + targetUser } }];\n\nif (action === 'deleteAccount') {\n  if (targetUser === adminUser) return [{ json: { _stage: 'error', error: '不能刪除自己的帳號' } }];\n  return [{ json: {\n    _stage: 'delete',\n    row_number: targetRowNumber,\n    targetName: String(targetRow['員工姓名'] || '').trim(),\n    field: '刪除',\n    '帳號': targetRow['帳號']\n  } }];\n}\n\nif (action === 'changePassword') {\n  if (!newPassword || newPassword.length < 4) return [{ json: { _stage: 'error', error: '新密碼至少 4 字元' } }];\n  return [{ json: {\n    _stage: 'update',\n    row_number: targetRowNumber,\n    targetName: String(targetRow['員工姓名'] || '').trim(),\n    field: '密碼',\n    '員工編號': targetRow['員工編號'],\n    '員工姓名': targetRow['員工姓名'],\n    '帳號': targetRow['帳號'],\n    '密碼': newPassword,\n    '角色': targetRow['角色'],\n    '職稱': targetRow['職稱'],\n    '狀態': targetRow['狀態'],\n    '最後登入': targetRow['最後登入'],\n    '備註': targetRow['備註']\n  } }];\n}\n\nif (action === 'changeStatus') {\n  if (!['啟用', '停用'].includes(newStatus)) return [{ json: { _stage: 'error', error: '狀態須為「啟用」或「停用」' } }];\n  if (targetUser === adminUser && newStatus === '停用') return [{ json: { _stage: 'error', error: '不能停用自己的管理員帳號' } }];\n  return [{ json: {\n    _stage: 'update',\n    row_number: targetRowNumber,\n    targetName: String(targetRow['員工姓名'] || '').trim(),\n    field: '狀態',\n    '員工編號': targetRow['員工編號'],\n    '員工姓名': targetRow['員工姓名'],\n    '帳號': targetRow['帳號'],\n    '密碼': targetRow['密碼'],\n    '角色': targetRow['角色'],\n    '職稱': targetRow['職稱'],\n    '狀態': newStatus,\n    '最後登入': targetRow['最後登入'],\n    '備註': targetRow['備註']\n  } }];\n}\n\nreturn [{ json: { _stage: 'error', error: '未知 action：' + action } }];"
+      },
+      "id": "node-verify",
+      "name": "驗證 admin 並準備動作",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $json._stage }}",
+                    "rightValue": "error",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "error"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $json._stage }}",
+                    "rightValue": "list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s3",
+                    "leftValue": "={{ $json._stage }}",
+                    "rightValue": "update",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "update"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s4",
+                    "leftValue": "={{ $json._stage }}",
+                    "rightValue": "append",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "append"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "s5",
+                    "leftValue": "={{ $json._stage }}",
+                    "rightValue": "delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delete"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-switch",
+      "name": "依 stage 分流",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":false,\"error\":{{ JSON.stringify($json.error) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-verify-err",
+      "name": "回傳驗證錯誤",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"list\":{{ JSON.stringify($json.list) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-list",
+      "name": "回傳列表",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "員工帳號",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": "={{ $json.row_number }}",
+            "員工編號": "={{ $json['員工編號'] }}",
+            "員工姓名": "={{ $json['員工姓名'] }}",
+            "帳號": "={{ $json['帳號'] }}",
+            "密碼": "={{ $json['密碼'] }}",
+            "角色": "={{ $json['角色'] }}",
+            "職稱": "={{ $json['職稱'] }}",
+            "狀態": "={{ $json['狀態'] }}",
+            "最後登入": "={{ $json['最後登入'] }}",
+            "備註": "={{ $json['備註'] }}"
+          },
+          "matchingColumns": [
+            "row_number"
+          ],
+          "schema": [
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "員工編號",
+              "displayName": "員工編號",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "員工姓名",
+              "displayName": "員工姓名",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "帳號",
+              "displayName": "帳號",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "密碼",
+              "displayName": "密碼",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "角色",
+              "displayName": "角色",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "職稱",
+              "displayName": "職稱",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "狀態",
+              "displayName": "狀態",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "最後登入",
+              "displayName": "最後登入",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "備註",
+              "displayName": "備註",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-update",
+      "name": "更新 Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        680
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"message\":{{ JSON.stringify('已更新 ' + $('驗證 admin 並準備動作').first().json.targetName + ' 的' + $('驗證 admin 並準備動作').first().json.field) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-update",
+      "name": "回傳更新成功",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "員工帳號",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "員工編號": "={{ $json['員工編號'] }}",
+            "員工姓名": "={{ $json['員工姓名'] }}",
+            "帳號": "={{ $json['帳號'] }}",
+            "密碼": "={{ $json['密碼'] }}",
+            "角色": "={{ $json['角色'] }}",
+            "職稱": "={{ $json['職稱'] }}",
+            "狀態": "={{ $json['狀態'] }}",
+            "最後登入": "={{ $json['最後登入'] }}",
+            "備註": "={{ $json['備註'] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "員工編號",
+              "displayName": "員工編號",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "員工姓名",
+              "displayName": "員工姓名",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "帳號",
+              "displayName": "帳號",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "密碼",
+              "displayName": "密碼",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "角色",
+              "displayName": "角色",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "職稱",
+              "displayName": "職稱",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "狀態",
+              "displayName": "狀態",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "最後登入",
+              "displayName": "最後登入",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            },
+            {
+              "id": "備註",
+              "displayName": "備註",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-append",
+      "name": "新增帳號到 Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        840
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "documentId": {
+          "__rl": true,
+          "value": "1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "員工帳號",
+          "mode": "name"
+        },
+        "toDelete": "rows",
+        "startIndex": "={{ $json.row_number }}",
+        "numberToDelete": 1,
+        "options": {}
+      },
+      "id": "node-delete-row",
+      "name": "從 Sheets 刪除帳號列",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        1000
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CRED_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"message\":{{ JSON.stringify('已新增帳號：' + $('驗證 admin 並準備動作').first().json.targetName) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-append",
+      "name": "回傳新增成功",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"success\":true,\"message\":{{ JSON.stringify('已刪除帳號：' + $('驗證 admin 並準備動作').first().json.targetName) }}}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "node-resp-delete",
+      "name": "回傳刪除成功",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1680,
+        1000
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: Admin": {
+      "main": [
+        [
+          {
+            "node": "解析請求",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析請求": {
+      "main": [
+        [
+          {
+            "node": "輸入有錯?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "輸入有錯?": {
+      "main": [
+        [
+          {
+            "node": "回傳輸入錯誤",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "讀取員工帳號表",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "讀取員工帳號表": {
+      "main": [
+        [
+          {
+            "node": "驗證 admin 並準備動作",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "驗證 admin 並準備動作": {
+      "main": [
+        [
+          {
+            "node": "依 stage 分流",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "依 stage 分流": {
+      "main": [
+        [
+          {
+            "node": "回傳驗證錯誤",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "回傳列表",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "更新 Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "新增帳號到 Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "從 Sheets 刪除帳號列",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "更新 Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "回傳更新成功",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "新增帳號到 Sheets": {
+      "main": [
+        [
+          {
+            "node": "回傳新增成功",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "從 Sheets 刪除帳號列": {
+      "main": [
+        [
+          {
+            "node": "回傳刪除成功",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {},
+  "versionId": "1",
+  "triggerCount": 0,
+  "tags": []
+}

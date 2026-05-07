@@ -1600,21 +1600,82 @@ function showBookingChangeModal(idx, action){
 }
 
 // ── 夏令營 ────────────────────────────────────────────────
+// ─── 夏令營報名輔助：從任何資料形式抽出「週次名單」+「總天數」 ───
+function _campWeeksAndDays(r){
+  // 標準週次表（中銨制定）
+  const WEEKS_2026 = {
+    'W1': '7/6–7/10',  'W2': '7/13–7/17', 'W3': '7/20–7/24', 'W4': '7/27–7/31',
+    'W5': '8/3–8/7',   'W6': '8/10–8/14', 'W7': '8/17–8/21', 'W8': '8/24–8/28'
+  };
+  let weeks = [], days = 0, weekKeys = [];
+
+  // 新格式：children[].julyDates / augDates
+  if (r.children && Array.isArray(r.children)) {
+    r.children.forEach(c => {
+      const j = (c.julyDates||[]).length;
+      const a = (c.augDates||[]).length;
+      days += j + a;
+      if (j) weeks.push(c.sname + ' 七月 ' + j + ' 天');
+      if (a) weeks.push(c.sname + ' 八月 ' + a + ' 天');
+    });
+  }
+  // n8n payload 格式：courses: { july: { weeks: […], days: N }, aug: {…} }
+  else if (r.courses && typeof r.courses==='object' && (r.courses.july || r.courses.aug)) {
+    if (r.courses.july && r.courses.july.weeks) {
+      weeks.push('七月：' + r.courses.july.weeks.join('、'));
+      days += parseInt(r.courses.july.days||0,10);
+    }
+    if (r.courses.aug && r.courses.aug.weeks) {
+      weeks.push('八月：' + r.courses.aug.weeks.join('、'));
+      days += parseInt(r.courses.aug.days||0,10);
+    }
+  }
+  // 舊格式：courses 為純文字（例如葉佳慧那筆）
+  else if (typeof r.courses === 'string' && r.courses.length > 5) {
+    weeks.push(r.courses);
+    // 嘗試從文字推估天數：每週 5 天，標準頻率計數
+    const matches = r.courses.match(/\d+\/\d+/g) || [];
+    days = Math.max(matches.length * 2, 0); // 保守估計
+  }
+
+  return { weeks: weeks, days: days, summary: weeks.join(' / ') || '未填' };
+}
+
 function renderCamp(el) {
   const d = loadData();
   const rows = d.camp;
   const statusOpts = ['待確認','已確認','已繳費','已取消'];
+
+  // 統計卡
+  const total = rows.length;
+  const earlyBirdCount = rows.filter(r=>r.earlyBird===true||r.earlyBird==='是'||r.earlyBird==='true').length;
+  const paidCount = rows.filter(r=>r.status==='已繳費').length;
+  const pendingCount = rows.filter(r=>r.status==='待確認'||!r.status).length;
+  let totalDays = 0, totalKids = 0;
+  rows.forEach(r => {
+    const info = _campWeeksAndDays(r);
+    totalDays += info.days;
+    totalKids += (r.children && r.children.length) ? r.children.length : 1;
+  });
+
   el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px">
+      <div class="card" style="padding:14px;border-left:4px solid #E8863A"><div style="font-size:0.75rem;color:var(--text-muted)">報名筆數</div><div style="font-size:1.5rem;font-weight:800;color:#E8863A;margin-top:2px">${total}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #2B7A4B"><div style="font-size:0.75rem;color:var(--text-muted)">總學生數</div><div style="font-size:1.5rem;font-weight:800;color:#2B7A4B;margin-top:2px">${totalKids} 人</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #2563EB"><div style="font-size:0.75rem;color:var(--text-muted)">總報名天數</div><div style="font-size:1.5rem;font-weight:800;color:#2563EB;margin-top:2px">${totalDays} 天</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #7C3AED"><div style="font-size:0.75rem;color:var(--text-muted)">早鳥員</div><div style="font-size:1.5rem;font-weight:800;color:#7C3AED;margin-top:2px">${earlyBirdCount}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #DC2626"><div style="font-size:0.75rem;color:var(--text-muted)">待確認</div><div style="font-size:1.5rem;font-weight:800;color:#DC2626;margin-top:2px">${pendingCount}</div></div>
+    </div>
     <div style="margin-bottom:12px;display:flex;gap:10px">
       <button class="btn btn-green" onclick="openCampForm()">＋ 手動新增夏令營</button>
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋…" id="searchCamp" oninput="renderCamp(document.getElementById('mainContent'))">
+        <input type="text" placeholder="搜尋家長/電話/學生…" id="searchCamp" oninput="renderCamp(document.getElementById('mainContent'))">
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
-        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th>報名期別</th><th>早鳥</th><th>狀態</th><th>操作</th><th>編輯</th><th>刪除</th></tr></thead>
+        <thead><tr><th>#</th><th>時間</th><th>家長</th><th>電話</th><th>學生</th><th>年級</th><th style="min-width:200px">報名週次明細</th><th>天數</th><th>早鳥</th><th>狀態</th><th>操作</th><th>編輯</th><th>刪除</th></tr></thead>
         <tbody id="campTbody"></tbody>
       </table>
     </div>`;
@@ -1623,22 +1684,23 @@ function renderCamp(el) {
   let filtered = rows.filter(r => !kw || [r.pname,r.phone,r.sname].join(' ').includes(kw));
   const tbody = document.getElementById('campTbody');
   if(!filtered.length){
-    tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--text-muted)">尚無夏令營報名</td></tr>`;
     return;
   }
   tbody.innerHTML = filtered.map((r,i) => {
     const status=r.status||'待確認';
-    const bc=status==='待確認'?'badge-pending':status==='已繳費'?'badge-enrolled':'badge-arranged';
     const realIdx=rows.indexOf(r);
-    const courses = typeof r.courses==='object' ? Object.entries(r.courses).map(([k,v])=>k+':'+v).join('、') : (r.courses||'—');
+    const info = _campWeeksAndDays(r);
+    const phoneDisp = r.phone ? (r.phone.startsWith('0')||r.phone.startsWith('+')||r.phone.length<9 ? r.phone : '0'+r.phone) : '—';
     return `<tr>
       <td>${realIdx+1}</td>
       <td>${(r.ts||'').substring(0,16)}</td>
       <td><strong>${r.pname||'—'}</strong></td>
-      <td>${r.phone||'—'}</td>
+      <td><a href="tel:${phoneDisp}" style="color:inherit;text-decoration:none">${phoneDisp}</a></td>
       <td>${r.sname||'—'}${r.children&&r.children.length>1?' <span style="background:var(--green);color:#fff;font-size:0.65rem;padding:1px 5px;border-radius:8px;font-weight:700">'+r.children.length+'位</span>':''}</td>
       <td>${r.grade||'—'}</td>
-      <td title="${courses}">${courses.length>20?courses.substring(0,20)+'…':courses}</td>
+      <td title="${info.summary}" style="font-size:0.78rem;line-height:1.4">${info.summary.length>50?info.summary.substring(0,50)+'…':info.summary}</td>
+      <td style="text-align:center;font-weight:700;color:${info.days>0?'#2563EB':'#9CA3AF'}">${info.days||'—'}</td>
       <td>${r.earlyBird?'✅ 是':'否'}</td>
       <td><select class="status-select" onchange="updateStatus('camp',${realIdx},this.value)">
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
