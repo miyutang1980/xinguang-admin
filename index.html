@@ -1609,31 +1609,47 @@ function _campWeeksAndDays(r){
   };
   let weeks = [], days = 0, weekKeys = [];
 
-  // 新格式：children[].dates (個別日期陣列) 或 julyDates/augDates周次
+  // 新格式：children[].dates (個別日期陣列) 或 julyDates/augDates(主網站表單寫個別日期 / 舊后台寫週次代號 W1···W8)
   if (r.children && Array.isArray(r.children)) {
     r.children.forEach(c => {
-      const dates = Array.isArray(c.dates) ? c.dates : [];
-      // 個別日期 · 最准確
-      if (dates.length) {
-        days += dates.length;
-        const july = dates.filter(d => d.indexOf('2026/7/') === 0).map(d => d.replace('2026/',''));
-        const aug = dates.filter(d => d.indexOf('2026/8/') === 0).map(d => d.replace('2026/',''));
-        if (july.length) weeks.push(c.sname + ' 七月 ' + july.join('、'));
-        if (aug.length) weeks.push(c.sname + ' 八月 ' + aug.join('、'));
-      } else {
-        // 起舊資料：只有週次、每週 5 天估計
-        const jW = (c.julyDates||[]).length;
-        const aW = (c.augDates||[]).length;
-        days += (jW + aW) * 5;
-        if (jW) {
-          const labels = (c.julyDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
-          weeks.push(c.sname + ' 七月 ' + labels);
-        }
-        if (aW) {
-          const labels = (c.augDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
-          weeks.push(c.sname + ' 八月 ' + labels);
-        }
-      }
+      // 收集所有可能的日期來源
+      let allDates = Array.isArray(c.dates) ? c.dates.slice() : [];
+      // julyDates / augDates 可能是個別日期 (主網站格式) 或週次代號 (舊後台格式)
+      const WEEK_DATES = {
+        W1:['2026-07-06','2026-07-07','2026-07-08','2026-07-09','2026-07-10'],
+        W2:['2026-07-13','2026-07-14','2026-07-15','2026-07-16','2026-07-17'],
+        W3:['2026-07-20','2026-07-21','2026-07-22','2026-07-23','2026-07-24'],
+        W4:['2026-07-27','2026-07-28','2026-07-29','2026-07-30','2026-07-31'],
+        W5:['2026-08-03','2026-08-04','2026-08-05','2026-08-06','2026-08-07'],
+        W6:['2026-08-10','2026-08-11','2026-08-12','2026-08-13','2026-08-14'],
+        W7:['2026-08-17','2026-08-18','2026-08-19','2026-08-20','2026-08-21'],
+        W8:['2026-08-24','2026-08-25','2026-08-26','2026-08-27','2026-08-28']
+      };
+      (c.julyDates||[]).forEach(x => {
+        if (/^W[1-8]$/.test(String(x))) allDates = allDates.concat(WEEK_DATES[x] || []);
+        else allDates.push(x);
+      });
+      (c.augDates||[]).forEach(x => {
+        if (/^W[1-8]$/.test(String(x))) allDates = allDates.concat(WEEK_DATES[x] || []);
+        else allDates.push(x);
+      });
+      // 正規化為 'M/D' 顯示格式、並去重
+      const seen = new Set();
+      const july = [];
+      const aug = [];
+      allDates.forEach(d => {
+        const m = String(d).match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+        if (!m) return;
+        const key = m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+        if (seen.has(key)) return;
+        seen.add(key);
+        const short = parseInt(m[2],10) + '/' + parseInt(m[3],10);
+        if (parseInt(m[2],10) === 7) july.push(short);
+        else if (parseInt(m[2],10) === 8) aug.push(short);
+      });
+      days += seen.size;
+      if (july.length) weeks.push((c.sname||'未填名') + ' 七月 ' + july.join('、'));
+      if (aug.length) weeks.push((c.sname||'未填名') + ' 八月 ' + aug.join('、'));
     });
   }
   // n8n payload 格式：courses: { july: { weeks: […], days: N }, aug: {…} }
@@ -6735,9 +6751,15 @@ function _campAugDates() {
   CAMP_WEEKS_2026.aug.forEach(function(w){ w.dates.forEach(function(d){ out.push({date:d, week:w.key}); }); });
   return out;
 }
-function _campShortDate(s) {  // '2026/7/6' → '7/6'
-  var m = String(s).match(/\d{4}\/(\d{1,2})\/(\d{1,2})/);
-  return m ? (m[1] + '/' + m[2]) : s;
+function _campShortDate(s) {  // '2026/7/6' 或 '2026-07-06' → '7/6'
+  var m = String(s).match(/\d{4}[\/-](\d{1,2})[\/-](\d{1,2})/);
+  return m ? (parseInt(m[1],10) + '/' + parseInt(m[2],10)) : s;
+}
+// 正規化：'2026-07-06' 或 '2026/07/06' → '2026/7/6'· 讓「主網站存的 dash」與「後台存的 slash」能互通
+function _campNormalizeDate(s) {
+  var m = String(s).match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (!m) return s;
+  return m[1] + '/' + parseInt(m[2],10) + '/' + parseInt(m[3],10);
 }
 function _campWeekToDates(weekKey) {
   var w = [].concat(CAMP_WEEKS_2026.july, CAMP_WEEKS_2026.aug).find(function(x){ return x.key === weekKey; });
@@ -6747,21 +6769,37 @@ function _campWeekToDates(weekKey) {
 // 從舊資料推變孩子陣列：讓葉佳慧那筆（sname='A(國小5年級,制服M)/B(國小3年級,制服34)'）能拆出兩個孩子
 function _campMigrateChildren(r) {
   if (Array.isArray(r.children) && r.children.length) return r.children.map(function(c){
-    var dates = Array.isArray(c.dates) ? c.dates.slice() : [];
-    var jW = Array.isArray(c.julyDates) ? c.julyDates : [];
-    var aW = Array.isArray(c.augDates) ? c.augDates : [];
-    // 如果舊資料只有 W1···W8週次、dates 为空，能那個週次展開為 5 天
-    if (!dates.length) {
-      jW.forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
-      aW.forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
-    }
+    var rawDates = [];
+    // 主網站表單寫的 julyDates / augDates 是個別日期 (e.g. ['2026-07-06',...])，不是 W1/W2 週次代號
+    var rawJ = Array.isArray(c.julyDates) ? c.julyDates : [];
+    var rawA = Array.isArray(c.augDates) ? c.augDates : [];
+    if (Array.isArray(c.dates)) rawDates = rawDates.concat(c.dates);
+    rawJ.forEach(function(x){
+      // 週次代號 W1-W8 → 展開成 5 天
+      if (/^W[1-8]$/.test(String(x))) rawDates = rawDates.concat(_campWeekToDates(x));
+      else rawDates.push(x);
+    });
+    rawA.forEach(function(x){
+      if (/^W[1-8]$/.test(String(x))) rawDates = rawDates.concat(_campWeekToDates(x));
+      else rawDates.push(x);
+    });
+    // 正規化所有日期為 '2026/7/6' slash 格式，並去重
+    var norm = [];
+    rawDates.forEach(function(d){
+      var n = _campNormalizeDate(d);
+      if (n && norm.indexOf(n) < 0) norm.push(n);
+    });
+    // 重新計算 julyDates / augDates 週次集合 (為了向下相容)
+    var jW = [], aW = [];
+    CAMP_WEEKS_2026.july.forEach(function(w){ if (w.dates.some(function(d){ return norm.indexOf(d)>=0; })) jW.push(w.key); });
+    CAMP_WEEKS_2026.aug.forEach(function(w){ if (w.dates.some(function(d){ return norm.indexOf(d)>=0; })) aW.push(w.key); });
     return {
       sname: c.sname || c.name || '',
       grade: c.grade || '',
-      uniform: c.uniform || '',
-      dates: dates,
-      julyDates: jW.slice(),
-      augDates: aW.slice()
+      uniform: c.uniform || c.tsize || '',  // 主網站存的是 tsize、後台顯示 uniform
+      dates: norm,
+      julyDates: jW,
+      augDates: aW
     };
   });
   // 舊格式：sname 裡面包含 '/' 分隔多個孩子
