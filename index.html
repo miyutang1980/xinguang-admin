@@ -7033,12 +7033,51 @@ const VEHICLES_LIST = [
 
 // 學生快取(避免重複打 API)
 const _schoolStudentsCache = {};
+let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 過濾
+async function _loadAllStudentsOnce(authPayload) {
+  if (_allStudentsCache) return _allStudentsCache;
+  try {
+    const res = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/students', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(Object.assign({action: 'list'}, authPayload || {}))
+    });
+    const r = await res.json();
+    _allStudentsCache = r.rows || r.students || [];
+  } catch (e) {
+    console.error('[students-list] failed:', e);
+    _allStudentsCache = [];
+  }
+  return _allStudentsCache;
+}
 async function _getSchoolStudents(schoolName, authPayload) {
   if (_schoolStudentsCache[schoolName]) return _schoolStudentsCache[schoolName];
-  const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
-    action: 'get_students_by_school', school_name: schoolName
-  }, authPayload));
-  const list = (r && r.students) || [];
+  // 先試原本的 pickup-details API，失敗或空時 fallback 到 students/list 過濾
+  let list = [];
+  try {
+    const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
+      action: 'get_students_by_school', school_name: schoolName
+    }, authPayload));
+    list = (r && r.students) || [];
+  } catch (e) {}
+  // Fallback: 讀全部學生 → 前端過濾 (接送彈窗依賴 chinese_name + student_id、用 「has_pickup=true 且 status=active」)
+  if (list.length === 0) {
+    const all = await _loadAllStudentsOnce(authPayload);
+    list = all.filter(s => {
+      if (s.school_name !== schoolName) return false;
+      if (s.status !== 'active') return false;
+      const hp = s.has_pickup;
+      // has_pickup 可能是 boolean true / 'TRUE' / 1 / '是'
+      return hp === true || hp === 'TRUE' || hp === true || hp === 1 || hp === '是' || hp === 'true' || String(hp).toUpperCase() === 'TRUE';
+    }).map(s => ({
+      student_id: s.student_id,
+      chinese_name: s.chinese_name,
+      english_name: s.english_name,
+      class_code: s.class_code,
+      school_name: s.school_name,
+      pickup_method: s.pickup_method
+    }));
+  }
   _schoolStudentsCache[schoolName] = list;
   return list;
 }
