@@ -1609,19 +1609,30 @@ function _campWeeksAndDays(r){
   };
   let weeks = [], days = 0, weekKeys = [];
 
-  // 新格式：children[].julyDates / augDates（個別週次，每週 5 天）
+  // 新格式：children[].dates (個別日期陣列) 或 julyDates/augDates周次
   if (r.children && Array.isArray(r.children)) {
     r.children.forEach(c => {
-      const jW = (c.julyDates||[]).length;
-      const aW = (c.augDates||[]).length;
-      days += (jW + aW) * 5;
-      if (jW) {
-        const labels = (c.julyDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
-        weeks.push(c.sname + ' 七月 ' + labels);
-      }
-      if (aW) {
-        const labels = (c.augDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
-        weeks.push(c.sname + ' 八月 ' + labels);
+      const dates = Array.isArray(c.dates) ? c.dates : [];
+      // 個別日期 · 最准確
+      if (dates.length) {
+        days += dates.length;
+        const july = dates.filter(d => d.indexOf('2026/7/') === 0).map(d => d.replace('2026/',''));
+        const aug = dates.filter(d => d.indexOf('2026/8/') === 0).map(d => d.replace('2026/',''));
+        if (july.length) weeks.push(c.sname + ' 七月 ' + july.join('、'));
+        if (aug.length) weeks.push(c.sname + ' 八月 ' + aug.join('、'));
+      } else {
+        // 起舊資料：只有週次、每週 5 天估計
+        const jW = (c.julyDates||[]).length;
+        const aW = (c.augDates||[]).length;
+        days += (jW + aW) * 5;
+        if (jW) {
+          const labels = (c.julyDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
+          weeks.push(c.sname + ' 七月 ' + labels);
+        }
+        if (aW) {
+          const labels = (c.augDates||[]).map(k => WEEKS_2026[k] ? (k+'('+WEEKS_2026[k]+')') : k).join('、');
+          weeks.push(c.sname + ' 八月 ' + labels);
+        }
       }
     });
   }
@@ -6700,34 +6711,75 @@ function openBookingForm(idx) {
 // 夏令營週次表（2026 完整版）
 var CAMP_WEEKS_2026 = {
   july: [
-    {key:'W1', label:'W1 · 7/6–7/10'},
-    {key:'W2', label:'W2 · 7/13–7/17'},
-    {key:'W3', label:'W3 · 7/20–7/24'},
-    {key:'W4', label:'W4 · 7/27–7/31'}
+    {key:'W1', label:'W1 · 7/6–7/10', dates:['2026/7/6','2026/7/7','2026/7/8','2026/7/9','2026/7/10']},
+    {key:'W2', label:'W2 · 7/13–7/17', dates:['2026/7/13','2026/7/14','2026/7/15','2026/7/16','2026/7/17']},
+    {key:'W3', label:'W3 · 7/20–7/24', dates:['2026/7/20','2026/7/21','2026/7/22','2026/7/23','2026/7/24']},
+    {key:'W4', label:'W4 · 7/27–7/31', dates:['2026/7/27','2026/7/28','2026/7/29','2026/7/30','2026/7/31']}
   ],
   aug: [
-    {key:'W5', label:'W5 · 8/3–8/7'},
-    {key:'W6', label:'W6 · 8/10–8/14'},
-    {key:'W7', label:'W7 · 8/17–8/21'},
-    {key:'W8', label:'W8 · 8/24–8/28'}
+    {key:'W5', label:'W5 · 8/3–8/7',  dates:['2026/8/3','2026/8/4','2026/8/5','2026/8/6','2026/8/7']},
+    {key:'W6', label:'W6 · 8/10–8/14', dates:['2026/8/10','2026/8/11','2026/8/12','2026/8/13','2026/8/14']},
+    {key:'W7', label:'W7 · 8/17–8/21', dates:['2026/8/17','2026/8/18','2026/8/19','2026/8/20','2026/8/21']},
+    {key:'W8', label:'W8 · 8/24–8/28', dates:['2026/8/24','2026/8/25','2026/8/26','2026/8/27','2026/8/28']}
   ]
 };
 
-// 從舊資料推變孩子陣列：讓葉佳慧那筆（sname='A/B'）能拆出兩個孩子
+// 七月/八月平常日表（週一到週五）
+function _campJulyDates() {
+  var out = [];
+  CAMP_WEEKS_2026.july.forEach(function(w){ w.dates.forEach(function(d){ out.push({date:d, week:w.key}); }); });
+  return out;
+}
+function _campAugDates() {
+  var out = [];
+  CAMP_WEEKS_2026.aug.forEach(function(w){ w.dates.forEach(function(d){ out.push({date:d, week:w.key}); }); });
+  return out;
+}
+function _campShortDate(s) {  // '2026/7/6' → '7/6'
+  var m = String(s).match(/\d{4}\/(\d{1,2})\/(\d{1,2})/);
+  return m ? (m[1] + '/' + m[2]) : s;
+}
+function _campWeekToDates(weekKey) {
+  var w = [].concat(CAMP_WEEKS_2026.july, CAMP_WEEKS_2026.aug).find(function(x){ return x.key === weekKey; });
+  return w ? w.dates : [];
+}
+
+// 從舊資料推變孩子陣列：讓葉佳慧那筆（sname='A(國小5年級,制服M)/B(國小3年級,制服34)'）能拆出兩個孩子
 function _campMigrateChildren(r) {
   if (Array.isArray(r.children) && r.children.length) return r.children.map(function(c){
+    var dates = Array.isArray(c.dates) ? c.dates.slice() : [];
+    var jW = Array.isArray(c.julyDates) ? c.julyDates : [];
+    var aW = Array.isArray(c.augDates) ? c.augDates : [];
+    // 如果舊資料只有 W1···W8週次、dates 为空，能那個週次展開為 5 天
+    if (!dates.length) {
+      jW.forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
+      aW.forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
+    }
     return {
       sname: c.sname || c.name || '',
       grade: c.grade || '',
       uniform: c.uniform || '',
-      julyDates: Array.isArray(c.julyDates) ? c.julyDates.slice() : [],
-      augDates: Array.isArray(c.augDates) ? c.augDates.slice() : []
+      dates: dates,
+      julyDates: jW.slice(),
+      augDates: aW.slice()
     };
   });
   // 舊格式：sname 裡面包含 '/' 分隔多個孩子
   var raw = r.sname || '';
-  if (!raw) return [{sname:'', grade:'', uniform:'', julyDates:[], augDates:[]}];
-  var parts = raw.split(/\s*[\/\u3001\uff0c,]\s*/);
+  if (!raw) return [{sname:'', grade:'', uniform:'', dates:[], julyDates:[], augDates:[]}];
+  // 先寫名字、括號股、/ 分割。這邊講讓「制服M」「制服34」不被袡成姓名
+  var parts = [];
+  var depth = 0, buf = '';
+  for (var i = 0; i < raw.length; i++) {
+    var ch = raw[i];
+    if (ch === '(' || ch === '（') depth++;
+    else if (ch === ')' || ch === '）') depth--;
+    if (depth === 0 && (ch === '/' || ch === '、' || ch === '，')) {
+      if (buf.trim()) parts.push(buf.trim());
+      buf = '';
+    } else { buf += ch; }
+  }
+  if (buf.trim()) parts.push(buf.trim());
   return parts.map(function(p){
     var m = p.match(/^([^()（]+)[\(（]?([^)）]*)[\)）]?$/);
     var nm = (m ? m[1] : p).trim();
@@ -6737,16 +6789,65 @@ function _campMigrateChildren(r) {
     if (gm) grade = gm[1];
     var um = meta.match(/(?:制服|uniform)[\s:：]*([A-Z0-9]+)/i);
     if (um) uniform = um[1];
-    return {sname:nm, grade:grade, uniform:uniform, julyDates:[], augDates:[]};
+    // 如果姓名裡面還殘留「制服34」、抽出來到 uniform
+    var nameUmatch = nm.match(/(?:制服|uniform)[\s:：]*([A-Z0-9]+)/i);
+    if (nameUmatch && !uniform) {
+      uniform = nameUmatch[1];
+      nm = nm.replace(nameUmatch[0], '').trim();
+    }
+    return {sname:nm, grade:grade, uniform:uniform, dates:[], julyDates:[], augDates:[]};
   });
 }
 
+// 讓某个孩子的某個月份表格：五列（週一···週五）× 4 週
+function _renderCampMonthGrid(cidx, monthName, weeks, selectedDates, color, lightBg) {
+  var html = '<div style="margin-top:10px;background:' + lightBg + ';border:1px solid ' + color + ';border-radius:8px;padding:10px">';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+  html += '<div style="font-size:0.82rem;color:' + color + ';font-weight:700">📅 ' + monthName + '（點內安可選任何一天）</div>';
+  html += '<div style="display:flex;gap:4px;flex-wrap:wrap">';
+  weeks.forEach(function(w){
+    var allOn = w.dates.every(function(d){ return selectedDates.indexOf(d) >= 0; });
+    html += '<button type="button" class="_camp-week-btn" data-cidx="' + cidx + '" data-week="' + w.key + '" '
+      + 'style="padding:3px 8px;font-size:0.72rem;border:1px solid ' + color + ';background:' + (allOn?color:'#fff') + ';color:' + (allOn?'#fff':color) + ';border-radius:5px;cursor:pointer;font-weight:600">'
+      + (allOn?'✓ ':'') + w.key + '</button>';
+  });
+  html += '</div></div>';
+  // 表格頭
+  html += '<div style="display:grid;grid-template-columns:60px repeat(5,1fr);gap:4px;align-items:stretch">';
+  html += '<div style="font-size:0.7rem;color:#9CA3AF;font-weight:700;display:flex;align-items:center"></div>';
+  ['週一','週二','週三','週四','週五'].forEach(function(z){
+    html += '<div style="font-size:0.72rem;color:#6B7280;font-weight:700;text-align:center;padding:3px 0">' + z + '</div>';
+  });
+  weeks.forEach(function(w){
+    html += '<div style="font-size:0.7rem;color:' + color + ';font-weight:700;display:flex;align-items:center;justify-content:center">' + w.key + '</div>';
+    w.dates.forEach(function(d){
+      var on = selectedDates.indexOf(d) >= 0;
+      html += '<label class="_camp-day-cell" data-cidx="' + cidx + '" data-date="' + d + '" '
+        + 'style="display:flex;flex-direction:column;align-items:center;justify-content:center;background:' + (on?color:'#fff') + ';color:' + (on?'#fff':'#374151') + ';border:1px solid ' + (on?color:'#E5E7EB') + ';border-radius:5px;padding:6px 0;cursor:pointer;font-size:0.78rem;font-weight:' + (on?'700':'500') + ';transition:all 0.1s">'
+        + '<input type="checkbox" class="_camp-c-date" value="' + d + '" ' + (on?'checked':'') + ' style="display:none">'
+        + '<span>' + _campShortDate(d) + '</span>'
+        + '</label>';
+    });
+  });
+  html += '</div></div>';
+  return html;
+}
+
 function _renderCampChildBlock(idx, c) {
-  var jKeys = Array.isArray(c.julyDates) ? c.julyDates : [];
-  var aKeys = Array.isArray(c.augDates) ? c.augDates : [];
+  var dates = Array.isArray(c.dates) ? c.dates : [];
+  // 如果只有舊的 julyDates/augDates 週次、展開為個別日期
+  if (!dates.length && (Array.isArray(c.julyDates) || Array.isArray(c.augDates))) {
+    (c.julyDates || []).forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
+    (c.augDates || []).forEach(function(k){ dates = dates.concat(_campWeekToDates(k)); });
+    c.dates = dates;
+  }
+  var jSel = dates.filter(function(d){ return d.indexOf('2026/7/') === 0; });
+  var aSel = dates.filter(function(d){ return d.indexOf('2026/8/') === 0; });
+  var totalDays = jSel.length + aSel.length;
+
   var html = '<div class="camp-child-block" data-cidx="' + idx + '" style="border:1.5px solid #2563EB;background:#F8FAFE;border-radius:10px;padding:14px;margin-bottom:14px">';
   html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
-  html += '<strong style="color:#1B474D;font-size:0.95rem">👦 孩子 #' + (idx+1) + '</strong>';
+  html += '<strong style="color:#1B474D;font-size:0.95rem">👦 孩子 #' + (idx+1) + ' · <span style="color:#2563EB;font-weight:700" data-camp-day-count="' + idx + '">合計 ' + totalDays + ' 天</span></strong>';
   html += '<button type="button" class="btn btn-outline" style="padding:4px 10px;font-size:0.75rem;color:#DC2626;border-color:#DC2626" onclick="_removeCampChild(' + idx + ')">移除</button>';
   html += '</div>';
   html += '<div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-bottom:10px">';
@@ -6754,22 +6855,10 @@ function _renderCampChildBlock(idx, c) {
   html += '<div><label style="font-size:0.75rem;color:#666;font-weight:600">年級</label><input class="_camp-c-grade" type="text" value="' + (c.grade||'').replace(/"/g,'&quot;') + '" placeholder="如：國小3年級" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px"></div>';
   html += '<div><label style="font-size:0.75rem;color:#666;font-weight:600">制服</label><input class="_camp-c-uniform" type="text" value="' + (c.uniform||'').replace(/"/g,'&quot;') + '" placeholder="如：M/34" style="width:100%;padding:6px;border:1px solid #ccc;border-radius:6px"></div>';
   html += '</div>';
-  // 七月週次
-  html += '<div style="margin-top:8px"><label style="font-size:0.78rem;color:#2B7A4B;font-weight:700">📅 七月週次 (可複選)</label>';
-  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px">';
-  CAMP_WEEKS_2026.july.forEach(function(w){
-    var ck = jKeys.indexOf(w.key) >= 0 ? ' checked' : '';
-    html += '<label style="display:flex;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #d1fae5;border-radius:6px;cursor:pointer;font-size:0.82rem"><input type="checkbox" class="_camp-c-july" value="' + w.key + '"' + ck + '> ' + w.label + '</label>';
-  });
-  html += '</div></div>';
-  // 八月週次
-  html += '<div style="margin-top:8px"><label style="font-size:0.78rem;color:#2563EB;font-weight:700">📅 八月週次 (可複選)</label>';
-  html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px">';
-  CAMP_WEEKS_2026.aug.forEach(function(w){
-    var ck = aKeys.indexOf(w.key) >= 0 ? ' checked' : '';
-    html += '<label style="display:flex;align-items:center;gap:6px;background:#fff;padding:6px 8px;border:1px solid #dbeafe;border-radius:6px;cursor:pointer;font-size:0.82rem"><input type="checkbox" class="_camp-c-aug" value="' + w.key + '"' + ck + '> ' + w.label + '</label>';
-  });
-  html += '</div></div>';
+  // 七月日曆
+  html += _renderCampMonthGrid(idx, '七月', CAMP_WEEKS_2026.july, jSel, '#2B7A4B', '#F0FDF4');
+  // 八月日曆
+  html += _renderCampMonthGrid(idx, '八月', CAMP_WEEKS_2026.aug, aSel, '#2563EB', '#EFF6FF');
   html += '</div>';
   return html;
 }
@@ -6786,7 +6875,7 @@ function _removeCampChild(i) {
 
 function _addCampChild() {
   _syncCampChildrenFromDOM();
-  _campChildrenState.push({sname:'', grade:'', uniform:'', julyDates:[], augDates:[]});
+  _campChildrenState.push({sname:'', grade:'', uniform:'', dates:[], julyDates:[], augDates:[]});
   _refreshCampChildrenUI();
 }
 
@@ -6794,13 +6883,22 @@ function _syncCampChildrenFromDOM() {
   var blocks = document.querySelectorAll('.camp-child-block');
   if (!blocks.length) return;
   _campChildrenState = Array.from(blocks).map(function(b){
-    var jul = Array.from(b.querySelectorAll('._camp-c-july:checked')).map(function(x){ return x.value; });
-    var aug = Array.from(b.querySelectorAll('._camp-c-aug:checked')).map(function(x){ return x.value; });
+    var dates = Array.from(b.querySelectorAll('._camp-c-date:checked')).map(function(x){ return x.value; });
+    // 仍然同步 julyDates/augDates 週次集合（為了向下相容、讀取者能以週為單位看）
+    var jW = [], aW = [];
+    CAMP_WEEKS_2026.july.forEach(function(w){
+      if (w.dates.some(function(d){ return dates.indexOf(d) >= 0; })) jW.push(w.key);
+    });
+    CAMP_WEEKS_2026.aug.forEach(function(w){
+      if (w.dates.some(function(d){ return dates.indexOf(d) >= 0; })) aW.push(w.key);
+    });
     return {
       sname: (b.querySelector('._camp-c-sname')||{}).value || '',
       grade: (b.querySelector('._camp-c-grade')||{}).value || '',
       uniform: (b.querySelector('._camp-c-uniform')||{}).value || '',
-      julyDates: jul, augDates: aug
+      dates: dates,
+      julyDates: jW,
+      augDates: aW
     };
   });
 }
@@ -6809,6 +6907,44 @@ function _refreshCampChildrenUI() {
   var host = document.getElementById('_campChildrenHost');
   if (!host) return;
   host.innerHTML = _campChildrenState.map(function(c, i){ return _renderCampChildBlock(i, c); }).join('');
+  _bindCampDayHandlers();
+}
+
+// 點選任何一天 → toggle dates 陣列 → 重繪該個孩子區塊
+function _bindCampDayHandlers() {
+  document.querySelectorAll('._camp-day-cell').forEach(function(cell){
+    cell.onclick = function(ev){
+      ev.preventDefault();
+      _syncCampChildrenFromDOM();
+      var cidx = parseInt(cell.dataset.cidx, 10);
+      var date = cell.dataset.date;
+      var c = _campChildrenState[cidx];
+      if (!c) return;
+      var i = c.dates.indexOf(date);
+      if (i >= 0) c.dates.splice(i, 1);
+      else c.dates.push(date);
+      _refreshCampChildrenUI();
+    };
+  });
+  document.querySelectorAll('._camp-week-btn').forEach(function(btn){
+    btn.onclick = function(){
+      _syncCampChildrenFromDOM();
+      var cidx = parseInt(btn.dataset.cidx, 10);
+      var weekKey = btn.dataset.week;
+      var c = _campChildrenState[cidx];
+      if (!c) return;
+      var dates = _campWeekToDates(weekKey);
+      var allOn = dates.every(function(d){ return c.dates.indexOf(d) >= 0; });
+      if (allOn) {
+        // 全部已選 → 取消這周
+        c.dates = c.dates.filter(function(d){ return dates.indexOf(d) < 0; });
+      } else {
+        // 設全上
+        dates.forEach(function(d){ if (c.dates.indexOf(d) < 0) c.dates.push(d); });
+      }
+      _refreshCampChildrenUI();
+    };
+  });
 }
 
 function openCampForm(idx) {
@@ -6856,12 +6992,16 @@ function openCampForm(idx) {
       return c.sname + (meta.length ? '(' + meta.join(',') + ')' : '');
     }).join('/');
     out.grade = children.map(function(c){ return c.grade; }).filter(Boolean).join('/');
-    // courses 文字摘要（寫回 Sheets 用）
+    // courses 文字摘要（寫回 Sheets 用）· 改為列出個別日期、使表面看到 7/6、7/8、7/10 本身
     var summaryParts = [];
     children.forEach(function(c){
+      var dates = Array.isArray(c.dates) ? c.dates : [];
+      if (!dates.length) return;
+      var july = dates.filter(function(d){ return d.indexOf('2026/7/') === 0; }).map(_campShortDate);
+      var aug = dates.filter(function(d){ return d.indexOf('2026/8/') === 0; }).map(_campShortDate);
       var lines = [];
-      if ((c.julyDates||[]).length) lines.push('七月:' + c.julyDates.join(','));
-      if ((c.augDates||[]).length) lines.push('八月:' + c.augDates.join(','));
+      if (july.length) lines.push('七月:' + july.join('、'));
+      if (aug.length) lines.push('八月:' + aug.join('、'));
       if (lines.length) summaryParts.push(c.sname + ' · ' + lines.join(' / '));
     });
     out.courses = summaryParts.join(' 【】 ') || (initial.courses || '');
