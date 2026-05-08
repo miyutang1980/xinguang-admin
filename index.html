@@ -2046,6 +2046,7 @@ function renderAssess(el) {
       <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
+        ${r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>` : ''}
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_assessDelete(${realIdx})" title="刪除這筆檢測紀錄">[X]</button></td>
@@ -2186,6 +2187,285 @@ function goToAssess(parent, childName, grade) {
       if(eg && grade) eg.value = grade;
     }, 100);
   }, 200);
+}
+
+// ── 後台人工排體驗課 ──────────────────────────────────────────
+var _trialBookerState = { assessIdx: -1, classes: [], bookings: [], selDate: '', selClassId: '' };
+
+async function openTrialBooker(assessIdx) {
+  const d = loadData();
+  const r = d.assessments[assessIdx];
+  if (!r) { alert('找不到該檢測紀錄'); return; }
+  if (!r.finalClass) { alert('請先完成分班才能排體驗課'); return; }
+
+  // 找該學生對應的家長 + 電話（從 inquiries 或 bookingRegs 撈）
+  const inq = (d.inquiries||[]).find(x => (x.children||[]).some(c => c.name === r.studentName));
+  const bkg = (d.bookings||[]).find(x => x.student === r.studentName || x.child === r.studentName);
+  const parent = (inq && inq.pname) || (bkg && bkg.parent) || r.parent || '';
+  const phone  = (inq && inq.phone) || (bkg && bkg.phone)  || r.phone  || '';
+
+  _trialBookerState = {
+    assessIdx: assessIdx,
+    classes: [],
+    bookings: [],
+    selDate: '',
+    selClassId: '',
+    student: r.studentName || '',
+    grade: r.grade || '',
+    finalClass: r.finalClass || '',
+    parent: parent,
+    phone: phone
+  };
+
+  document.getElementById('modalTitle').textContent = '🟠 排體驗課 · ' + (r.studentName||'—');
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div style="background:#FFF7ED;border:1.5px solid #E8863A;border-radius:10px;padding:12px 16px">
+        <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:0.86rem">
+          <div><span style="color:#9A3412;font-weight:700">學生</span> ${r.studentName||'—'}</div>
+          <div><span style="color:#9A3412;font-weight:700">年級</span> ${r.grade||'—'}</div>
+          <div><span style="color:#9A3412;font-weight:700">分班</span> <span class="badge-status badge-enrolled">${r.finalClass||'—'}</span></div>
+        </div>
+        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div>
+            <label style="font-size:0.78rem;color:#92400E;font-weight:700">家長姓名 *</label>
+            <input type="text" id="tbParent" value="${parent}" style="width:100%;padding:7px 10px;border:1.5px solid #FED7AA;border-radius:6px;font-size:0.86rem;margin-top:4px">
+          </div>
+          <div>
+            <label style="font-size:0.78rem;color:#92400E;font-weight:700">家長電話 *</label>
+            <input type="tel" id="tbPhone" value="${phone}" style="width:100%;padding:7px 10px;border:1.5px solid #FED7AA;border-radius:6px;font-size:0.86rem;margin-top:4px">
+          </div>
+        </div>
+      </div>
+
+      <div id="tbCalWrap" style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:14px">
+        <div style="text-align:center;color:#6B7280;padding:30px">📅 載入體驗班表中...</div>
+      </div>
+
+      <div id="tbSlotsWrap" style="display:none;background:#F9FAFB;border:1.5px solid #E5E7EB;border-radius:10px;padding:14px">
+        <div style="font-weight:700;font-size:0.92rem;margin-bottom:10px" id="tbSlotsTitle">選日期看可體驗班次</div>
+        <div id="tbSlotsList"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #E5E7EB;padding-top:14px">
+        <button class="btn btn-outline" onclick="closeModal()">取消</button>
+        <button class="btn" id="tbConfirmBtn" disabled onclick="confirmTrialBooking()" style="background:#E8863A;color:#fff;border:none;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer;opacity:0.5">📨 確認排班並通知家長</button>
+      </div>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+
+  // 拉班表 + 已預約清單
+  try {
+    const [classesResp, bookingsResp] = await Promise.all([
+      fetch(GW_URL + '?action=trialClasses').then(r=>r.json()),
+      fetch(GW_URL + '?action=trialBookings').then(r=>r.json())
+    ]);
+    _trialBookerState.classes = classesResp.classes || [];
+    _trialBookerState.bookings = bookingsResp.bookings || [];
+    _renderTrialBookerCal();
+  } catch(e) {
+    document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">❌ 載入班表失敗：' + e.message + '</div>';
+  }
+}
+
+function _renderTrialBookerCal() {
+  const cls = _trialBookerState.classes;
+  if (!cls.length) {
+    document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">尚無體驗班可排</div>';
+    return;
+  }
+  // 收集所有班的可體驗日期
+  const allDates = new Set();
+  cls.forEach(c => (c.dates||[]).forEach(dt => {
+    // 統一為 yyyy-mm-dd
+    const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    if (m) allDates.add(m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'));
+  }));
+  const dateList = Array.from(allDates).sort();
+  if (!dateList.length) {
+    document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">班表沒有可體驗日期</div>';
+    return;
+  }
+  // 以月份分組顯示
+  const byMonth = {};
+  dateList.forEach(d => {
+    const ym = d.substring(0,7);
+    if (!byMonth[ym]) byMonth[ym] = [];
+    byMonth[ym].push(d);
+  });
+  const html = Object.keys(byMonth).sort().map(ym => {
+    const [y,m] = ym.split('-');
+    return `<div style="margin-bottom:14px">
+      <div style="font-weight:700;font-size:0.92rem;color:#1F2937;margin-bottom:8px">📅 ${y} 年 ${parseInt(m,10)} 月</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px">
+        ${byMonth[ym].map(d => {
+          const dateObj = new Date(d+'T00:00:00');
+          const dow = ['日','一','二','三','四','五','六'][dateObj.getDay()];
+          const dd = parseInt(d.split('-')[2], 10);
+          // 該日有多少班可體驗
+          const dayClasses = cls.filter(c => (c.dates||[]).some(dt => {
+            const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+            return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === d;
+          }));
+          // 該日已被預約幾班
+          const bookedClasses = _trialBookerState.bookings.filter(b => b.date === d).length;
+          const avail = dayClasses.length - bookedClasses;
+          const isFull = avail <= 0;
+          const sel = _trialBookerState.selDate === d;
+          return `<button onclick="_pickTrialBookerDate('${d}')" ${isFull?'disabled':''} style="
+            padding:8px 4px;border-radius:8px;cursor:${isFull?'not-allowed':'pointer'};
+            background:${sel?'#E8863A':isFull?'#F3F4F6':'#FFF'};
+            color:${sel?'#FFF':isFull?'#9CA3AF':'#1F2937'};
+            border:1.5px solid ${sel?'#E8863A':isFull?'#E5E7EB':'#FED7AA'};
+            font-weight:${sel?'700':'600'};
+            display:flex;flex-direction:column;align-items:center;gap:2px;font-size:0.78rem
+          ">
+            <span style="font-size:0.7rem;opacity:0.7">週${dow}</span>
+            <span style="font-size:1.05rem;font-weight:700">${dd}</span>
+            <span style="font-size:0.65rem;${sel?'color:#FFF':'color:#16A34A'}">${isFull?'已額滿':'剩 '+avail+' 班'}</span>
+          </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('tbCalWrap').innerHTML = html;
+}
+
+function _pickTrialBookerDate(date) {
+  _trialBookerState.selDate = date;
+  _trialBookerState.selClassId = '';
+  _renderTrialBookerCal();
+  // 顯示該日期可體驗班次（僅顯示未滿的）
+  const cls = _trialBookerState.classes;
+  const dayClasses = cls.filter(c => (c.dates||[]).some(dt => {
+    const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === date;
+  }));
+  // 過濾出 finalClass 對應的優先（例如分班是 3A 就只顯示 3A）
+  const fc = (_trialBookerState.finalClass || '').toUpperCase().trim();
+  const recommended = dayClasses.filter(c => (c.level||'').toUpperCase() === fc);
+  const others = dayClasses.filter(c => (c.level||'').toUpperCase() !== fc);
+
+  const wrap = document.getElementById('tbSlotsWrap');
+  wrap.style.display = 'block';
+  document.getElementById('tbSlotsTitle').textContent = '📚 ' + date + ' 可體驗班次';
+
+  function classCard(c, isReco) {
+    const slot = (c.time_start||'') + '-' + (c.time_end||'');
+    const taken = _trialBookerState.bookings.some(b => b.date === date && b.slot === slot);
+    const sel = _trialBookerState.selClassId === c.id;
+    return `<div onclick="${taken?'':"_pickTrialBookerClass('"+c.id+"')"}" style="
+      padding:12px 14px;border-radius:10px;cursor:${taken?'not-allowed':'pointer'};margin-bottom:8px;
+      background:${sel?'#FFF7ED':taken?'#F3F4F6':'#FFF'};
+      border:1.5px solid ${sel?'#E8863A':taken?'#E5E7EB':isReco?'#16A34A':'#E5E7EB'};
+      opacity:${taken?'0.5':'1'};display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap
+    ">
+      <div>
+        <div style="font-weight:700;font-size:0.95rem">
+          ${isReco?'⭐ ':''}${c.cat_zh||'班'} ${c.level} 班
+          ${taken?'<span style=\"color:#9CA3AF;font-size:0.78rem;font-weight:400\">（已被預約）</span>':''}
+        </div>
+        <div style="font-size:0.8rem;color:#6B7280;margin-top:3px">
+          🕐 ${c.time_start}-${c.time_end} · 週${c.day} · ${c.room||''} · ${c.tw||''} / ${c.fr||''}
+        </div>
+      </div>
+      ${sel?'<span style="background:#E8863A;color:#FFF;padding:4px 12px;border-radius:14px;font-size:0.78rem;font-weight:700">✓ 已選</span>':''}
+    </div>`;
+  }
+
+  let html = '';
+  if (recommended.length) {
+    html += '<div style="font-size:0.82rem;color:#16A34A;font-weight:700;margin-bottom:6px">⭐ 推薦：對應 ' + fc + ' 分班</div>' +
+            recommended.map(c => classCard(c, true)).join('');
+  }
+  if (others.length) {
+    html += '<div style="font-size:0.82rem;color:#6B7280;font-weight:700;margin:10px 0 6px">其他可選班次</div>' +
+            others.map(c => classCard(c, false)).join('');
+  }
+  if (!html) html = '<div style="color:#9CA3AF;text-align:center;padding:20px">這天無可體驗班次</div>';
+  document.getElementById('tbSlotsList').innerHTML = html;
+}
+
+function _pickTrialBookerClass(classId) {
+  _trialBookerState.selClassId = classId;
+  _pickTrialBookerDate(_trialBookerState.selDate); // 重繪
+  // 啟用確認按鈕
+  const btn = document.getElementById('tbConfirmBtn');
+  btn.disabled = false;
+  btn.style.opacity = '1';
+}
+
+async function confirmTrialBooking() {
+  const s = _trialBookerState;
+  if (!s.selDate || !s.selClassId) { alert('請先選日期與班次'); return; }
+  const parent = document.getElementById('tbParent').value.trim();
+  const phone  = document.getElementById('tbPhone').value.trim();
+  if (!parent || !phone) { alert('請填寫家長姓名與電話'); return; }
+
+  const cls = s.classes.find(c => c.id === s.selClassId);
+  if (!cls) { alert('班次資料異常'); return; }
+
+  const slot = cls.time_start + '-' + cls.time_end;
+  const trialClassLabel = (cls.cat_zh||'班') + ' ' + cls.level + ' 班';
+
+  const btn = document.getElementById('tbConfirmBtn');
+  btn.disabled = true;
+  btn.textContent = '送出中...';
+  btn.style.opacity = '0.6';
+
+  try {
+    const payload = {
+      _type: 'booking',
+      pname: parent,
+      parent: parent,
+      phone: phone,
+      child: s.student,
+      student: s.student,
+      type: '體驗課',
+      bookingType: 'trial',
+      date: s.selDate,
+      slot: slot,
+      cls: s.finalClass,
+      trialClassId: cls.id,
+      trialClassLabel: trialClassLabel,
+      trialTeacher: (cls.tw||'') + (cls.fr?' / '+cls.fr:''),
+      trialRoom: cls.room || '',
+      _adminBooked: true,
+      _notifyParent: true,
+      ts: new Date().toLocaleString('zh-TW')
+    };
+    const resp = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow'
+    });
+    const data = await resp.json();
+    if (data.success === false) throw new Error(data.error || '寫入失敗');
+
+    // 寫到 localStorage
+    const d = loadData();
+    d.bookings = d.bookings || [];
+    d.bookings.push({
+      ts: payload.ts, parent: parent, phone: phone, student: s.student,
+      type: '體驗課', date: s.selDate, slot: slot, bkType: 'trial',
+      trialClassLabel: trialClassLabel, source: '後台人工排', stage: '已排體驗', status: '已確認'
+    });
+    saveData(d);
+
+    closeModal();
+    if (typeof showToast === 'function') {
+      showToast('✅ 排班成功！已 LINE 通知家長：' + s.student + ' · ' + s.selDate + ' ' + slot);
+    } else {
+      alert('✅ 排班成功！已 LINE 通知家長\n\n學生：' + s.student + '\n日期：' + s.selDate + ' ' + slot + '\n班次：' + trialClassLabel);
+    }
+    if (typeof renderAssess === 'function') renderAssess(document.getElementById('mainContent'));
+  } catch(e) {
+    alert('❌ 排班失敗：' + e.message);
+    btn.disabled = false;
+    btn.textContent = '📨 確認排班並通知家長';
+    btn.style.opacity = '1';
+  }
 }
 
 // ── 正式報名 ──────────────────────────────────────────────
