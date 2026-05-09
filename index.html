@@ -10618,12 +10618,13 @@ function _lvBindStats() {
 // ===== END 請假紀錄模組 =====
 
 // ===== 文件中心模組 (Stage 2.7) =====
-let _docsTab = 'dev'; // 'dev' | 'user'
+let _docsTab = 'todo'; // 'todo' | 'dev' | 'user'
 let _docsKw = '';
 
 function renderDocs(el) {
   const tabBar = `
     <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="${_docsTab==='todo'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_docsSwitchTab('todo')">⏳ 待辦事項</button>
       <button class="${_docsTab==='dev'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_docsSwitchTab('dev')">⚙️ 開發手冊</button>
       <button class="${_docsTab==='user'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_docsSwitchTab('user')">👨‍🏫 使用手冊</button>
     </div>
@@ -10632,11 +10633,16 @@ function renderDocs(el) {
       <button class="btn btn-outline" onclick="_docsClearSearch()" style="padding:6px 14px">清除</button>
       <span style="color:#9CA3AF;font-size:0.78rem">最後更新 2026/05/09</span>
     </div>`;
-  el.innerHTML = tabBar + '<div id="docsBody" class="card" style="padding:24px;line-height:1.7;font-size:0.92rem">' + (_docsTab === 'dev' ? _docsDevContent() : _docsUserContent()) + '</div>';
+  function getContent() {
+    if (_docsTab === 'todo') return _docsTodoContent();
+    if (_docsTab === 'dev') return _docsDevContent();
+    return _docsUserContent();
+  }
+  el.innerHTML = tabBar + '<div id="docsBody" class="card" style="padding:24px;line-height:1.7;font-size:0.92rem">' + getContent() + '</div>';
   const ki = document.getElementById('docsKw');
   if (ki) ki.addEventListener('input', e => {
     _docsKw = e.target.value;
-    document.getElementById('docsBody').innerHTML = _docsTab === 'dev' ? _docsDevContent() : _docsUserContent();
+    document.getElementById('docsBody').innerHTML = getContent();
     document.getElementById('docsKw').focus();
   });
 }
@@ -10685,6 +10691,59 @@ function _box(text, type) {
 }
 
 // ─── 開發手冊內容 ───
+// ─── 待辦事項 (Stage 2.7+) ───
+function _docsTodoContent() {
+  let html = '';
+  html += _h('尚未完成工作清單', 1);
+  html += _box('這裡集中追蹤「今天你還需要做」與「下一階段可以動」的事項 · 最後更新 <b>2026/05/09</b>', 'info');
+
+  html += _h('🔴 必須做 (系統真實上線前)', 2);
+  html += _table(['項目', '影響', '該誰做'], [
+    ['<b>1. 設 Apps Script Time Trigger</b><br><small>在 Apps Script 編輯器 · 時鐘圖示 · 新增 Time-driven · 函數 cronLeave12 (每天 12:00) · 函數 cronLeave1230 (每天 12:30)</small>', '不設不推 Flex 到三個群', '👤 admin (3 分鐘)'],
+    ['<b>2. 真實學生資料匯入</b><br><small>現在「班級指派」只有湯敏郁 1 個測試生 · 需以 N 個學生位上線</small>', '家長打「請假」進 LIFF 找不到孩子', '👤 admin / 行政'],
+    ['<b>3. LINE Rich Menu 按鈕接 LIFF</b><br><small>在 LINE OA Manager · 「我要請假」按鈕設定動作 → URI · URL = https://liff.line.me/2009757754-paHJ5QJO</small>', '家長不打字也能點按鈕進表單', '👤 admin']
+  ]);
+
+  html += _h('🟡 建議做 (提升體驗)', 2);
+  html += _table(['項目', '影響', '該誰做'], [
+    ['<b>4. BotBonnie 加關鍵字別名</b><br><small>「我要請假」 / 「不來上課」 / 「leave」· BotBonnie 設關鍵字 → 推 Flex 卡接 LIFF</small>', '家長記什麼都能進請假 ·容錯高', '👤 admin'],
+    ['<b>5. 主網站 Header 加「📝 請假」按鈕</b><br><small>主網站右上角加永久「📝 請假」連結 LIFF · 裝一行 CSS+JS</small>', '主網站來訪家長也能請假', '🤖 我 (5 分鐘)'],
+    ['<b>6. 電話欄位改「純文字」格式</b><br><small>現在 Sheets 電話被存成數字 · 頭個 0 掌不見 (例: 湯敏郁電話 = 972634118)</small>', '電話比對有吃不難 ·但識讀上看不順眼', '👤 admin (選 H 欄 · 格式 → 數字 → 純文字)']
+  ]);
+
+  html += _h('🟢 加分項 (未來可選)', 2);
+  html += _table(['項目', '說明'], [
+    ['<b>7. N8N students 同步到 Gateway 「在校學生」</b>', '不用重複輸入 · 但要寫一個 N8N → Gateway 同步脚本'],
+    ['<b>8. 教學群 Flex 分「早班/午班/晚班」</b>', '按課都時間分組 · 老師一眼掃到課表'],
+    ['<b>9. 家長 LINE 點適設送 / 狀態查詢</b>', 'Rich Menu 按鈕「查今日接送」 / 「查請假」 · reply token 免費'],
+    ['<b>10. 請假推送學期歸檔</b>', '「請假紀錄」寫進另一張學期表 · 主表保持輕量'],
+    ['<b>11. Cancel/Update 帶推播給老師</b>', '家長取消 · 教學群推一張小卡該誰誰取消了']
+  ]);
+
+  html += _h('🔍 已完成上線', 2);
+  html += _table(['階段', '狀態'], [
+    ['Stage 1: 班級指派 (Gateway + 后台)', '✅ 2026/05/09 上線'],
+    ['Stage 2: LIFF 請假表單 (5 種類型/多天)', '✅ 2026/05/09 上線'],
+    ['Stage 2.5: 后台請假管理 (列表/軸跡/統計)', '✅ 2026/05/09 上線'],
+    ['Stage 2.6: 家長「我的請假」修改/取消', '✅ 2026/05/09 上線'],
+    ['Stage 2.7: 雙家長綁定 + 后台編輯', '✅ 2026/05/09 上線'],
+    ['Stage 3: 12:00/12:30 cron Flex (接送群/教學群/托育群)', '⚠️ 邏輯完成 · 等設 Time Trigger'],
+    ['待辦追蹤頁', '✅ 2026/05/09 上線(就是這頁)']
+  ]);
+
+  html += _h('📦 現行版本', 2);
+  html += _table(['組件', '版本·狀態'], [
+    ['Gateway', '<b>v2.16.0</b> (Apps Script)'],
+    ['后台', '最新 commit (Cloudflare 自動部署)'],
+    ['主網站', '最新 commit'],
+    ['LIFF 表單', 'taipingxinguang.org/leave/'],
+    ['Sheets', '11 張分頁 · 乾淨'],
+    ['LINE Webhook', 'Gateway URL (ShvatiHjw)']
+  ]);
+
+  return _docsHighlight(html);
+}
+
 function _docsDevContent() {
   let html = '';
 
