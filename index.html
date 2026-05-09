@@ -1359,9 +1359,42 @@ function showInquiryDetail(idx) {
 }
 
 // ── 預約紀錄 ──────────────────────────────────────────────
-function renderBooking(el) {
+// 后台預約紀錄來源：優先讀 Gateway 雲端，失敗才倒回 localStorage
+async function _loadBookingsFromGateway() {
+  try {
+    const resp = await fetch(GW_URL + '?action=bookingList', { method: 'GET' });
+    const data = await resp.json();
+    if (data && data.ok && Array.isArray(data.bookings)) {
+      // 讓后台表格使用雲端資料、並保留 row_index
+      return data.bookings.map(b => ({
+        _rowIndex: b._row,
+        ts: b.ts,
+        parent: b.parent,
+        phone: b.phone,
+        child: b.child,
+        bookingType: b.type,  // 讓表格顯示中文類型
+        type: b.type,
+        date: b.date,
+        slot: b.slot,
+        status: b.status
+      }));
+    }
+  } catch(e) {
+    console.warn('[bookings cloud load] err:', e.message);
+  }
+  return null;
+}
+
+async function renderBooking(el) {
+  // 先 render 載入中、同步拉雲端
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF">⏳ 從雲端載入預約紀錄中...</div>';
+  const cloud = await _loadBookingsFromGateway();
   const d = loadData();
-  const rows = d.bookings;
+  if (cloud) {
+    d.bookings = cloud;
+    saveData(d);  // 同步到 localStorage
+  }
+  const rows = d.bookings || [];
   const statusOpts = ['待確認','已確認','已完成','已取消'];
   el.innerHTML = `
     <div style="margin-bottom:12px;display:flex;gap:10px">
@@ -2746,12 +2779,23 @@ function showRegChangeModal(idx, action){
 }
 
 // ── 共用工具 ──────────────────────────────────────────────
-function updateStatus(collection, idx, newStatus) {
+async function updateStatus(collection, idx, newStatus) {
   const data = loadData();
   if(data[collection] && data[collection][idx]) {
     data[collection][idx].status = newStatus;
     saveData(data);
     showToast('✅ 狀態已更新：' + newStatus);
+    // 如果是 bookings，同步到 Gateway
+    if (collection === 'bookings') {
+      const rec = data[collection][idx];
+      if (rec._rowIndex) {
+        try {
+          const r = await _formsDataWrite('update', 'bookings', { status: newStatus }, rec._rowIndex);
+          if (r.ok) showToast('✅ 雲端已同步');
+          else showToast('⚠️ 雲端同步失敗 - ' + r.msg);
+        } catch(e) { showToast('⚠️ 雲端同步失敗'); }
+      }
+    }
   }
 }
 
@@ -7048,6 +7092,29 @@ function _genFormSubmit(ev) {
 // ====================================================================
 // 嘗試寫回 HQ Sheets — 失敗給警告但不擋
 async function _formsDataWrite(action, collection, payload, rowIndex) {
+  // 預約紀錄 走 Apps Script Gateway (booking_*) — 其他 collection 繼續走 N8N forms-data
+  if (collection === 'bookings') {
+    try {
+      var gwAction = action === 'create' ? 'booking_create'
+                   : action === 'update' ? 'booking_update'
+                   : action === 'delete' ? 'booking_delete' : null;
+      if (!gwAction) return { ok: false, msg: 'unknown action: ' + action };
+      var gwBody = { _action: gwAction, fields: payload };
+      if (rowIndex) gwBody.row_index = rowIndex;
+      var res = await fetch(GW_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(gwBody),
+        redirect: 'follow'
+      });
+      var r = {};
+      try { r = await res.json(); } catch(e){}
+      return { ok: r.success !== false, msg: r.error || '', row: r.row };
+    } catch (e) {
+      return { ok: false, msg: e.message };
+    }
+  }
+  // 其他 collection (inquiries / camp / register / assess) 走原本 N8N
   try {
     var body = {
       action: action,
@@ -7057,14 +7124,14 @@ async function _formsDataWrite(action, collection, payload, rowIndex) {
       fields: payload
     };
     if (rowIndex) body.row_index = rowIndex;
-    var res = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
+    var res2 = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/forms-data', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    var r = {};
-    try { r = await res.json(); } catch(e){}
-    return { ok: res.ok && r.success !== false, msg: r.error || '' };
+    var r2 = {};
+    try { r2 = await res2.json(); } catch(e){}
+    return { ok: res2.ok && r2.success !== false, msg: r2.error || '' };
   } catch (e) {
     return { ok: false, msg: e.message };
   }
@@ -9578,6 +9645,24 @@ async function _formDelete(collection, idx) {
   if (!r) { alert('找不到資料'); return; }
   var displayName = r.parent || r.pname || r.studentName || r.sname || '（無姓名）';
   var meta = _FORM_META[collection] || { name: collection, render: function(){} };
+
+  // bookings 特殊處理：從 Gateway 真刪除 Sheets 列 + 釋放主網站預約鎖定
+  if (collection === 'bookings' && r._rowIndex) {
+    if (!confirm('刷除預約「' + displayName + '」？\n\n這筆資料會从 Google Sheets 永久刪除。\n主網站該時段會釋放出來讓其他家長能預約。\n\n如只需「取消」不要永久刪除、請改狀態為「已取消」。')) return;
+    try {
+      var rsp = await _formsDataWrite('delete', 'bookings', {}, r._rowIndex);
+      if (!rsp.ok) {
+        if (!confirm('雲端刪除失敗 (' + (rsp.msg||'?') + ')、是否仍要从本地隱藏？')) return;
+      }
+    } catch(e) { console.warn('booking delete err:', e); }
+    if (Array.isArray(_DB[collection])) {
+      _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+      if (typeof saveData === 'function') saveData(_DB);
+    }
+    meta.render();
+    showToast('✅ 預約已刪除、主網站時段釋出');
+    return;
+  }
 
   // 一鍵軟刪除，不再關軟/硬選擇、不要打家長姓名
   if (!confirm('刪除' + meta.name + '「' + displayName + '」？\n\n這筆資料會被隱藏、不再顯示。\n原始資料仍在 Google Sheets，可以復原。')) return;
