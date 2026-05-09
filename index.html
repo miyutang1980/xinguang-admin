@@ -3115,6 +3115,53 @@ async function renderTrial(el) {
 }
 
 const GW_URL = 'https://script.google.com/macros/s/AKfycbznzkq0WXktqReyqilxz1BoxUmPL2VoaZxhRak1B8g1ShvatiHjw_taeShh_qAbSeiHbg/exec';
+
+// 2026/05/09: 包裝 fetch · 加 timeout(15s) + 客戶端快取 (60s)
+// 避免 Gateway 冷啟動造成「未載入」永遠卡住
+(function patchFetch() {
+  if (window._gwFetchPatched) return;
+  window._gwFetchPatched = true;
+  const _origFetch = window.fetch.bind(window);
+  const _gwCache = new Map();
+  const CACHE_TTL = 60000; // 60 秒
+  const TIMEOUT_MS = 15000; // 15 秒 timeout
+  window.fetch = function(input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!url.startsWith(GW_URL)) {
+      return _origFetch(input, init);
+    }
+    // GET 用快取
+    const isGet = !init || !init.method || init.method.toUpperCase() === 'GET';
+    const cacheKey = isGet ? url : null;
+    if (cacheKey) {
+      const c = _gwCache.get(cacheKey);
+      if (c && (Date.now() - c.t) < CACHE_TTL) {
+        return Promise.resolve(new Response(c.body, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+      }
+    }
+    // 加 timeout + 重試 1 次
+    function once() {
+      const ctrl = new AbortController();
+      const id = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+      const opts = Object.assign({}, init || {}, { signal: ctrl.signal });
+      return _origFetch(input, opts).then(r => {
+        clearTimeout(id);
+        if (cacheKey && r.ok) {
+          r.clone().text().then(t => _gwCache.set(cacheKey, { t: Date.now(), body: t })).catch(()=>{});
+        }
+        return r;
+      }).catch(e => {
+        clearTimeout(id);
+        throw e;
+      });
+    }
+    return once().catch(e => {
+      console.warn('[gw fetch] retry once after:', e.message);
+      return once();
+    });
+  };
+  console.log('[gw fetch] patched - timeout 15s + 60s GET cache + 1 retry');
+})();
 let _trialClasses = [];
 let _trialDirty = false;
 let _trialPeriodStart = '2026-05-08';
