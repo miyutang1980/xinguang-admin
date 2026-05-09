@@ -8153,13 +8153,30 @@ async function renderPickupSchedule(el) {
     sel.onchange = renderTable;
   }
 
+  // 從 YYYY-MM-DD 重新算週幾，防 N8N Sheets 標記錯誤
+  const _wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
+  function _trueWeekday(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr + 'T00:00:00');
+    return _wdMap[d.getDay()];
+  }
+  function _isWeekend(dateStr) {
+    if (!dateStr) return false;
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    return dow === 0 || dow === 6;
+  }
+
   function renderTable() {
     const week = document.getElementById('ps-filter-week').value;
-    const filtered = !week ? allRows : allRows.filter(r => {
+    const filtered = (!week ? allRows : allRows.filter(r => {
       if (!r.date) return false;
       const d = new Date(r.date);
       const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay()+6) % 7));
       return monday.toISOString().slice(0,10) === week;
+    })).filter(r => !_isWeekend(r.date));  // 過濾週末、任何週末資料都不顯示
+    // 以正確的 weekday 獲得重新設定 (不修改 allRows、只變顯示用)
+    filtered.forEach(r => {
+      r.weekday = _trueWeekday(r.date);
     });
 
     const driverOpts = ['<option value=""></option>',
@@ -8430,7 +8447,80 @@ async function renderPickupSchedule(el) {
     else alert('新增失敗: ' + ((r&&r.error)||'未知錯誤'));
   };
 
-  // ─── A3: 複製整週 ───
+  // ─── A3+: 一鍵複製到下一週（從現在選的週次 → +7 天）
+  function _addCopyNextBtn() {
+    if (document.getElementById('ps-copy-next')) return;
+    const refresh = document.getElementById('ps-refresh');
+    if (!refresh) return;
+    const btn = document.createElement('button');
+    btn.id = 'ps-copy-next';
+    btn.textContent = '⏭️ 複製到下一週';
+    btn.style.cssText = 'padding:6px 12px;background:#0EA5E9;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem;margin-right:6px';
+    refresh.parentElement.insertBefore(btn, refresh);
+    btn.onclick = async () => {
+      const srcMon = document.getElementById('ps-filter-week').value;
+      if (!srcMon) { alert('請先選一個週次當「來源」'); return; }
+      const srcD = new Date(srcMon + 'T00:00:00');
+      const dstD = new Date(srcD.getTime() + 7*86400000);
+      const dstMon = dstD.toISOString().slice(0,10);
+      if (!confirm('複製週次 ' + srcMon + ' → ' + dstMon + ' ？')) return;
+      await _doCopyWeek(srcMon, dstMon);
+    };
+
+    // 「生成未來 4 週」按鈕
+    if (!document.getElementById('ps-copy-4w')) {
+      const btn4 = document.createElement('button');
+      btn4.id = 'ps-copy-4w';
+      btn4.textContent = '⏩ 生成未來 4 週';
+      btn4.style.cssText = 'padding:6px 12px;background:#7C3AED;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem;margin-right:6px';
+      refresh.parentElement.insertBefore(btn4, refresh);
+      btn4.onclick = async () => {
+        const srcMon = document.getElementById('ps-filter-week').value;
+        if (!srcMon) { alert('請先選一個「該週有完整班表」的週次當來源'); return; }
+        if (!confirm('以 ' + srcMon + ' 週為範本、往後生成 4 週 (成 28 天、30 路線) 的接送排班？')) return;
+        const srcD = new Date(srcMon + 'T00:00:00');
+        for (let i = 1; i <= 4; i++) {
+          const dstD = new Date(srcD.getTime() + i*7*86400000);
+          const dstMon = dstD.toISOString().slice(0,10);
+          await _doCopyWeek(srcMon, dstMon);
+        }
+        showToast('✅ 未來 4 週生成完成');
+      };
+    }
+  }
+
+  // 實際複製邏輯抽出來、供「複製整週」「複製下一週」「未來 4 週」共用
+  async function _doCopyWeek(srcMon, dstMon) {
+    const srcD = new Date(srcMon + 'T00:00:00');
+    const offset = Math.round((new Date(dstMon + 'T00:00:00') - srcD) / 86400000);
+    if (offset === 0) return;
+    const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
+    const newRows = [];
+    allRows.forEach(r => {
+      const rd = new Date(r.date + 'T00:00:00');
+      if (rd < srcD || rd > new Date(srcD.getTime() + 4*86400000)) return;
+      const newD = new Date(rd.getTime() + offset*86400000);
+      // 跳過週末
+      if (newD.getDay() === 0 || newD.getDay() === 6) return;
+      const newDate = newD.toISOString().slice(0,10);
+      if (allRows.some(x => x.date === newDate && x.route === r.route)) return;
+      newRows.push({row_index:99999, fields:{
+        date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
+        noon_vehicle:r.noon_vehicle||'', noon_driver:r.noon_driver||'', noon_driver2:r.noon_driver2||'',
+        noon_school:r.noon_school||'', noon_count:String(r.noon_count||''), noon_time:r.noon_time||'',
+        pm_vehicle:r.pm_vehicle||'', pm_driver:r.pm_driver||'', pm_driver2:r.pm_driver2||'',
+        pm_school:r.pm_school||'', pm_count:String(r.pm_count||''), pm_time:r.pm_time||'',
+        remark:r.remark||''
+      }});
+    });
+    if (newRows.length === 0) return;
+    document.getElementById('ps-status').textContent = '複製中… ' + dstMon;
+    const rsp = await api({action:'append', rows:newRows});
+    if (rsp && rsp.success) { showToast('✅ 複製 ' + newRows.length + ' 筆 → ' + dstMon); await loadAll(); }
+    else alert('複製失敗: ' + ((rsp&&rsp.error)||'未知錯誤'));
+  }
+
+  // ─── A3: 複製整週 (原本版) ───
   document.getElementById('ps-copy-week').onclick = async () => {
     const srcMon = prompt('來源週次(週一日期, YYYY-MM-DD)?', document.getElementById('ps-filter-week').value || '');
     if (!srcMon || !/^\d{4}-\d{2}-\d{2}$/.test(srcMon)) return;
@@ -8485,6 +8575,7 @@ async function renderPickupSchedule(el) {
   };
 
   await loadAll();
+  _addCopyNextBtn();
 }
 
 // ========================================================================
