@@ -9441,6 +9441,10 @@ async function _studentsCall(action, extra) {
 }
 
 async function renderStudents(el) {
+  // 2026/05/09: 舊 N8N 學生管理已退休 · 全部走 Gateway「在校學生」
+  if (typeof renderClassAssign === 'function') {
+    return renderClassAssign(el);
+  }
   el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
   try {
     const [listRes, schoolsRes] = await Promise.all([
