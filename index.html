@@ -192,6 +192,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('students')" id="nav-students">
         🎓 學生管理
       </div>
+    <div class="sidebar-item" onclick="switchSection('classAssign')" id="nav-classAssign">
+        🏫 班級指派
+      </div>
     <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
         📅 開班資訊
       </div>
@@ -649,6 +652,7 @@ function switchSection(sec) {
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
     trial:'🗓️ 體驗課排班', trialBookings:'📅 體驗預約一覽', documents:'📎 說明會簡報',
     students:'🎓 學生管理',
+    classAssign:'🏫 班級指派',
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
@@ -667,6 +671,7 @@ function switchSection(sec) {
   else if(sec === 'trial') renderTrial(content);
   else if(sec === 'documents') renderDocuments(content);
   else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
+  else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
   else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -9734,6 +9739,326 @@ async function _studentsDelete(row_index, name, sid) {
     alert('刪除失敗：' + (res.error || ''));
   }
 }
+
+
+// ===== 班級指派模組 (Stage 1) — Gateway「在校學生」分頁 =====
+let _caStudents = [];        // Gateway 傳來的學生清單
+let _caTeachers = [];        // 老師清單(中外籍)
+let _caFilter = { keyword: '' };
+
+async function _caCallGw(action, payload) {
+  const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+  if (!u.username || u.role !== 'admin') {
+    return { success:false, error:'只有管理員可以操作' };
+  }
+  let adminPass = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
+  if (!adminPass) {
+    adminPass = prompt('需要確認您的管理者密碼以繼續操作:');
+    if (!adminPass) return { success:false, error:'未提供密碼' };
+    sessionStorage.setItem('xg_session_pwd', adminPass);
+    localStorage.setItem('xg_admin_pwd', adminPass);
+  }
+  const body = Object.assign({
+    _action: action,
+    adminUser: u.username,
+    adminPass: adminPass
+  }, payload || {});
+  try {
+    const resp = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body),
+      redirect: 'follow'
+    });
+    let result = await resp.json();
+    if (Array.isArray(result)) result = result[0] || {};
+    return result;
+  } catch (e) {
+    return { success:false, error:'網路錯誤:' + e.message };
+  }
+}
+
+async function renderClassAssign(el) {
+  el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
+  try {
+    const [stuRes, teaRes] = await Promise.all([
+      _caCallGw('students_list'),
+      // 老師清單可走 GET (不需密碼)
+      fetch(GW_URL + '?action=staffteachers').then(r => r.json()).catch(() => ({ success:false }))
+    ]);
+    if (!stuRes.success) {
+      el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">讀取失敗:' + (stuRes.error || '未知錯誤') + '</div>';
+      return;
+    }
+    _caStudents = stuRes.list || [];
+    _caTeachers = (teaRes && teaRes.success) ? (teaRes.teachers || []) : [];
+    _renderClassAssignView(el);
+  } catch (e) {
+    el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">連線失敗:' + e.message + '</div>';
+  }
+}
+
+function _renderClassAssignView(el) {
+  const f = _caFilter;
+  const kw = (f.keyword || '').toLowerCase();
+  const filtered = _caStudents.filter(s => {
+    if (!kw) return true;
+    const hay = ((s.name||'')+(s.englishName||'')+(s.studentNo||'')+(s.cls||'')
+                +(s.parentPhone||'')+(s.teacherCh||'')+(s.teacherEn||'')).toLowerCase();
+    return hay.includes(kw);
+  });
+
+  const chTeachers = _caTeachers.filter(t => t.kind === 'ch');
+  const enTeachers = _caTeachers.filter(t => t.kind === 'en');
+
+  const banner = `
+    <div class="card" style="padding:14px 18px;background:#FEF3C7;border-left:4px solid #F59E0B;margin-bottom:14px">
+      <div style="font-weight:700;color:#92400E;font-size:0.95rem">🏫 班級指派 (Stage 1)</div>
+      <div style="font-size:0.82rem;color:#78350F;margin-top:4px">
+        這份名單是給「請假通知系統」用的。每個孩子要登記:就讀班級、中籍老師、外籍老師。
+        老師選項從「帳號管理」role=teacher 自動撈(目前 ${_caTeachers.length} 位:中籍 ${chTeachers.length} / 外籍 ${enTeachers.length})。
+        資料存在 Sheets「在校學生」分頁,跟「學生管理」是分開的兩張表 ── 這裡只負責「請假對應」用途。
+      </div>
+    </div>`;
+
+  const filterBar = `
+    <div class="card" style="padding:14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input id="caKeyword" placeholder="搜尋:姓名/學號/班級/家長電話/老師" value="${_esc(f.keyword)}" style="flex:1;min-width:240px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
+      <button class="btn btn-green" onclick="_caAddNew()">＋ 新增學生</button>
+      <button class="btn btn-outline" onclick="renderClassAssign(document.getElementById('mainContent'))">🔄 重新整理</button>
+      <span style="color:#777;font-size:0.82rem">共 ${filtered.length} / ${_caStudents.length} 筆</span>
+    </div>`;
+
+  const head = `
+    <tr style="background:#E0F2FE">
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E;width:80px">學號</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">中文姓名</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">英文名</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">班級</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">中籍師</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">外籍師</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">家長電話</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">接送方式</th>
+      <th style="padding:8px 10px;text-align:center;font-size:0.78rem;color:#0C4A6E;width:90px">操作</th>
+    </tr>`;
+
+  function teacherOpts(list, val) {
+    return '<option value="">--</option>' +
+      list.map(t => '<option value="'+_esc(t.name)+'"' + (val===t.name?' selected':'') + '>'+_esc(t.name)+'</option>').join('');
+  }
+  function methodOpts(val) {
+    const opts = [{v:'walk',l:'走路'},{v:'bus',l:'交通車'},{v:'official_car',l:'公務車'},{v:'parent',l:'家長接送'}];
+    return '<option value="">--</option>' +
+      opts.map(o => '<option value="'+o.v+'"' + (val===o.v?' selected':'') + '>'+o.l+'</option>').join('');
+  }
+
+  const rows = filtered.map(s => `
+      <tr data-row="${s._row}" style="border-bottom:1px solid #eee">
+        <td style="padding:6px 10px;font-size:0.82rem;color:#666;font-family:monospace">${_esc(s.studentNo)}</td>
+        <td style="padding:4px 6px"><input data-f="name" value="${_esc(s.name)}" style="width:90px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="englishName" value="${_esc(s.englishName)}" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="cls" value="${_esc(s.cls)}" placeholder="如: 3A" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><select data-f="teacherCh" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(chTeachers, s.teacherCh)}</select></td>
+        <td style="padding:4px 6px"><select data-f="teacherEn" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(enTeachers, s.teacherEn)}</select></td>
+        <td style="padding:4px 6px"><input data-f="parentPhone" value="${_esc(s.parentPhone)}" placeholder="09xx-xxx-xxx" style="width:120px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><select data-f="pickupMethod" style="width:100px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${methodOpts(s.pickupMethod)}</select></td>
+        <td style="padding:6px 6px;text-align:center;white-space:nowrap">
+          <button class="btn-link" onclick="_caViewDetail(${s._row})" style="background:none;border:none;color:#1e90ff;cursor:pointer;font-size:0.82rem;padding:2px 4px" title="詳細">📄</button>
+          <button onclick="_caDelete(${s._row}, '${_esc(s.name).replace(/'/g,'\\\'')}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 4px" title="刪除">❌</button>
+        </td>
+      </tr>`).join('');
+
+  el.innerHTML = banner + filterBar + `
+    <div class="card" style="padding:0;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
+        <thead>${head}</thead>
+        <tbody id="caTbody">${rows || '<tr><td colspan="9" style="padding:40px;text-align:center;color:#999">還沒有學生 ── 點上方「+ 新增學生」開始建檔</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
+  // 篩選
+  const kwInput = document.getElementById('caKeyword');
+  if (kwInput) kwInput.oninput = (e) => { _caFilter.keyword = e.target.value; _renderClassAssignView(el); document.getElementById('caKeyword').focus(); };
+
+  // inline blur 自動存
+  document.querySelectorAll('#caTbody [data-f]').forEach(input => {
+    input.addEventListener('blur', async (ev) => {
+      const tr = ev.target.closest('tr');
+      const row_index = parseInt(tr.getAttribute('data-row'), 10);
+      const field = ev.target.getAttribute('data-f');
+      let value = ev.target.value;
+      if (field === 'parentPhone' && /^9\d{8}$/.test(value)) {
+        value = '0' + value;
+        ev.target.value = value;
+      }
+      const fields = {};
+      fields[field] = value;
+      ev.target.style.background = '#FFFBEB';
+      const res = await _caCallGw('students_update', { row_index, fields });
+      if (res && res.success) {
+        ev.target.style.background = '#D1FAE5';
+        const local = _caStudents.find(x => x._row === row_index);
+        if (local) local[field] = value;
+        setTimeout(() => { ev.target.style.background = ''; }, 1500);
+      } else {
+        ev.target.style.background = '#FEE2E2';
+        alert('儲存失敗:' + ((res && res.error) || ''));
+      }
+    });
+  });
+}
+
+async function _caAddNew() {
+  const html = `
+    <div style="max-width:560px">
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">學生中文姓名 <span style="color:#dc2626">*</span></label>
+        <input id="caf_name" placeholder="如:王小明" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">英文名</label>
+          <input id="caf_englishName" placeholder="Tommy" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">班級</label>
+          <input id="caf_cls" placeholder="如:3A" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">中籍老師</label>
+          <select id="caf_teacherCh" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="">-- 不指派 --</option>
+            ${_caTeachers.filter(t=>t.kind==='ch').map(t=>'<option value="'+_esc(t.name)+'">'+_esc(t.name)+'</option>').join('')}
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">外籍老師</label>
+          <select id="caf_teacherEn" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="">-- 不指派 --</option>
+            ${_caTeachers.filter(t=>t.kind==='en').map(t=>'<option value="'+_esc(t.name)+'">'+_esc(t.name)+'</option>').join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長姓名</label>
+          <input id="caf_parentName" placeholder="王媽媽" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長電話</label>
+          <input id="caf_parentPhone" placeholder="0912-345-678" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">接送方式</label>
+          <select id="caf_pickupMethod" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="">-- 不設 --</option>
+            <option value="walk">走路</option>
+            <option value="bus">交通車</option>
+            <option value="official_car">公務車</option>
+            <option value="parent">家長接送</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">是否安親</label>
+          <select id="caf_hasDaycare" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="false">否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">是否托育</label>
+          <select id="caf_hasNursery" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="false">否</option>
+            <option value="true">是</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
+        <input id="caf_note" placeholder="(選填)" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px">
+        <button class="btn btn-outline" onclick="closeModal()">取消</button>
+        <button class="btn btn-green" onclick="_caSubmitNew()">儲存</button>
+      </div>
+    </div>`;
+  document.getElementById('modalTitle').textContent = '➕ 新增學生';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+  setTimeout(() => { const f = document.getElementById('caf_name'); if (f) f.focus(); }, 100);
+}
+
+async function _caSubmitNew() {
+  const get = (id) => (document.getElementById(id) || {}).value || '';
+  const name = get('caf_name').trim();
+  if (!name) { alert('學生姓名不可空'); return; }
+  let phone = get('caf_parentPhone').trim();
+  if (/^9\d{8}$/.test(phone)) phone = '0' + phone;
+  const fields = {
+    name: name,
+    englishName: get('caf_englishName').trim(),
+    cls: get('caf_cls').trim(),
+    teacherCh: get('caf_teacherCh'),
+    teacherEn: get('caf_teacherEn'),
+    parentName: get('caf_parentName').trim(),
+    parentPhone: phone,
+    pickupMethod: get('caf_pickupMethod'),
+    hasDaycare: get('caf_hasDaycare') === 'true',
+    hasNursery: get('caf_hasNursery') === 'true',
+    note: get('caf_note').trim()
+  };
+  const res = await _caCallGw('students_create', { fields });
+  if (res && res.success) {
+    closeModal();
+    if (typeof showToast === 'function') showToast('已新增 · ' + name + ' (' + (res.studentNo || '') + ')');
+    renderClassAssign(document.getElementById('mainContent'));
+  } else {
+    alert('新增失敗:' + ((res && res.error) || '未知錯誤'));
+  }
+}
+
+async function _caDelete(row_index, name) {
+  if (!confirm('確定要刪除學生「' + name + '」?\n\n注意:刪除後無法復原,請假紀錄會失去連結。')) return;
+  const res = await _caCallGw('students_delete', { row_index });
+  if (res && res.success) {
+    if (typeof showToast === 'function') showToast('已刪除 · ' + name);
+    renderClassAssign(document.getElementById('mainContent'));
+  } else {
+    alert('刪除失敗:' + ((res && res.error) || ''));
+  }
+}
+
+function _caViewDetail(row_index) {
+  const s = _caStudents.find(x => x._row === row_index);
+  if (!s) { alert('找不到資料'); return; }
+  const lines = [
+    ['學號', s.studentNo],
+    ['中文姓名', s.name],
+    ['英文名', s.englishName],
+    ['班級', s.cls],
+    ['中籍老師', s.teacherCh],
+    ['外籍老師', s.teacherEn],
+    ['家長姓名', s.parentName],
+    ['家長電話', s.parentPhone],
+    ['家長 LINE userId', s.parentLineUserId],
+    ['接送方式', s.pickupMethod],
+    ['安親', s.hasDaycare ? '是' : '否'],
+    ['托育', s.hasNursery ? '是' : '否'],
+    ['狀態', s.status],
+    ['備註', s.note],
+    ['建立時間', s.createdAt],
+    ['更新時間', s.updatedAt]
+  ];
+  const rows = lines.map(([k,v]) => '<tr><td style="padding:6px 12px;color:#6B7280;font-size:0.82rem;width:120px">'+k+'</td><td style="padding:6px 12px;font-size:0.88rem">'+_esc(v||'(未填)')+'</td></tr>').join('');
+  document.getElementById('modalTitle').textContent = '📄 學生詳細 · ' + (s.name || s.studentNo);
+  document.getElementById('modalBody').innerHTML = '<div style="max-width:560px"><table style="width:100%;border-collapse:collapse">'+rows+'</table></div>';
+  document.getElementById('modalOverlay').classList.add('open');
+}
+// ===== END 班級指派模組 =====
 
 // 右下角 toast，帶可選 undo 按鈕。5 秒後自動消失。
 function showToast(message, undoLabel, undoFn) {
