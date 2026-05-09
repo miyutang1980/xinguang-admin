@@ -682,7 +682,15 @@ function switchSection(sec) {
   else if(sec === 'register') renderRegister(content);
   else if(sec === 'trial') renderTrial(content);
   else if(sec === 'documents') renderDocuments(content);
-  else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
+  else if(sec === 'students') {
+    // 舊「學生管理」 (N8N) 已退休 · 轉到「班級指派」讀同一份 Gateway 資料
+    if (typeof renderClassAssign === 'function') {
+      document.getElementById('pageTitle').textContent = '🎓 學生管理';
+      renderClassAssign(content);
+    } else {
+      content.innerHTML = '<div style="padding:40px">學生模組未載入</div>';
+    }
+  }
   else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
   else if(sec === 'leaves') { if(typeof renderLeaves==='function') renderLeaves(content); else content.innerHTML='<div style="padding:40px">請假紀錄模組未載入</div>'; }
   else if(sec === 'docs') { if(typeof renderDocs==='function') renderDocs(content); else content.innerHTML='<div style="padding:40px">文件中心模組未載入</div>'; }
