@@ -684,25 +684,49 @@ function switchSection(sec) {
   else if(sec === 'documents') renderDocuments(content);
   else if(sec === 'students') {
     // 舊「學生管理」 (N8N) 已退休 · 轉到「班級指派」讀同一份 Gateway 資料
-    if (typeof renderClassAssign === 'function') {
-      document.getElementById('pageTitle').textContent = '🎓 學生管理';
-      renderClassAssign(content);
-    } else {
-      content.innerHTML = '<div style="padding:40px">學生模組未載入</div>';
-    }
+    document.getElementById('pageTitle').textContent = '🎓 學生管理';
+    _lazyRender(content, 'renderClassAssign', '學生模組');
   }
-  else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
-  else if(sec === 'leaves') { if(typeof renderLeaves==='function') renderLeaves(content); else content.innerHTML='<div style="padding:40px">請假紀錄模組未載入</div>'; }
-  else if(sec === 'docs') { if(typeof renderDocs==='function') renderDocs(content); else content.innerHTML='<div style="padding:40px">文件中心模組未載入</div>'; }
-  else if(sec === 'links') { if(typeof renderLinks==='function') renderLinks(content); else content.innerHTML='<div style="padding:40px">連結中心模組未載入</div>'; }
-  else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
-  else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
-  else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
-  else if(sec === 'transfer') { if(typeof renderTransferAdmin==='function') renderTransferAdmin(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
-  else if(sec === 'stats') { if(typeof renderTeacherStats==='function') renderTeacherStats(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
-  else if(sec === 'health') { if(typeof renderHealth==='function') renderHealth(content); else content.innerHTML='<div style="padding:40px">健檢模組未載入</div>'; }
-  else if(sec === 'classes') { if(typeof renderClasses==='function') renderClasses(content); else content.innerHTML='<div style="padding:40px">開班資訊模組未載入</div>'; }
+  else if(sec === 'classAssign') { _lazyRender(content, 'renderClassAssign', '班級指派模組'); }
+  else if(sec === 'leaves') { _lazyRender(content, 'renderLeaves', '請假紀錄模組'); }
+  else if(sec === 'docs') { _lazyRender(content, 'renderDocs', '文件中心模組'); }
+  else if(sec === 'links') { _lazyRender(content, 'renderLinks', '連結中心模組'); }
+  else if(sec === 'webcal') { _lazyRender(content, 'renderWebCalendar', '主網站日曆模組'); }
+  else if(sec === 'pickup') { _lazyRender(content, 'renderPickupSchedule', '接送模組'); }
+  else if(sec === 'assignments') { _lazyRender(content, 'renderPickupToday', '今日接送模組'); }
+  else if(sec === 'transfer') { _lazyRender(content, 'renderTransferAdmin', '轉交模組'); }
+  else if(sec === 'stats') { _lazyRender(content, 'renderTeacherStats', '老師月報模組'); }
+  else if(sec === 'health') { _lazyRender(content, 'renderHealth', '健檢模組'); }
+  else if(sec === 'classes') { _lazyRender(content, 'renderClasses', '開班資訊模組'); }
   else if(sec === 'lineSrc') { renderLineSourceAnalysis(content); }
+}
+
+/**
+ * Lazy 載入路由：跨 <script> 區塊的函式可能在 switchSection 觸發時還沒 parse 完，
+ * 用輪詢方式等最多 3 秒，每 100ms retry 一次。
+ */
+function _lazyRender(container, fnName, modName) {
+  container.innerHTML = '<div style="padding:60px;text-align:center;color:#9CA3AF"><div style="font-size:2rem">⏳</div><div style="margin-top:8px">載入' + modName + '中…</div></div>';
+  var tries = 0;
+  var maxTries = 30; // 30 × 100ms = 3 秒
+  var timer = setInterval(function(){
+    tries++;
+    if (typeof window[fnName] === 'function') {
+      clearInterval(timer);
+      try { window[fnName](container); }
+      catch(e) {
+        console.error('[' + fnName + '] error:', e);
+        container.innerHTML = '<div style="padding:40px;color:#dc2626">' + modName + '渲染錯誤：' + (e.message||e) + '</div>';
+      }
+    } else if (tries >= maxTries) {
+      clearInterval(timer);
+      container.innerHTML = '<div style="padding:40px;text-align:center">' +
+        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ ' + modName + '未載入</div>' +
+        '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:16px">已等候 3 秒。可能原因：JS 載入失敗 / 函式未定義 (' + fnName + ')</div>' +
+        '<button onclick="location.reload()" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重新載入頁面</button>' +
+        '</div>';
+    }
+  }, 100);
 }
 
 /* ============ LINE 點擊來源分析 ============ */
@@ -11292,4 +11316,12 @@ async function _formDelete(collection, idx) {
 
   _addToDeletedFormsSet(collection, r.ts);
   if (Array.isArray(_DB[collection])) {
-    _DB[collection] = _DB[collection
+    _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
+    if (typeof saveData === 'function') saveData(_DB);
+  }
+  meta.render();
+  showToast('✅ ' + meta.name + '已隱藏');
+}
+</script>
+</body>
+</html>
