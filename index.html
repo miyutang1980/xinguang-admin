@@ -2587,7 +2587,7 @@ function openAddRegister(fromAssess) {
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">班型 *</label>
         <select id="reg_class" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
           <option value="">請選擇</option>
-          ${['浸潤班','菁英班','標準班','全民英檢班','安親課輔班','托育班'].map(c=>`<option>${c}</option>`).join('')}
+          ${['浸潤班','菁英班','全民英檢班','安親課輔班','托育班'].map(c=>`<option>${c}</option>`).join('')}
         </select>
       </div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果</label><input type="text" id="reg_assess" value="${fromAssess.finalClass||''}" readonly style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:var(--surface)"></div>
@@ -2682,7 +2682,7 @@ function showRegChangeModal(idx, action){
     bodyHtml += `<input type="text" id="chgGrade" value="${r.grade||''}" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
     bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">班型</label>`;
     bodyHtml += `<select id="chgClassType" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box">`;
-    ['','浸潤班','菁英班','標準班'].forEach(opt=>{
+    ['','浸潤班','菁英班'].forEach(opt=>{
       bodyHtml += `<option${opt===(r.classType||'')?' selected':''}>${opt}</option>`;
     });
     bodyHtml += `</select></div>`;
