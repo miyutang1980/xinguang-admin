@@ -9874,6 +9874,7 @@ function _renderClassAssignView(el) {
         <td style="padding:4px 6px"><select data-f="pickupMethod" style="width:100px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${methodOpts(s.pickupMethod)}</select></td>
         <td style="padding:6px 6px;text-align:center;white-space:nowrap">
           <button class="btn-link" onclick="_caViewDetail(${s._row})" style="background:none;border:none;color:#1e90ff;cursor:pointer;font-size:0.82rem;padding:2px 4px" title="詳細">📄</button>
+          <button class="btn-link" onclick="_caEdit(${s._row})" style="background:none;border:none;color:#10B981;cursor:pointer;font-size:0.82rem;padding:2px 4px" title="編輯">✏️</button>
           <button onclick="_caDelete(${s._row}, '${_esc(s.name).replace(/'/g,'\\\'')}')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 4px" title="刪除">❌</button>
         </td>
       </tr>`).join('');
@@ -10065,6 +10066,140 @@ async function _caDelete(row_index, name) {
     renderClassAssign(document.getElementById('mainContent'));
   } else {
     alert('刪除失敗:' + ((res && res.error) || ''));
+  }
+}
+
+// v2.16: 完整編輯 modal (含家長 2)
+async function _caEdit(row_index) {
+  const s = _caStudents.find(x => x._row === row_index);
+  if (!s) { alert('找不到資料'); return; }
+  const chTeachers = _caTeachers.filter(t => t.kind === 'ch');
+  const enTeachers = _caTeachers.filter(t => t.kind === 'en');
+  const teacherOpt = (list, val) => '<option value="">--</option>' +
+    list.map(t => '<option value="'+_esc(t.name)+'"'+(val===t.name?' selected':'')+'>'+_esc(t.name)+'</option>').join('');
+  const methodOpt = (val) => {
+    const opts = [{v:'',l:'-- 不設 --'},{v:'walk',l:'走路'},{v:'bus',l:'交通車'},{v:'official_car',l:'公務車'},{v:'parent',l:'家長接送'}];
+    return opts.map(o => '<option value="'+o.v+'"'+(val===o.v?' selected':'')+'>'+o.l+'</option>').join('');
+  };
+  const yesNoOpt = (val) => {
+    return '<option value="false"'+(!val?' selected':'')+'>否</option><option value="true"'+(val?' selected':'')+'>是</option>';
+  };
+  const relOpts = ['','父親','母親','阿公','阿嬤','其他'];
+  const relOpt = relOpts.map(r => '<option value="'+r+'"'+(s.parent2Relation===r?' selected':'')+'>'+(r||'--')+'</option>').join('');
+
+  const html = `
+    <div style="max-width:560px;max-height:75vh;overflow-y:auto">
+      <div style="background:#EFF6FF;border-left:3px solid #3B82F6;padding:8px 12px;border-radius:6px;margin-bottom:14px;font-size:0.82rem;color:#1E3A8A">✏️ 編輯學生 · ${_esc(s.name)} (${_esc(s.studentNo)})</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">姓名 *</label>
+          <input id="cae_name" value="${_esc(s.name)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">英文名</label>
+          <input id="cae_englishName" value="${_esc(s.englishName)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">班級</label>
+          <input id="cae_cls" value="${_esc(s.cls)}" placeholder="3A" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">中籍師</label>
+          <select id="cae_teacherCh" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${teacherOpt(chTeachers, s.teacherCh)}</select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">外籍師</label>
+          <select id="cae_teacherEn" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${teacherOpt(enTeachers, s.teacherEn)}</select>
+        </div>
+      </div>
+      <div style="background:#F0FDF4;border-left:3px solid #10B981;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.78rem;color:#065F46">主要家長</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長姓名</label>
+          <input id="cae_parentName" value="${_esc(s.parentName)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長電話</label>
+          <input id="cae_parentPhone" value="${_esc(s.parentPhone)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+      </div>
+      <div style="background:#FEF3C7;border-left:3px solid #F59E0B;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.78rem;color:#92400E">其他家長 (選填 · 例:爸爸/阿公) · 裝了他就能進 LIFF 請假</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長 2 姓名</label>
+          <input id="cae_parent2Name" value="${_esc(s.parent2Name)}" placeholder="王爸爸" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長 2 電話</label>
+          <input id="cae_parent2Phone" value="${_esc(s.parent2Phone)}" placeholder="0987-654-321" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">關係</label>
+          <select id="cae_parent2Relation" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${relOpt}</select>
+        </div>
+      </div>
+      ${(s.parent2LineUserId || s.parentLineUserId) ? '<div style="background:#F9FAFB;padding:8px 12px;border-radius:6px;margin-bottom:12px;font-size:0.75rem;color:#6B7280;font-family:monospace">'+ (s.parentLineUserId?'家長 1 LINE: '+s.parentLineUserId.substring(0,12)+'...<br>':'') + (s.parent2LineUserId?'家長 2 LINE: '+s.parent2LineUserId.substring(0,12)+'...':'') +'</div>' : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">接送方式</label>
+          <select id="cae_pickupMethod" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${methodOpt(s.pickupMethod)}</select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">是否安親</label>
+          <select id="cae_hasDaycare" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${yesNoOpt(s.hasDaycare)}</select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">是否托育</label>
+          <select id="cae_hasNursery" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${yesNoOpt(s.hasNursery)}</select>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
+        <input id="cae_note" value="${_esc(s.note)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px">
+        <button class="btn btn-outline" onclick="closeModal()">取消</button>
+        <button class="btn btn-green" onclick="_caSubmitEdit(${row_index})">儲存修改</button>
+      </div>
+    </div>`;
+  document.getElementById('modalTitle').textContent = '✏️ 編輯學生';
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function _caSubmitEdit(row_index) {
+  const get = (id) => (document.getElementById(id) || {}).value || '';
+  const name = get('cae_name').trim();
+  if (!name) { alert('姓名不可空'); return; }
+  let phone = get('cae_parentPhone').trim();
+  if (/^9\d{8}$/.test(phone)) phone = '0' + phone;
+  let phone2 = get('cae_parent2Phone').trim();
+  if (/^9\d{8}$/.test(phone2)) phone2 = '0' + phone2;
+  const fields = {
+    name: name,
+    englishName: get('cae_englishName').trim(),
+    cls: get('cae_cls').trim(),
+    teacherCh: get('cae_teacherCh'),
+    teacherEn: get('cae_teacherEn'),
+    parentName: get('cae_parentName').trim(),
+    parentPhone: phone,
+    pickupMethod: get('cae_pickupMethod'),
+    hasDaycare: get('cae_hasDaycare') === 'true',
+    hasNursery: get('cae_hasNursery') === 'true',
+    note: get('cae_note').trim(),
+    parent2Name: get('cae_parent2Name').trim(),
+    parent2Phone: phone2,
+    parent2Relation: get('cae_parent2Relation')
+  };
+  const res = await _caCallGw('students_update', { row_index, fields });
+  if (res && res.success) {
+    closeModal();
+    if (typeof showToast === 'function') showToast('已修改 · ' + name);
+    renderClassAssign(document.getElementById('mainContent'));
+  } else {
+    alert('修改失敗:' + ((res && res.error) || ''));
   }
 }
 
