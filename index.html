@@ -198,6 +198,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('leaves')" id="nav-leaves">
         📝 請假紀錄
       </div>
+    <div class="sidebar-item" onclick="switchSection('docs')" id="nav-docs">
+        📖 文件中心
+      </div>
     <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
         📅 開班資訊
       </div>
@@ -657,6 +660,7 @@ function switchSection(sec) {
     students:'🎓 學生管理',
     classAssign:'🏫 班級指派',
     leaves:'📝 請假紀錄',
+    docs:'📖 文件中心',
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
@@ -677,6 +681,7 @@ function switchSection(sec) {
   else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
   else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
   else if(sec === 'leaves') { if(typeof renderLeaves==='function') renderLeaves(content); else content.innerHTML='<div style="padding:40px">請假紀錄模組未載入</div>'; }
+  else if(sec === 'docs') { if(typeof renderDocs==='function') renderDocs(content); else content.innerHTML='<div style="padding:40px">文件中心模組未載入</div>'; }
   else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -10446,6 +10451,337 @@ function _lvBindStats() {
   sel.addEventListener('change', e => { _lvStatsMonth = e.target.value; _lvRenderView(document.getElementById('mainContent')); });
 }
 // ===== END 請假紀錄模組 =====
+
+// ===== 文件中心模組 (Stage 2.7) =====
+let _docsTab = 'dev'; // 'dev' | 'user'
+let _docsKw = '';
+
+function renderDocs(el) {
+  const tabBar = `
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="${_docsTab==='dev'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_docsSwitchTab('dev')">⚙️ 開發手冊</button>
+      <button class="${_docsTab==='user'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_docsSwitchTab('user')">👨‍🏫 使用手冊</button>
+    </div>
+    <div class="card" style="padding:12px;margin-bottom:14px;display:flex;gap:8px;align-items:center">
+      <input id="docsKw" placeholder="🔍 在文件中搜尋..." value="${_esc(_docsKw)}" style="flex:1;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.9rem">
+      <button class="btn btn-outline" onclick="_docsClearSearch()" style="padding:6px 14px">清除</button>
+      <span style="color:#9CA3AF;font-size:0.78rem">最後更新 2026/05/09</span>
+    </div>`;
+  el.innerHTML = tabBar + '<div id="docsBody" class="card" style="padding:24px;line-height:1.7;font-size:0.92rem">' + (_docsTab === 'dev' ? _docsDevContent() : _docsUserContent()) + '</div>';
+  const ki = document.getElementById('docsKw');
+  if (ki) ki.addEventListener('input', e => {
+    _docsKw = e.target.value;
+    document.getElementById('docsBody').innerHTML = _docsTab === 'dev' ? _docsDevContent() : _docsUserContent();
+    document.getElementById('docsKw').focus();
+  });
+}
+
+function _docsSwitchTab(t) { _docsTab = t; _docsKw=''; renderDocs(document.getElementById('mainContent')); }
+function _docsClearSearch() { _docsKw = ''; renderDocs(document.getElementById('mainContent')); }
+
+// 簡易搜尋:把含有關鍵字的段落 highlight,其他段落顯灰色
+function _docsHighlight(html) {
+  if (!_docsKw || !_docsKw.trim()) return html;
+  const kw = _docsKw.trim();
+  const re = new RegExp('(' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+  return html.replace(re, '<mark style="background:#FEF3C7;padding:1px 3px;border-radius:3px">$1</mark>');
+}
+
+function _h(text, level) {
+  const c = level === 1 ? '#0F172A' : level === 2 ? '#1E40AF' : '#374151';
+  const sz = level === 1 ? '1.6rem' : level === 2 ? '1.25rem' : '1.05rem';
+  const mt = level === 1 ? '0' : level === 2 ? '24px' : '18px';
+  const bb = level === 1 ? 'border-bottom:2px solid #E5E7EB;padding-bottom:8px' : '';
+  return `<h${level} style="color:${c};font-size:${sz};margin:${mt} 0 12px;${bb}">${text}</h${level}>`;
+}
+
+function _table(headers, rows) {
+  let h = '<div style="overflow-x:auto;margin:12px 0"><table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+  h += '<thead><tr style="background:#F3F4F6">';
+  headers.forEach(c => h += '<th style="padding:8px 10px;text-align:left;border:1px solid #E5E7EB;font-weight:700">'+c+'</th>');
+  h += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    h += '<tr>';
+    r.forEach(c => h += '<td style="padding:8px 10px;border:1px solid #E5E7EB;vertical-align:top">'+c+'</td>');
+    h += '</tr>';
+  });
+  h += '</tbody></table></div>';
+  return h;
+}
+
+function _code(s) {
+  return '<pre style="background:#1F2937;color:#D1FAE5;padding:14px;border-radius:8px;overflow-x:auto;font-size:0.82rem;font-family:monospace;margin:10px 0;white-space:pre-wrap;word-break:break-all">'+_esc(s)+'</pre>';
+}
+
+function _box(text, type) {
+  const colors = { info: '#0EA5E9', warn: '#F59E0B', error: '#DC2626', success: '#10B981' };
+  const c = colors[type] || '#6B7280';
+  return '<div style="background:'+c+'15;border-left:4px solid '+c+';padding:12px 14px;border-radius:6px;margin:12px 0;font-size:0.9rem">'+text+'</div>';
+}
+
+// ─── 開發手冊內容 ───
+function _docsDevContent() {
+  let html = '';
+
+  html += _h('太平新光分校系統 · 開發手冊', 1);
+  html += _box('此文件涵蓋整個系統的技術架構、資料流向、Gateway API、Sheets 結構、部署流程。最後更新 <b>2026/05/09</b> · Gateway v2.15.1', 'info');
+
+  html += _h('系統總覽', 2);
+  html += '<p>太平新光分校採用「<b>Apps Script Gateway 中心化架構</b>」,核心是一個 Google Apps Script(Gateway),負責所有資料寫入、讀取、LINE 推送、業務邏輯。前端有三個介面:</p>';
+  html += _table(['介面', 'URL', '使用對象', '部署方式'], [
+    ['<b>主網站</b>', '<a href="https://taipingxinguang.org" target="_blank">taipingxinguang.org</a>', '家長/訪客', 'Cloudflare Pages (GitHub: xinguang-website)'],
+    ['<b>後台管理</b>', '<a href="https://admin.taipingxinguang.org" target="_blank">admin.taipingxinguang.org</a>', '行政/老師', 'Cloudflare Pages (GitHub: xinguang-admin)'],
+    ['<b>請假 LIFF</b>', '<a href="https://taipingxinguang.org/leave/" target="_blank">taipingxinguang.org/leave/</a>', '家長(LINE 內)', '主網站子路徑'],
+    ['<b>Gateway</b>', 'Google Apps Script', '所有上游後端', 'Apps Script Web App']
+  ]);
+
+  html += _h('架構圖', 3);
+  html += _code(`家長 LINE  ──┐
+              ↓
+        ┌──────────┐
+        │   LINE   │
+        │ Channel  │
+        └─────┬────┘
+              ↓ webhook
+        ┌──────────┐         ┌─────────┐
+        │ Gateway  │ ────→   │BotBonnie│
+        │(Apps     │ (轉發    └─────────┘
+        │ Script)  │  非請假)
+        └─────┬────┘
+              ↓
+   ┌──────────┴──────────────────┐
+   ↓                             ↓
+ Sheets                  LINE Messaging API
+ (資料儲存)              (推 Flex 給家長/群組)
+
+主網站 / 後台 / LIFF ──→ Gateway (HTTP)`);
+
+  html += _h('Gateway 詳情', 2);
+  html += _table(['項目', '值'], [
+    ['版本', '<b>2.15.1</b>'],
+    ['檔案', 'xinguang-form-gateway-v2.gs'],
+    ['Web App URL (新)', '<code style="background:#F3F4F6;padding:2px 6px;border-radius:4px;font-size:0.78rem">.../ShvatiHjw_taeShh_qAbSeiHbg/exec</code>'],
+    ['作者帳號', 'miyutang1980@gmail.com'],
+    ['Sheets ID', '1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w'],
+    ['Properties', 'LINE_BOT_TOKEN / ADMIN_GROUP_ID / BOTBONNIE_WEBHOOK_URL']
+  ]);
+
+  html += _h('Gateway Actions(POST `_action`)', 3);
+  html += _table(['Action', '功能', '參數', '需 admin'], [
+    ['<code>trial_classes_set/get</code>', '體驗課班表', 'classes[]', 'No'],
+    ['<code>trial_bookings_get</code>', '體驗預約查詢', '-', 'No'],
+    ['<code>booking_list/create/update/delete</code>', '預約 CRUD', 'fields, row_index', 'No'],
+    ['<code>calendar_settings_get/set</code>', '主網站日曆', 'settings', 'No'],
+    ['<code>account_list/create/update/delete</code>', '員工帳號', 'fields, adminUser, adminPass', 'Yes'],
+    ['<code>students_list/create/update/delete</code>', '學生 CRUD', 'fields, adminUser, adminPass', 'Yes'],
+    ['<code>staff_list_teachers</code>', '撈中外師清單', '-', 'No'],
+    ['<code>leave_lookup_kids</code>', 'LIFF 查家長綁的孩子', 'lineUserId / phone', 'No'],
+    ['<code>leave_create</code>', '建立請假', 'kids[], dates[], leaveType, reason', 'No'],
+    ['<code>leave_list</code>', '查請假', 'scope (mine/all), lineUserId', 'No'],
+    ['<code>leave_cancel</code>', '取消請假', 'leaveNo, lineUserId', 'No (own)'],
+    ['<code>leave_update</code>', '修改請假類型/原因', 'leaveNo, lineUserId, leaveType, reason', 'No (own)'],
+    ['<code>leave_admin_list</code>', '後台查全部請假', 'adminUser, adminPass', 'Yes'],
+    ['<code>leave_admin_cancel</code>', '後台取消任何請假', 'leaveNo, adminUser, adminPass', 'Yes']
+  ]);
+
+  html += _h('Gateway Actions(GET `?action=`)', 3);
+  html += _table(['Action', '功能'], [
+    ['<code>?action=trialclasses</code>', '體驗課班表(主網站讀)'],
+    ['<code>?action=trialbookings</code>', '體驗預約鎖定查詢'],
+    ['<code>?action=allbookings</code>', '所有預約(跨裝置鎖定用)'],
+    ['<code>?action=calendarsettings</code>', '主網站日曆設定'],
+    ['<code>?action=staffteachers</code>', '中外師清單'],
+    ['<code>?action=cron12</code>', '手動觸發 12:00 接送群推 Flex'],
+    ['<code>?action=cron1230</code>', '手動觸發 12:30 教學群+托育群推 Flex'],
+    ['<code>?action=cron_preview</code>', '預覽 cron Flex(不推)'],
+    ['<code>?action=debugprops</code>', '看 Properties 設定狀態(不顯示值)']
+  ]);
+
+  html += _h('Sheets 結構', 2);
+  html += _box('Sheets 是真理之源。所有資料都存在這裡 · 任何 UI 都是 Sheets 的視覺化呈現。', 'info');
+  html += _table(['Sheet 名稱', '欄位數', '主要欄位', '寫入者'], [
+    ['<b>LINE好友</b>', '6', 'userId / displayName / 電話 / 加入時間 / 來源 / sentMessages', 'Gateway webhook'],
+    ['<b>請假紀錄</b>', '14', '請假編號 / 日期 / 學生 / 班級 / 中外師 / 類型 / 原因 / 補課 / 狀態 / 來源 / userId', 'Gateway leave_create'],
+    ['<b>在校學生</b>', '16', '學生編號 / 姓名 / 班級 / 中外師 / 家長電話 / userId / 接送 / 安親 / 托育', 'Gateway students_*'],
+    ['<b>主網站設定</b>', '3', 'key / value / updated_at (儲存日曆 blockedDates 等)', 'Gateway calendar_settings_set'],
+    ['<b>體驗課班表</b>', '14', '班代號 / 級數 / 時段 / 中外師 / 教室', 'Gateway trial_classes_set'],
+    ['<b>夏令營報名</b>', '8', '時間 / 家長 / 電話 / LINE / 孩子 / 課程 / 飲食 / 狀態', '主網站表單'],
+    ['<b>問課諮詢</b>', '9', '時間 / 家長 / 電話 / Email / 孩子 / 班型 / 問題 / 狀態', '主網站表單'],
+    ['<b>預約紀錄</b>', '8', '時間 / 家長 / 電話 / 孩子 / 類型 / 日期 / 時段 / 狀態', '主網站 + 後台'],
+    ['<b>正式註冊</b>', '10', '時間 / 家長 / 學生 / 年級 / 班型 / 附加服務', '主網站表單'],
+    ['<b>員工帳號</b>', '9', '員工編號 / 姓名 / 帳號 / 密碼 / 角色 / 職稱 / 狀態', '後台帳號管理'],
+    ['<b>LINE事件紀錄</b>', '6', '時間 / 事件類型 / userId / groupId / 訊息內容', 'Gateway webhook']
+  ]);
+
+  html += _h('LINE Channel + LIFF', 2);
+  html += _table(['項目', '值'], [
+    ['Channel ID', '2008565960'],
+    ['Webhook URL', 'Gateway URL (...ShvatiHjw.../exec)'],
+    ['Auto-reply', 'Disabled'],
+    ['LIFF App「請假申請」', '<code>2009757754-paHJ5QJO</code>'],
+    ['LIFF App「綁定」', '<code>2009757754-xD0scwQv</code>'],
+    ['LIFF Endpoint URL', 'https://taipingxinguang.org/leave/'],
+    ['LIFF Size', 'Tall'],
+    ['LIFF Scope', 'profile + openid']
+  ]);
+
+  html += _h('LINE 群組 ID', 3);
+  html += _table(['群組角色', 'Group ID', '推什麼時候'], [
+    ['🚐 接送群 (TRANSPORT)', '<code style="font-size:0.78rem">C49bb85a4808ade9200f34a482a1f5b0a</code>', '12:00 推「全銳名單」'],
+    ['📚 教學群 (TEACHING)', '<code style="font-size:0.78rem">C97a1bb6d1133a51f003b91d4058131e4</code>', '12:30 推「美語請假按班分組」'],
+    ['🏫 行政托育群 (DAYCARE)', '<code style="font-size:0.78rem">Cc442adf8b4ce0dcf087c302fbc043f43</code>', '12:30 推「安親/托育請假」'],
+    ['📋 招生群 (ADMIN)', 'Property <code>ADMIN_GROUP_ID</code>', '主網站表單即時推'],
+    ['📋 招生群(舊)', '<code style="font-size:0.78rem">C48adfca649b3d5e76f137d582b94fc6b</code>', '備援 ID']
+  ]);
+
+  html += _h('部署流程', 2);
+  html += _h('Gateway 部署', 3);
+  html += '<ol style="padding-left:24px;margin:10px 0">';
+  html += '<li>修改 <code>xinguang-form-gateway-v2.gs</code></li>';
+  html += '<li>到 <a href="https://script.google.com/home" target="_blank">Apps Script 編輯器</a></li>';
+  html += '<li>複製整段貼上 → Ctrl+S</li>';
+  html += '<li><b>部署 → 管理部署作業 → 找 ShvatiHjw 那條 → ✏️ → 新版本 → 部署</b></li>';
+  html += '<li><b>⚠️ 一定要選「現有那條」改新版本,不要新增 deployment</b>(URL 會變)</li>';
+  html += '</ol>';
+
+  html += _h('主網站 + 後台部署', 3);
+  html += '<ol style="padding-left:24px;margin:10px 0">';
+  html += '<li>修改 <code>xinguang-website-repo/index.html</code> 或 <code>xinguang-admin/index.html</code></li>';
+  html += '<li>git commit + git push 到 main</li>';
+  html += '<li>Cloudflare Pages 自動拉新版(30-60 秒)</li>';
+  html += '</ol>';
+
+  html += _h('Cron 設定', 3);
+  html += _box('目前 12:00 / 12:30 cron <b>還沒有自動排程</b>!需要在 Apps Script 編輯器手動設定 Time Trigger。<br>步驟:左欄時鐘 ⏱ 圖示 → 新增觸發條件 → 函數選 cronLeave12 → 時間驅動 → 每天 12:00 → 儲存。第二個 cronLeave1230 重複一次選 12:30。', 'warn');
+
+  html += _h('品牌名稱規則', 2);
+  html += _table(['情境', '正確品牌名'], [
+    ['自家系統(主網站/後台/Flex 卡)', '<b>太平新光分校</b>'],
+    ['LINE Official Account 顯示名', '弋果美語太平新光分校 (總部規定不能改)'],
+    ['BotBonnie 歡迎訊息', '弋果美語 (總部規定不能改)']
+  ]);
+
+  html += _h('已知問題 + 注意事項', 2);
+  html += _box('<b>NEVER curl POST n8n webhooks</b> — 會發假卡到 LINE 群打擾用戶 · 任何 LINE 推送驗證請用 ?action=cron_preview 或在 Apps Script 編輯器手動執行測試函數', 'error');
+  html += _box('<b>N8N 已停用</b>:forms-data / account-admin workflow 已壞並由 Gateway 接管。但接送排程 (route-schedule) 跟學生管理 (students) 還在 N8N 跑,別動。', 'warn');
+  html += _box('<b>11:30 鎖單規則</b>:請假當天 11:30 後家長不能改/取消(Gateway 強制) · 後台 admin 可以(_fromAdmin 跳過檢查)', 'info');
+  html += _box('<b>11:30 後 / pushed_* 狀態</b>:狀態欄位 status = pending → pushed_pickup → pushed_class 為流程,cancelled 為終態', 'info');
+
+  html += _h('Repos + 連結', 2);
+  html += _table(['Repo', 'GitHub URL', '部署目標'], [
+    ['xinguang-website', 'github.com/miyutang1980/xinguang-website', 'Cloudflare → taipingxinguang.org'],
+    ['xinguang-admin', 'github.com/miyutang1980/xinguang-admin', 'Cloudflare → admin.taipingxinguang.org'],
+    ['xinguang-n8n', 'github.com/miyutang1980/xinguang-n8n', 'Railway (僅老 workflow)'],
+    ['xinguang-form-gateway-v2.gs', '(在 Apps Script 編輯器內)', 'Google Apps Script Web App']
+  ]);
+
+  return _docsHighlight(html);
+}
+
+// ─── 使用手冊內容 ───
+function _docsUserContent() {
+  let html = '';
+
+  html += _h('太平新光分校系統 · 使用手冊', 1);
+  html += _box('這份手冊是給<b>老師、行政、職員</b>看的。教你怎麼用後台、怎麼指引家長使用各個功能。', 'info');
+
+  html += _h('登入後台', 2);
+  html += '<ol style="padding-left:24px"><li>瀏覽器開 <a href="https://admin.taipingxinguang.org" target="_blank">admin.taipingxinguang.org</a></li><li>輸入帳號密碼登入</li><li>左邊 sidebar 看到所有功能</li></ol>';
+  html += _box('帳號管理員會建給你 · 每個老師有自己的帳號 · 不要共用', 'warn');
+
+  html += _h('一、家長端服務(請假)', 2);
+
+  html += _h('家長怎麼請假', 3);
+  html += '<ol style="padding-left:24px;margin:10px 0">';
+  html += '<li>家長在 LINE 加你們官方帳號(弋果美語太平新光分校)為好友</li>';
+  html += '<li>對話視窗打「<b>請假</b>」兩個字</li>';
+  html += '<li>系統推一張綠色 Flex 卡 「📝 孩子請假」</li>';
+  html += '<li>家長點「📝 點此填表」按鈕</li>';
+  html += '<li>進入 LIFF 表單(在 LINE 內開啟):</li>';
+  html += '<ul style="padding-left:20px"><li>系統自動辨識 LINE 帳號 → 列出該家長綁的所有孩子</li><li>選孩子(多胞可複選)</li><li>選請假日期(可選一段區間)</li><li>選請假類型(5 種)</li><li>填原因</li><li>送出</li></ul>';
+  html += '<li>家長立刻收到 LINE 推播「✅ 請假已收到」確認</li>';
+  html += '</ol>';
+
+  html += _h('5 種請假類型', 3);
+  html += _table(['類型', '說明', '影響範圍'], [
+    ['🚐 接車不接(改自己接)', '只取消接車,美語/安親/托育照常', '司機'],
+    ['📚 接車不接 + 美語請假', '接車取消 + 不上美語(其他照常)', '司機 + 中外師'],
+    ['🏫 接車 + 美語 + 安親請假', '接車取消、美語請假、安親不留', '司機 + 中外師 + 行政'],
+    ['👶 接車 + 美語 + 托育請假', '接車取消、美語請假、托育不留', '司機 + 中外師 + 行政'],
+    ['🛑 全部請假', '全部不來 / 不接車 / 不安親 / 不托育', '司機 + 中外師 + 行政']
+  ]);
+
+  html += _h('家長如何修改/取消請假', 3);
+  html += '<p>請假當天 <b>11:30 之前</b> 家長可以自行修改/取消:</p>';
+  html += '<ol style="padding-left:24px"><li>LINE 打「請假」 → 點「點此填表」進 LIFF</li><li>上方點 Tab「📋 我的請假」</li><li>看到近 30 天請假紀錄</li><li>對未鎖定的請假(11:30 前)點「✏️ 修改」或「❌ 取消」</li></ol>';
+  html += _box('11:30 後 → 顯示 🔒 鎖定 · 家長不能再改 · 必須打學校電話 04-23960585', 'warn');
+
+  html += _h('每天 12:00/12:30 自動推送', 3);
+  html += _table(['時間', '群組', '內容'], [
+    ['12:00', '🚐 接送群', '今日全銳名單(誰要接、誰不接) · 點數+不接學生清單'],
+    ['12:30', '📚 教學群', '今日美語請假(按班級分組,標 [美語]/[美+安親]/[美+托育]/[全請]'],
+    ['12:30', '🏫 行政托育群', '今日安親不留 + 托育不留清單']
+  ]);
+  html += _box('沒人請假就不推 · 避免雜訊', 'info');
+
+  html += _h('二、後台分頁說明', 2);
+
+  html += _h('🎓 學生管理', 3);
+  html += '<p>查全校學生資料(目前接 N8N) · 可加學號、家長電話、接送方式、就讀學校</p>';
+
+  html += _h('🏫 班級指派 (Stage 1)', 3);
+  html += '<p>給「請假通知」用的學生名冊 · 必須有班級、中外師才能讓 Flex 卡按班分組</p>';
+  html += '<ol style="padding-left:24px"><li>左邊點「🏫 班級指派」</li><li>看到全校學生(在校學生分頁) · 包含學號、姓名、班級、中籍師、外籍師</li><li>點「+ 新增學生」 → 輸入姓名(必填) · 班級 · 中外師(下拉) · 家長電話 · 接送 · 安親/托育</li><li>儲存 → 自動產生學號 SXXXX</li></ol>';
+  html += _box('中外師下拉選項從「員工帳號」role=teacher 或職稱含「師」自動撈', 'info');
+
+  html += _h('📝 請假紀錄 (Stage 2.5)', 3);
+  html += '<p>3 個 Tab:</p>';
+  html += '<h4 style="margin:14px 0 8px;color:#374151">📋 列表</h4>';
+  html += '<ul style="padding-left:24px"><li>篩選:日期區間 / 班級 / 類型 / 狀態 / 關鍵字</li><li>未通知學校的請假可手動取消</li><li>已通知 (pushed) / 已過期 / 已取消 → 鎖定不能動</li></ul>';
+  html += '<h4 style="margin:14px 0 8px;color:#374151">👤 學生軌跡</h4>';
+  html += '<ul style="padding-left:24px"><li>選一個學生 → 看他全部請假歷史</li><li>按月分組 + 累計請假天數 + 類型分布</li><li>用來看哪些孩子請假特別多 · 跟家長談</li></ul>';
+  html += '<h4 style="margin:14px 0 8px;color:#374151">📊 月統計</h4>';
+  html += '<ul style="padding-left:24px"><li>選月份 → 總筆數 / 按班級 / 按類型 / Top 5 學生</li><li>每月初給校長 / 教務主任看</li></ul>';
+
+  html += _h('📅 開班資訊 / 體驗課排班', 3);
+  html += '<p>目前體驗課的班級設定 · 主網站「線上預約體驗」拉這份資料</p>';
+
+  html += _h('🚐 接送排程 / 🚶 今日接送', 3);
+  html += '<p>司機交通車排班 · 老師排班 · 還在 N8N 跑(不要動)</p>';
+
+  html += _h('🌐 主網站日曆', 3);
+  html += '<p>設定主網站可預約日 / 不可預約日 / 時段</p>';
+  html += '<ul style="padding-left:24px"><li>每年寒暑假、國定假日設成「不開放預約」</li><li>暑假時段:14:00 + 19:00 → 改 17:00 + 19:00</li></ul>';
+
+  html += _h('👥 帳號管理 (admin only)', 3);
+  html += '<p>建立 / 修改 / 停用員工帳號</p>';
+  html += '<ul style="padding-left:24px"><li>角色:admin / teacher / staff</li><li>密碼變更只能由 admin 操作</li></ul>';
+
+  html += _h('🩺 系統健檢', 3);
+  html += '<p>看系統各端 (Gateway / N8N / 主網站) 的健康狀態</p>';
+
+  html += _h('三、常見問題排解', 2);
+  html += _table(['問題', '原因', '解法'], [
+    ['家長打「請假」沒跳卡', 'LINE 快取', '請家長殺 LINE 重開 · 或清快取'],
+    ['LIFF 看到 perplexity.ai', 'LIFF Endpoint URL 沒改 · 或快取', '改 LINE Developers Console + LINE 重啟'],
+    ['請假紀錄是空的', 'Sheets 沒有家長 LINE userId 對應', '請家長先加 LINE 好友 · 確認在校學生名冊有家長電話'],
+    ['12:00/12:30 沒推 Flex', 'Time Trigger 沒設', '到 Apps Script 設 Time-driven Trigger'],
+    ['Flex 卡推送失敗', 'LINE_BOT_TOKEN 過期 · 或群組 ID 錯', '到 Apps Script Properties 重新設'],
+    ['後台看不到「請假紀錄」分頁', 'Cloudflare 快取', 'Ctrl+F5 強制重整']
+  ]);
+
+  html += _h('四、聯絡資訊', 2);
+  html += _table(['對象', '聯絡方式'], [
+    ['學校總機', '<a href="tel:0423960585">04-2396-0585</a>'],
+    ['LINE 官方帳號', '<a href="https://lin.ee/tdpTDdu" target="_blank">lin.ee/tdpTDdu</a>'],
+    ['主網站', '<a href="https://taipingxinguang.org" target="_blank">taipingxinguang.org</a>']
+  ]);
+
+  return _docsHighlight(html);
+}
+// ===== END 文件中心模組 =====
+
+
 
 
 
