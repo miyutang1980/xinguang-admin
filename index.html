@@ -8215,7 +8215,7 @@ async function renderPickupSchedule(el) {
           </div>
           ${isHoliday ? '' : _renderSessionNames(r, 'noon')}
         </td>
-        <td style="padding:6px"><input data-field="noon_time" type="time" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px"><input data-field="noon_time" type="time" lang="en-GB" step="60" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px"><select data-field="pm_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${vehicleOpts.replace(`value="${r.pm_vehicle||''}"`,`value="${r.pm_vehicle||''}" selected`)}</select></td>
         <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver}"`,`value="${r.pm_driver}" selected`)}</select></td>
         <td style="padding:6px"><select data-field="pm_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver2||''}"`,`value="${r.pm_driver2||''}" selected`)}</select></td>
@@ -8227,7 +8227,7 @@ async function renderPickupSchedule(el) {
           </div>
           ${isHoliday ? '' : _renderSessionNames(r, 'pm')}
         </td>
-        <td style="padding:6px"><input data-field="pm_time" type="time" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}></td>
+        <td style="padding:6px"><input data-field="pm_time" type="time" lang="en-GB" step="60" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace" ${isHoliday?'disabled':''}></td>
         <td style="padding:6px;text-align:center">
           <button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button>
         </td>
@@ -8529,24 +8529,44 @@ async function renderPickupSchedule(el) {
     // 同步複製學生明細
     document.getElementById('ps-status').textContent = '同步學生名單中…';
     let detailsCopied = 0;
+    let diagAttempted = 0;
+    const diagDetails = [];
     for (const map of sourceMapping) {
       try {
-        // 找新的 row_index
         const newRow = allRows.find(x => x.date === map.newDate && x.route === map.route);
-        if (!newRow) continue;
-        // 兩個 session 各拉一次
+        if (!newRow) {
+          diagDetails.push('對不到新 row: ' + map.newDate + ' / ' + map.route);
+          continue;
+        }
         for (const session of ['noon','pm']) {
+          diagAttempted++;
           try {
             const src = await _getRouteDetails(map.srcRowIndex, session, auth_payload);
             const details = (src && src.details) || [];
             if (details.length === 0) continue;
-            await _saveRouteDetails(newRow.row_index, session, map.newDate, map.route, details, auth_payload);
-            detailsCopied++;
-          } catch(e) { console.warn('[copy details] err:', e.message); }
+            const sv = await _saveRouteDetails(newRow.row_index, session, map.newDate, map.route, details, auth_payload);
+            if (sv && (sv.success || sv.ok)) {
+              detailsCopied++;
+            } else {
+              diagDetails.push(map.route + ' ' + session + ' 寫入失敗: ' + JSON.stringify(sv).slice(0,80));
+            }
+          } catch(e) {
+            diagDetails.push(map.route + ' ' + session + ' 例外: ' + e.message);
+          }
         }
-      } catch(e) {}
+      } catch(e) { diagDetails.push('例外: ' + e.message); }
     }
-    if (detailsCopied > 0) showToast('✅ 學生名單同步 ' + detailsCopied + ' 筆');
+    // 詳細診斷 — 全部狀態都顯示出來
+    var diagMsg = '學生名單複製：成功 ' + detailsCopied + ' 個 session\n';
+    diagMsg += '認到 ' + sourceMapping.length + ' 筆來源列\n';
+    diagMsg += '其中 ' + diagAttempted + ' 筆有試圖複製\n';
+    diagMsg += diagDetails.length ? '\n錯誤資訊:\n' + diagDetails.join('\n') : '';
+    if (detailsCopied === 0) {
+      alert('⚠️ 學生名單未複製成功\n\n' + diagMsg);
+    } else {
+      showToast('✅ 學生名單同步 ' + detailsCopied + ' 個 session');
+    }
+    console.log('[copy-week diag]', diagMsg);
     await loadAll();  // 再重讀、讓名單重新顯示
   }
 
