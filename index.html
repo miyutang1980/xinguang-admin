@@ -9951,6 +9951,7 @@ async function _caAddNew() {
           </select>
         </div>
       </div>
+      <div style="background:#F0FDF4;border-left:3px solid #10B981;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.78rem;color:#065F46">主要家長 (必填)</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
           <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長姓名</label>
@@ -9959,6 +9960,28 @@ async function _caAddNew() {
         <div>
           <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長電話</label>
           <input id="caf_parentPhone" placeholder="0912-345-678" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+      </div>
+      <div style="background:#FEF3C7;border-left:3px solid #F59E0B;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:0.78rem;color:#92400E">其他家長 (選填 · 例:爸爸/阿公) · 裝了他就能進 LIFF 請假</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長 2 姓名</label>
+          <input id="caf_parent2Name" placeholder="王爸爸" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">家長 2 電話</label>
+          <input id="caf_parent2Phone" placeholder="0987-654-321" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">關係</label>
+          <select id="caf_parent2Relation" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+            <option value="">--</option>
+            <option value="父親">父親</option>
+            <option value="母親">母親</option>
+            <option value="阿公">阿公</option>
+            <option value="阿嬤">阿嬤</option>
+            <option value="其他">其他</option>
+          </select>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px">
@@ -10019,7 +10042,10 @@ async function _caSubmitNew() {
     pickupMethod: get('caf_pickupMethod'),
     hasDaycare: get('caf_hasDaycare') === 'true',
     hasNursery: get('caf_hasNursery') === 'true',
-    note: get('caf_note').trim()
+    note: get('caf_note').trim(),
+    parent2Name: get('caf_parent2Name').trim(),
+    parent2Phone: (function(){ var p2=get('caf_parent2Phone').trim(); return /^9\d{8}$/.test(p2)?'0'+p2:p2; })(),
+    parent2Relation: get('caf_parent2Relation')
   };
   const res = await _caCallGw('students_create', { fields });
   if (res && res.success) {
@@ -10055,6 +10081,10 @@ function _caViewDetail(row_index) {
     ['家長姓名', s.parentName],
     ['家長電話', s.parentPhone],
     ['家長 LINE userId', s.parentLineUserId],
+    ['家長 2 姓名', s.parent2Name],
+    ['家長 2 電話', s.parent2Phone],
+    ['家長 2 LINE userId', s.parent2LineUserId],
+    ['家長 2 關係', s.parent2Relation],
     ['接送方式', s.pickupMethod],
     ['安親', s.hasDaycare ? '是' : '否'],
     ['托育', s.hasNursery ? '是' : '否'],
