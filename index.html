@@ -8117,6 +8117,8 @@ async function renderPickupSchedule(el) {
 
   async function loadAll() {
     document.getElementById('ps-status').textContent = '載入中…';
+    // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
+    window._routeNamesCache = {};
     const [staffR, listR] = await Promise.all([
       api({action: 'get_staff'}),
       api({action: 'list'})
