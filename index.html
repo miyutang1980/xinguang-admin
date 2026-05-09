@@ -201,6 +201,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('docs')" id="nav-docs">
         📖 文件中心
       </div>
+    <div class="sidebar-item" onclick="switchSection('links')" id="nav-links">
+        🔗 連結中心
+      </div>
     <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
         📅 開班資訊
       </div>
@@ -661,6 +664,7 @@ function switchSection(sec) {
     classAssign:'🏫 班級指派',
     leaves:'📝 請假紀錄',
     docs:'📖 文件中心',
+    links:'🔗 連結中心',
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
@@ -682,6 +686,7 @@ function switchSection(sec) {
   else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
   else if(sec === 'leaves') { if(typeof renderLeaves==='function') renderLeaves(content); else content.innerHTML='<div style="padding:40px">請假紀錄模組未載入</div>'; }
   else if(sec === 'docs') { if(typeof renderDocs==='function') renderDocs(content); else content.innerHTML='<div style="padding:40px">文件中心模組未載入</div>'; }
+  else if(sec === 'links') { if(typeof renderLinks==='function') renderLinks(content); else content.innerHTML='<div style="padding:40px">連結中心模組未載入</div>'; }
   else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -11005,6 +11010,52 @@ function _docsUserContent() {
 }
 // ===== END 文件中心模組 =====
 
+// ===== 連結中心模組 =====
+function renderLinks(el) {
+  const links = [
+    { icon: '🌐', name: '主網站', url: 'https://taipingxinguang.org', desc: '家長看的官方網站 (各見表單 · 佈告)', bg: 'linear-gradient(135deg,#10B981,#059669)' },
+    { icon: '🔐', name: '后台管理', url: 'https://admin.taipingxinguang.org', desc: '你現在這個 · 職員登入管理', bg: 'linear-gradient(135deg,#3B82F6,#1E40AF)' },
+    { icon: '📝', name: 'LIFF 請假表單', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '家長請假 LINE 連結 (手機 LINE 裡點內源)', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
+    { icon: '📊', name: 'Google Sheets 資料', url: 'https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit', desc: '所有表單資料 · 請假·在校學生 · LINE好友', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
+    { icon: '⚙️', name: 'Apps Script (Gateway)', url: 'https://script.google.com/home/projects/1VyyN9wiRbi4lyp-skyW-hOywBKFs_aeC5dd5g409kWOY3khp5sMqbUUM/edit', desc: '后端程式碼 · 部署 · 觸發條件', bg: 'linear-gradient(135deg,#6B7280,#374151)' },
+    { icon: '💬', name: 'LINE OA 管理', url: 'https://manager.line.biz/', desc: '設圖文選單 · 推播訊息 · 看家長訊息', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
+  ];
+  const cards = links.map(l => `
+    <div class="card" style="padding:0;overflow:hidden;cursor:pointer;transition:transform 0.15s;display:flex;flex-direction:column" onclick="window.open('${l.url}','_blank')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+      <div style="background:${l.bg};color:#fff;padding:18px 20px">
+        <div style="font-size:2.2rem;line-height:1">${l.icon}</div>
+        <div style="font-size:1.1rem;font-weight:700;margin-top:8px">${l.name}</div>
+      </div>
+      <div style="padding:14px 18px;flex:1">
+        <div style="font-size:0.82rem;color:#6B7280;margin-bottom:10px;line-height:1.5">${l.desc}</div>
+        <div style="font-size:0.7rem;color:#9CA3AF;font-family:monospace;word-break:break-all;background:#F9FAFB;padding:6px 8px;border-radius:4px">${l.url}</div>
+      </div>
+      <div style="display:flex;border-top:1px solid #E5E7EB">
+        <div style="flex:1;padding:10px;text-align:center;font-size:0.85rem;color:#3B82F6;font-weight:600;cursor:pointer" onclick="event.stopPropagation();window.open('${l.url}','_blank')">↗ 開啟</div>
+        <div style="flex:1;padding:10px;text-align:center;font-size:0.85rem;color:#6B7280;font-weight:600;cursor:pointer;border-left:1px solid #E5E7EB" onclick="event.stopPropagation();_linkCopy('${l.url}', '${l.name}')">📋 複製</div>
+      </div>
+    </div>`).join('');
+  el.innerHTML = `
+    <div class="card" style="padding:14px 18px;background:#EFF6FF;border-left:4px solid #3B82F6;margin-bottom:14px">
+      <div style="font-weight:700;color:#1E3A8A;font-size:0.95rem">🔗 常用連結集中點</div>
+      <div style="font-size:0.82rem;color:#1E40AF;margin-top:4px">點「↗ 開啟」拿新分頁·「📋 複製」複網址到剪貼簿·供你你 LINE 你同事</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">${cards}</div>
+    <div class="card" style="padding:14px;margin-top:14px;font-size:0.78rem;color:#9CA3AF">💡 考虑加其他連結? GitHub · Cloudflare · N8N · BotBonnie · LINE Developers ·告訴我</div>`;
+}
+function _linkCopy(url, name) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      if (typeof showToast === 'function') showToast('已複製 · ' + name);
+      else alert('已複製:' + url);
+    }).catch(() => alert(url));
+  } else {
+    prompt('手動複製:', url);
+  }
+}
+// ===== END 連結中心模組 =====
+
+
 
 
 
@@ -11095,68 +11146,4 @@ async function _formDelete(collection, idx) {
 
   _addToDeletedFormsSet(collection, r.ts);
   if (Array.isArray(_DB[collection])) {
-    _DB[collection] = _DB[collection].filter(function(x){ return x !== r; });
-    if (typeof saveData === 'function') saveData(_DB);
-  }
-  meta.render();
-  
-  // toast 帶 undo
-  showToast('已刪除 ' + displayName, '復原', function(){
-    var s = getDeletedFormsSet();
-    s.delete(collection + ':' + (r.ts||''));
-    _saveDeletedFormsSet(s);
-    if (Array.isArray(_DB[collection])) {
-      _DB[collection].push(r);
-      if (typeof saveData === 'function') saveData(_DB);
-    }
-    meta.render();
-    showToast('已復原 ' + displayName);
-  });
-}
-
-// 三選一確認 dialog：返回 Promise<value>
-function _confirmDialog({ title, message, options }) {
-  return new Promise(resolve => {
-    const m = document.createElement('div');
-    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999';
-    const btnHtml = options.map((o, i) =>
-      '<button data-v="' + i + '" style="background:' + o.color + ';color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;font-size:0.9rem;margin:4px">' + _esc(o.label) + '</button>'
-    ).join('');
-    m.innerHTML = '<div style="background:#fff;border-radius:10px;padding:24px;min-width:380px;max-width:520px">'
-      + '<h3 style="margin:0 0 12px;font-size:1.1rem;color:#111">' + _esc(title) + '</h3>'
-      + '<p style="margin:0 0 18px;color:#555;line-height:1.6">' + _esc(message) + '</p>'
-      + '<div style="text-align:right">' + btnHtml + '</div></div>';
-    document.body.appendChild(m);
-    m.querySelectorAll('button[data-v]').forEach(b => {
-      b.onclick = () => {
-        const idx = parseInt(b.getAttribute('data-v'), 10);
-        m.remove();
-        resolve(options[idx].value);
-      };
-    });
-  });
-}
-
-function _studentsViewDetail(row_index) {
-  const r = _studentsRows.find(x => x.row_index === row_index);
-  if (!r) return;
-  const rows = [
-    ['學號', r.student_id], ['中文姓名', r.chinese_name], ['英文名', r.english_name],
-    ['就讀學校', r.school_name], ['班級', r.class_code], ['狀態', r.status],
-    ['家長1', r.parent1_name], ['家長1 LINE UID', r.parent1_line_uid], ['家長1電話', r.parent1_phone],
-    ['家長2', r.parent2_name], ['家長2電話', r.parent2_phone], ['緊急聯絡人', r.emergency_contact],
-    ['接送時段', r.pickup_time_slots], ['預設車輛', r.assigned_vehicle], ['接送方式', r.pickup_method],
-    ['美語班級', r.english_class_code], ['美語上課時間', r.english_class_time],
-    ['有接送', r.has_pickup], ['有安親', r.has_daycare], ['有家教', r.has_tutoring], ['有美語', r.has_english],
-    ['備註', r.remarks], ['更新時間', r.updated_at]
-  ];
-  const tableHtml = '<div style="padding:24px;min-width:520px;max-height:80vh;overflow:auto"><h3 style="margin:0 0 16px;font-size:1.1rem">學生詳細 — ' + _esc(r.chinese_name||'') + '</h3>'
-    + '<table style="width:100%;border-collapse:collapse;font-size:0.88rem">' + rows.map(([k,v]) => '<tr><td style="padding:6px 10px;background:#F9FAFB;color:#666;width:130px">' + _esc(k) + '</td><td style="padding:6px 10px">' + _esc(v||'-') + '</td></tr>').join('') + '</table>'
-    + '<div style="margin-top:18px;text-align:right"><button class="btn btn-green" onclick="closeModal()">關閉</button></div></div>';
-  if (typeof openModal === 'function') openModal(tableHtml);
-  else { const m=document.createElement('div'); m.id='_stuModal'; m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:9999'; m.innerHTML='<div style="background:#fff;border-radius:10px;max-width:680px">'+tableHtml+'</div>'; document.body.appendChild(m); window.closeModal=function(){const m=document.getElementById('_stuModal');if(m)m.remove();}; }
-}
-
-</script>
-</body>
-</html>
+    _DB[collection] = _DB[collection
