@@ -8153,6 +8153,13 @@ async function renderPickupSchedule(el) {
     sel.onchange = renderTable;
   }
 
+  // 本地日期格式化（防 toISOString() 跳時區變前一天的 bug）
+  function _localDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    return y + '-' + m + '-' + dd;
+  }
   // 從 YYYY-MM-DD 重新算週幾，防 N8N Sheets 標記錯誤
   const _wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
   function _trueWeekday(dateStr) {
@@ -8462,7 +8469,7 @@ async function renderPickupSchedule(el) {
       if (!srcMon) { alert('請先選一個週次當「來源」'); return; }
       const srcD = new Date(srcMon + 'T00:00:00');
       const dstD = new Date(srcD.getTime() + 7*86400000);
-      const dstMon = dstD.toISOString().slice(0,10);
+      const dstMon = _localDateStr(dstD);
       if (!confirm('複製週次 ' + srcMon + ' → ' + dstMon + ' ？')) return;
       await _doCopyWeek(srcMon, dstMon);
     };
@@ -8481,7 +8488,7 @@ async function renderPickupSchedule(el) {
         const srcD = new Date(srcMon + 'T00:00:00');
         for (let i = 1; i <= 4; i++) {
           const dstD = new Date(srcD.getTime() + i*7*86400000);
-          const dstMon = dstD.toISOString().slice(0,10);
+          const dstMon = _localDateStr(dstD);
           await _doCopyWeek(srcMon, dstMon);
         }
         showToast('✅ 未來 4 週生成完成');
@@ -8504,7 +8511,7 @@ async function renderPickupSchedule(el) {
       const newD = new Date(rd.getTime() + offset*86400000);
       // 跳過週末
       if (newD.getDay() === 0 || newD.getDay() === 6) return;
-      const newDate = newD.toISOString().slice(0,10);
+      const newDate = _localDateStr(newD);
       if (allRows.some(x => x.date === newDate && x.route === r.route)) return;
       newRows.push({row_index:99999, fields:{
         date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
@@ -8586,7 +8593,7 @@ async function renderPickupSchedule(el) {
       const rd = new Date(r.date + 'T00:00:00');
       if (rd < srcD || rd > new Date(srcD.getTime() + 4*86400000)) return;
       const newD = new Date(rd.getTime() + offset*86400000);
-      const newDate = newD.toISOString().slice(0,10);
+      const newDate = _localDateStr(newD);
       if (allRows.some(x => x.date === newDate && x.route === r.route)) return; // 已存在跳過
       newRows.push({row_index:99999, fields:{
         date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
