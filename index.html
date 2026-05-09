@@ -8523,11 +8523,16 @@ async function renderPickupSchedule(el) {
       }});
       sourceMapping.push({ srcRowIndex: r.row_index, newDate, route: r.route });
     });
-    if (newRows.length === 0) return;
+    if (newRows.length === 0) {
+      alert('⚠️ 沒有可複製的路線列\n\n來源週: ' + srcMon + '\n目標週: ' + dstMon + '\nallRows.length: ' + allRows.length + '\n可能原因：來源週本身無路線、或目標週都已存在');
+      return;
+    }
     document.getElementById('ps-status').textContent = '複製中… ' + dstMon;
+    console.log('[copy-week] 送出 append:', { dstMon, count: newRows.length, sample: newRows[0] });
     const rsp = await api({action:'append', rows:newRows});
+    console.log('[copy-week] append 回應:', rsp);
     if (!(rsp && rsp.success)) {
-      alert('複製失敗: ' + ((rsp&&rsp.error)||'未知錯誤'));
+      alert('⚠️ 複製失敗\n\nresponse: ' + JSON.stringify(rsp).slice(0,500));
       return;
     }
     showToast('✅ 複製 ' + newRows.length + ' 筆 → ' + dstMon + '，正在同步學生名單...');
