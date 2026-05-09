@@ -11012,15 +11012,24 @@ function _docsUserContent() {
 
 // ===== 連結中心模組 =====
 function renderLinks(el) {
-  const links = [
+  const parentLinks = [
+    { icon: '💬', name: '問課諮詢', url: 'https://taipingxinguang.org/#inquiry', desc: '家長填表·詢問課程/班型/費用', bg: 'linear-gradient(135deg,#0EA5E9,#0284C7)' },
+    { icon: '🏫', name: '預約參訪 + 檢測', url: 'https://taipingxinguang.org/#booking', desc: '家長選時段·可勾參訪/檢測或兩個都要', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
+    { icon: '☀️', name: '夏令營報名', url: 'https://taipingxinguang.org/#camp', desc: '夏令營課程內容 + 線上報名', bg: 'linear-gradient(135deg,#EF4444,#DC2626)' },
+    { icon: '📝', name: '正式註冊', url: 'https://taipingxinguang.org/#register', desc: '決定入學·選班、安親、接送設定', bg: 'linear-gradient(135deg,#10B981,#059669)' },
+    { icon: '📝', name: '孩子請假 (LIFF)', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '在讀家長請假 · 手機 LINE 裡點連結進去', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
+    { icon: '📞', name: 'LINE 官方帳號', url: 'https://lin.ee/tdpTDdu', desc: '家長加 LINE 好友·聊天諮詢', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
+  ];
+  const adminLinks = [
     { icon: '🌐', name: '主網站', url: 'https://taipingxinguang.org', desc: '家長看的官方網站 (各見表單 · 佈告)', bg: 'linear-gradient(135deg,#10B981,#059669)' },
     { icon: '🔐', name: '后台管理', url: 'https://admin.taipingxinguang.org', desc: '你現在這個 · 職員登入管理', bg: 'linear-gradient(135deg,#3B82F6,#1E40AF)' },
-    { icon: '📝', name: 'LIFF 請假表單', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '家長請假 LINE 連結 (手機 LINE 裡點內源)', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
     { icon: '📊', name: 'Google Sheets 資料', url: 'https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit', desc: '所有表單資料 · 請假·在校學生 · LINE好友', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
     { icon: '⚙️', name: 'Apps Script (Gateway)', url: 'https://script.google.com/home/projects/1VyyN9wiRbi4lyp-skyW-hOywBKFs_aeC5dd5g409kWOY3khp5sMqbUUM/edit', desc: '后端程式碼 · 部署 · 觸發條件', bg: 'linear-gradient(135deg,#6B7280,#374151)' },
     { icon: '💬', name: 'LINE OA 管理', url: 'https://manager.line.biz/', desc: '設圖文選單 · 推播訊息 · 看家長訊息', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
   ];
-  const cards = links.map(l => `
+  const links = adminLinks; // 保留變數名供下面變數使用、但實際不用
+  function buildCards(linkList) {
+    return linkList.map(l => `
     <div class="card" style="padding:0;overflow:hidden;cursor:pointer;transition:transform 0.15s;display:flex;flex-direction:column" onclick="window.open('${l.url}','_blank')" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
       <div style="background:${l.bg};color:#fff;padding:18px 20px">
         <div style="font-size:2.2rem;line-height:1">${l.icon}</div>
@@ -11035,12 +11044,25 @@ function renderLinks(el) {
         <div style="flex:1;padding:10px;text-align:center;font-size:0.85rem;color:#6B7280;font-weight:600;cursor:pointer;border-left:1px solid #E5E7EB" onclick="event.stopPropagation();_linkCopy('${l.url}', '${l.name}')">📋 複製</div>
       </div>
     </div>`).join('');
+  }
   el.innerHTML = `
     <div class="card" style="padding:14px 18px;background:#EFF6FF;border-left:4px solid #3B82F6;margin-bottom:14px">
       <div style="font-weight:700;color:#1E3A8A;font-size:0.95rem">🔗 常用連結集中點</div>
-      <div style="font-size:0.82rem;color:#1E40AF;margin-top:4px">點「↗ 開啟」拿新分頁·「📋 複製」複網址到剪貼簿·供你你 LINE 你同事</div>
+      <div style="font-size:0.82rem;color:#1E40AF;margin-top:4px">點「↗ 開啟」拿新分頁·「📋 複製」複網址到剪貼簿·供你 LINE 傳貼給家長或同事</div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">${cards}</div>
+
+    <div style="background:#FEF3C7;border-left:4px solid #F59E0B;padding:12px 16px;border-radius:8px;margin-bottom:12px">
+      <div style="font-weight:700;color:#92400E;font-size:1rem">📝 給家長的連結</div>
+      <div style="font-size:0.78rem;color:#92400E;margin-top:2px">複製、貼到 LINE 傳給家長</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:24px">${buildCards(parentLinks)}</div>
+
+    <div style="background:#DBEAFE;border-left:4px solid #3B82F6;padding:12px 16px;border-radius:8px;margin-bottom:12px">
+      <div style="font-weight:700;color:#1E3A8A;font-size:1rem">⚙️ 管理、資料、后台連結</div>
+      <div style="font-size:0.78rem;color:#1E3A8A;margin-top:2px">你/職員/工程師才需要</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">${buildCards(adminLinks)}</div>
+
     <div class="card" style="padding:14px;margin-top:14px;font-size:0.78rem;color:#9CA3AF">💡 考虑加其他連結? GitHub · Cloudflare · N8N · BotBonnie · LINE Developers ·告訴我</div>`;
 }
 function _linkCopy(url, name) {
