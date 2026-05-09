@@ -8474,6 +8474,23 @@ async function renderPickupSchedule(el) {
       await _doCopyWeek(srcMon, dstMon);
     };
 
+    // 「只補名單」按鈕 — 不重複主表、只以來源週 details 補到目標週
+    if (!document.getElementById('ps-fill-names')) {
+      const btnFill = document.createElement('button');
+      btnFill.id = 'ps-fill-names';
+      btnFill.textContent = '👥 補學生名單到下一週';
+      btnFill.style.cssText = 'padding:6px 12px;background:#16A34A;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem;margin-right:6px';
+      refresh.parentElement.insertBefore(btnFill, refresh);
+      btnFill.onclick = async () => {
+        const srcMon = document.getElementById('ps-filter-week').value;
+        if (!srcMon) { alert('請先選一個「該週有名單」的週次當來源'); return; }
+        const srcD = new Date(srcMon + 'T00:00:00');
+        const dstD = new Date(srcD.getTime() + 7*86400000);
+        const dstMon = _localDateStr(dstD);
+        if (!confirm('把學生名單從 ' + srcMon + ' 週 補到 ' + dstMon + ' 週？\n\n（不變動主表資料、只補名單）')) return;
+        await _fillNamesOnlyToWeek(srcMon, dstMon);
+      };
+    }
     // 「生成未來 4 週」按鈕
     if (!document.getElementById('ps-copy-4w')) {
       const btn4 = document.createElement('button');
@@ -8494,6 +8511,63 @@ async function renderPickupSchedule(el) {
         showToast('✅ 未來 4 週生成完成');
       };
     }
+  }
+
+  // 只補學生名單、不複製主表 — 適用主表已建但名單遺漏的狀態
+  async function _fillNamesOnlyToWeek(srcMon, dstMon) {
+    const srcD = new Date(srcMon + 'T00:00:00');
+    const dstD = new Date(dstMon + 'T00:00:00');
+    // 取來源週所有路線列
+    const srcRows = allRows.filter(r => {
+      const rd = new Date(r.date + 'T00:00:00');
+      return rd >= srcD && rd <= new Date(srcD.getTime() + 4*86400000);
+    });
+    if (srcRows.length === 0) { alert('來源週無路線資料'); return; }
+
+    document.getElementById('ps-status').textContent = '補名單中…';
+    let copied = 0, attempted = 0, skipped = 0;
+    const errs = [];
+
+    for (const srcR of srcRows) {
+      // 找目標週同一路線、下個週一同週幾的列
+      const srcDate = new Date(srcR.date + 'T00:00:00');
+      const offset = (dstD.getTime() - srcD.getTime());
+      const targetDate = _localDateStr(new Date(srcDate.getTime() + offset));
+      const targetRow = allRows.find(x => x.date === targetDate && x.route === srcR.route);
+      if (!targetRow) {
+        errs.push('找不到目標列: ' + targetDate + ' / ' + srcR.route);
+        continue;
+      }
+      // 兩個 session 各補
+      for (const session of ['noon','pm']) {
+        attempted++;
+        try {
+          // 先查目標是否已有 details（避免覆蓋）
+          const dst = await _getRouteDetails(targetRow.row_index, session, auth_payload);
+          if (dst && dst.details && dst.details.length > 0) { skipped++; continue; }
+          // 拉來源
+          const src = await _getRouteDetails(srcR.row_index, session, auth_payload);
+          const details = (src && src.details) || [];
+          if (details.length === 0) continue; // 來源也是空、跳過
+          const sv = await _saveRouteDetails(targetRow.row_index, session, targetDate, srcR.route, details, auth_payload);
+          if (sv && (sv.success || sv.ok)) {
+            copied++;
+          } else {
+            errs.push(srcR.route + ' ' + session + ' 寫入失敗: ' + JSON.stringify(sv).slice(0,100));
+          }
+        } catch(e) {
+          errs.push(srcR.route + ' ' + session + ' 例外: ' + e.message);
+        }
+      }
+    }
+    let msg = '學生名單補齊完成\n\n✅ 補上：' + copied + ' 個 session\n';
+    msg += '⏭️ 跳過（目標已有名單）：' + skipped + '\n';
+    msg += '🔍 共試：' + attempted + '\n';
+    if (errs.length) msg += '\n錯誤：\n' + errs.slice(0,5).join('\n');
+    alert(msg);
+    // 清 cache + 重讀
+    window._routeNamesCache = {};
+    await loadAll();
   }
 
   // 實際複製邏輯抽出來、供「複製整週」「複製下一週」「未來 4 週」共用
