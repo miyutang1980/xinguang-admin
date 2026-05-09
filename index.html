@@ -8490,12 +8490,14 @@ async function renderPickupSchedule(el) {
   }
 
   // 實際複製邏輯抽出來、供「複製整週」「複製下一週」「未來 4 週」共用
+  // 同步複製接送明細（學生名單）
   async function _doCopyWeek(srcMon, dstMon) {
     const srcD = new Date(srcMon + 'T00:00:00');
     const offset = Math.round((new Date(dstMon + 'T00:00:00') - srcD) / 86400000);
     if (offset === 0) return;
     const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
     const newRows = [];
+    const sourceMapping = []; // [{srcRow:r, newDate, route}, ...] — 後續複製 details 用
     allRows.forEach(r => {
       const rd = new Date(r.date + 'T00:00:00');
       if (rd < srcD || rd > new Date(srcD.getTime() + 4*86400000)) return;
@@ -8512,12 +8514,40 @@ async function renderPickupSchedule(el) {
         pm_school:r.pm_school||'', pm_count:String(r.pm_count||''), pm_time:r.pm_time||'',
         remark:r.remark||''
       }});
+      sourceMapping.push({ srcRowIndex: r.row_index, newDate, route: r.route });
     });
     if (newRows.length === 0) return;
     document.getElementById('ps-status').textContent = '複製中… ' + dstMon;
     const rsp = await api({action:'append', rows:newRows});
-    if (rsp && rsp.success) { showToast('✅ 複製 ' + newRows.length + ' 筆 → ' + dstMon); await loadAll(); }
-    else alert('複製失敗: ' + ((rsp&&rsp.error)||'未知錯誤'));
+    if (!(rsp && rsp.success)) {
+      alert('複製失敗: ' + ((rsp&&rsp.error)||'未知錯誤'));
+      return;
+    }
+    showToast('✅ 複製 ' + newRows.length + ' 筆 → ' + dstMon + '，正在同步學生名單...');
+    // 重新 load、拿到新 row_index
+    await loadAll();
+    // 同步複製學生明細
+    document.getElementById('ps-status').textContent = '同步學生名單中…';
+    let detailsCopied = 0;
+    for (const map of sourceMapping) {
+      try {
+        // 找新的 row_index
+        const newRow = allRows.find(x => x.date === map.newDate && x.route === map.route);
+        if (!newRow) continue;
+        // 兩個 session 各拉一次
+        for (const session of ['noon','pm']) {
+          try {
+            const src = await _getRouteDetails(map.srcRowIndex, session, auth_payload);
+            const details = (src && src.details) || [];
+            if (details.length === 0) continue;
+            await _saveRouteDetails(newRow.row_index, session, map.newDate, map.route, details, auth_payload);
+            detailsCopied++;
+          } catch(e) { console.warn('[copy details] err:', e.message); }
+        }
+      } catch(e) {}
+    }
+    if (detailsCopied > 0) showToast('✅ 學生名單同步 ' + detailsCopied + ' 筆');
+    await loadAll();  // 再重讀、讓名單重新顯示
   }
 
   // ─── A3: 複製整週 (原本版) ───
