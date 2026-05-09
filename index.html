@@ -195,6 +195,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('classAssign')" id="nav-classAssign">
         🏫 班級指派
       </div>
+    <div class="sidebar-item" onclick="switchSection('leaves')" id="nav-leaves">
+        📝 請假紀錄
+      </div>
     <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
         📅 開班資訊
       </div>
@@ -653,6 +656,7 @@ function switchSection(sec) {
     trial:'🗓️ 體驗課排班', trialBookings:'📅 體驗預約一覽', documents:'📎 說明會簡報',
     students:'🎓 學生管理',
     classAssign:'🏫 班級指派',
+    leaves:'📝 請假紀錄',
     classes:'📅 開班資訊',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
@@ -672,6 +676,7 @@ function switchSection(sec) {
   else if(sec === 'documents') renderDocuments(content);
   else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
   else if(sec === 'classAssign') { if(typeof renderClassAssign==='function') renderClassAssign(content); else content.innerHTML='<div style="padding:40px">班級指派模組未載入</div>'; }
+  else if(sec === 'leaves') { if(typeof renderLeaves==='function') renderLeaves(content); else content.innerHTML='<div style="padding:40px">請假紀錄模組未載入</div>'; }
   else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -10059,6 +10064,390 @@ function _caViewDetail(row_index) {
   document.getElementById('modalOverlay').classList.add('open');
 }
 // ===== END 班級指派模組 =====
+
+// ===== 請假紀錄模組 (Stage 2.5) =====
+// 三個 tab: 列表 / 學生軌跡 / 月統計
+// 只有 admin 能進
+let _lvAll = [];
+let _lvFilter = { dateFrom: '', dateTo: '', cls: '', leaveType: '', status: 'active', keyword: '' };
+let _lvTab = 'list'; // list / track / stats
+let _lvTrackStudent = ''; // 軌跡 tab 目前選的學生
+let _lvStatsMonth = ''; // 統計 tab 目前選的月份
+
+const LEAVE_TYPE_LABELS = {
+  pickup_only: '🚐 只不接車',
+  pickup_eng: '📚 接車+美語',
+  pickup_eng_daycare: '🏫 接車+美語+安親',
+  pickup_eng_nursery: '👶 接車+美語+托育',
+  all: '🛑 全請假'
+};
+const LEAVE_TYPE_COLORS = {
+  pickup_only: '#0EA5E9',
+  pickup_eng: '#7C3AED',
+  pickup_eng_daycare: '#F59E0B',
+  pickup_eng_nursery: '#EC4899',
+  all: '#DC2626'
+};
+
+async function _lvCallGw(action, payload) {
+  const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+  if (!u.username || u.role !== 'admin') {
+    return { success:false, error:'只有管理員可以操作' };
+  }
+  let adminPass = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
+  if (!adminPass) {
+    adminPass = prompt('需要確認您的管理者密碼以繼續操作:');
+    if (!adminPass) return { success:false, error:'未提供密碼' };
+    sessionStorage.setItem('xg_session_pwd', adminPass);
+    localStorage.setItem('xg_admin_pwd', adminPass);
+  }
+  const body = Object.assign({ _action: action, adminUser: u.username, adminPass: adminPass }, payload || {});
+  try {
+    const res = await fetch(GW_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body), redirect:'follow' });
+    let r = await res.json();
+    if (Array.isArray(r)) r = r[0] || {};
+    return r;
+  } catch(e) { return { success:false, error:'網路錯誤:'+e.message }; }
+}
+
+async function renderLeaves(el) {
+  if (!_currentUser || _currentUser.role !== 'admin') {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#999">⛔ 只有管理員可以存取此頁面</div>';
+    return;
+  }
+  el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
+  const r = await _lvCallGw('leave_admin_list');
+  if (!r.success) { el.innerHTML = '<div class="card" style="padding:24px;color:#dc2626">讀取失敗:' + (r.error || '未知錯誤') + '</div>'; return; }
+  _lvAll = r.list || [];
+  _lvRenderView(el);
+}
+
+function _lvRenderView(el) {
+  // 預設月份:本月
+  if (!_lvStatsMonth) {
+    const now = new Date();
+    _lvStatsMonth = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  }
+  const tabBar = `
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="${_lvTab==='list'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_lvSwitchTab('list')">📋 列表</button>
+      <button class="${_lvTab==='track'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_lvSwitchTab('track')">👤 學生軌跡</button>
+      <button class="${_lvTab==='stats'?'btn btn-green':'btn btn-outline'}" style="flex:1" onclick="_lvSwitchTab('stats')">📊 月統計</button>
+    </div>`;
+
+  let body = '';
+  if (_lvTab === 'list') body = _lvRenderList();
+  else if (_lvTab === 'track') body = _lvRenderTrack();
+  else body = _lvRenderStats();
+
+  el.innerHTML = tabBar + body;
+  if (_lvTab === 'list') _lvBindList();
+  if (_lvTab === 'track') _lvBindTrack();
+  if (_lvTab === 'stats') _lvBindStats();
+}
+
+function _lvSwitchTab(t) { _lvTab = t; _lvRenderView(document.getElementById('mainContent')); }
+
+// ─── List Tab ───
+function _lvRenderList() {
+  const f = _lvFilter;
+  // 班級下拉:從資料抽
+  const allCls = [...new Set(_lvAll.map(x=>x.cls).filter(Boolean))].sort();
+  const filtered = _lvAll.filter(l => {
+    if (f.dateFrom && l.date < f.dateFrom) return false;
+    if (f.dateTo && l.date > f.dateTo) return false;
+    if (f.cls && l.cls !== f.cls) return false;
+    if (f.leaveType && l.leaveType !== f.leaveType) return false;
+    if (f.status === 'active' && l.status === 'cancelled') return false;
+    if (f.status === 'cancelled' && l.status !== 'cancelled') return false;
+    if (f.status === 'all') {} // 不過濾
+    if (f.keyword) {
+      const k = f.keyword.toLowerCase();
+      const hay = ((l.name||'')+(l.studentNo||'')+(l.cls||'')+(l.reason||'')+(l.teacherCh||'')+(l.teacherEn||'')+(l.leaveNo||'')).toLowerCase();
+      if (!hay.includes(k)) return false;
+    }
+    return true;
+  }).sort((a,b)=>(b.date+b.leaveNo).localeCompare(a.date+a.leaveNo)); // 新→舊
+
+  const filterBar = `
+    <div class="card" style="padding:14px;margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="lvDateFrom" type="date" value="${f.dateFrom}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem" title="起始日">
+      <span>~</span>
+      <input id="lvDateTo" type="date" value="${f.dateTo}" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem" title="結束日">
+      <select id="lvCls" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem">
+        <option value="">全部班級</option>
+        ${allCls.map(c=>'<option value="'+_esc(c)+'"'+(f.cls===c?' selected':'')+'>'+_esc(c)+'</option>').join('')}
+      </select>
+      <select id="lvType" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem">
+        <option value="">全部類型</option>
+        ${Object.keys(LEAVE_TYPE_LABELS).map(k=>'<option value="'+k+'"'+(f.leaveType===k?' selected':'')+'>'+LEAVE_TYPE_LABELS[k]+'</option>').join('')}
+      </select>
+      <select id="lvStatus" style="padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem">
+        <option value="active" ${f.status==='active'?'selected':''}>有效(預設)</option>
+        <option value="cancelled" ${f.status==='cancelled'?'selected':''}>已取消</option>
+        <option value="all" ${f.status==='all'?'selected':''}>全部</option>
+      </select>
+      <input id="lvKw" placeholder="🔍 學生/班/原因/編號" value="${_esc(f.keyword)}" style="flex:1;min-width:160px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:0.85rem">
+      <button class="btn btn-outline" style="padding:6px 12px" onclick="renderLeaves(document.getElementById('mainContent'))">🔄</button>
+      <span style="color:#6B7280;font-size:0.78rem">${filtered.length} / ${_lvAll.length} 筆</span>
+    </div>`;
+
+  const head = `
+    <tr style="background:#FEF3C7;border-bottom:2px solid #F59E0B">
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">編號</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">日期</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">學生</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">班級</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">老師</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">類型</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">原因</th>
+      <th style="padding:8px;text-align:center;font-size:0.75rem;color:#78350F">補課</th>
+      <th style="padding:8px;text-align:left;font-size:0.75rem;color:#78350F">狀態</th>
+      <th style="padding:8px;text-align:center;font-size:0.75rem;color:#78350F;width:90px">操作</th>
+    </tr>`;
+
+  const rows = filtered.map(l => {
+    const typeLabel = LEAVE_TYPE_LABELS[l.leaveType] || l.leaveType;
+    const typeColor = LEAVE_TYPE_COLORS[l.leaveType] || '#6B7280';
+    const statusBadge = l.status === 'cancelled'
+      ? '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:10px;font-size:0.72rem">已取消</span>'
+      : (l.status||'').indexOf('pushed')===0
+        ? '<span style="background:#DBEAFE;color:#1E40AF;padding:2px 8px;border-radius:10px;font-size:0.72rem">已通知</span>'
+        : '<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:10px;font-size:0.72rem">待處理</span>';
+    const cancelBtn = (l.status === 'cancelled' || (l.status||'').indexOf('pushed')===0)
+      ? '<span style="color:#9CA3AF;font-size:0.72rem">--</span>'
+      : '<button onclick="_lvCancel(\''+l.leaveNo+'\', \''+_esc(l.name).replace(/\\\'/g,"\\\\'")+'\')" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:0.78rem;padding:2px 6px">❌ 取消</button>';
+
+    return `
+      <tr style="border-bottom:1px solid #eee">
+        <td style="padding:6px 8px;font-family:monospace;font-size:0.75rem;color:#6B7280">${_esc(l.leaveNo)}</td>
+        <td style="padding:6px 8px;font-size:0.85rem">${_esc(l.date)}</td>
+        <td style="padding:6px 8px;font-size:0.85rem;font-weight:600">${_esc(l.name)}<div style="font-size:0.72rem;color:#9CA3AF">${_esc(l.studentNo)}</div></td>
+        <td style="padding:6px 8px;font-size:0.85rem">${_esc(l.cls||'-')}</td>
+        <td style="padding:6px 8px;font-size:0.78rem;color:#6B7280">${_esc(l.teacherCh||'-')}<br>${_esc(l.teacherEn||'-')}</td>
+        <td style="padding:6px 8px"><span style="background:${typeColor}1A;color:${typeColor};padding:3px 8px;border-radius:6px;font-size:0.75rem;white-space:nowrap">${typeLabel}</span></td>
+        <td style="padding:6px 8px;font-size:0.82rem;max-width:160px">${_esc(l.reason||'(未填)')}</td>
+        <td style="padding:6px 8px;text-align:center;font-size:0.85rem">${l.makeup?'✅':'—'}</td>
+        <td style="padding:6px 8px">${statusBadge}</td>
+        <td style="padding:6px 8px;text-align:center">${cancelBtn}</td>
+      </tr>`;
+  }).join('');
+
+  return filterBar + `
+    <div class="card" style="padding:0;overflow:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;min-width:900px">
+        <thead>${head}</thead>
+        <tbody>${rows || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#9CA3AF">沒有符合條件的請假紀錄</td></tr>'}</tbody>
+      </table>
+    </div>`;
+}
+
+function _lvBindList() {
+  const ids = ['lvDateFrom','lvDateTo','lvCls','lvType','lvStatus','lvKw'];
+  const fmap = { lvDateFrom:'dateFrom', lvDateTo:'dateTo', lvCls:'cls', lvType:'leaveType', lvStatus:'status', lvKw:'keyword' };
+  ids.forEach(id => {
+    const e = document.getElementById(id);
+    if (!e) return;
+    const ev = (id==='lvKw') ? 'input' : 'change';
+    e.addEventListener(ev, () => {
+      _lvFilter[fmap[id]] = e.value;
+      _lvRenderView(document.getElementById('mainContent'));
+      if (id==='lvKw') document.getElementById('lvKw').focus();
+    });
+  });
+}
+
+async function _lvCancel(leaveNo, name) {
+  if (!confirm('確定要取消請假「' + leaveNo + ' · ' + name + '」?\n\n注意:\n- 已通知學校的請假不能取消\n- 取消後家長還是看得到紀錄、只是狀態變成「已取消」')) return;
+  const r = await _lvCallGw('leave_admin_cancel', { leaveNo });
+  if (r.success) {
+    if (typeof showToast === 'function') showToast('已取消 · ' + name);
+    renderLeaves(document.getElementById('mainContent'));
+  } else {
+    alert('取消失敗:' + (r.error || ''));
+  }
+}
+
+// ─── Track Tab ───
+function _lvRenderTrack() {
+  const allStudents = [...new Set(_lvAll.map(l => l.studentNo + '|' + l.name).filter(Boolean))]
+    .map(s => { const [no,name] = s.split('|'); return {no, name}; })
+    .sort((a,b) => a.name.localeCompare(b.name, 'zh-Hant'));
+
+  const opts = '<option value="">-- 選一個學生 --</option>' +
+    allStudents.map(s => '<option value="'+_esc(s.no)+'"'+(_lvTrackStudent===s.no?' selected':'')+'>'+_esc(s.name)+' ('+_esc(s.no)+')</option>').join('');
+
+  let detail = '';
+  if (_lvTrackStudent) {
+    const records = _lvAll.filter(l => l.studentNo === _lvTrackStudent && l.status !== 'cancelled')
+      .sort((a,b) => b.date.localeCompare(a.date));
+    if (records.length === 0) {
+      detail = '<div class="card" style="padding:40px;text-align:center;color:#9CA3AF">這位學生沒有有效的請假紀錄</div>';
+    } else {
+      // 按月分組
+      const byMonth = {};
+      records.forEach(r => {
+        const m = r.date.substring(0, 7);
+        (byMonth[m] = byMonth[m] || []).push(r);
+      });
+      // 統計
+      const totalDays = records.length;
+      const typeCount = {};
+      records.forEach(r => { typeCount[r.leaveType] = (typeCount[r.leaveType]||0)+1; });
+      const typeStats = Object.keys(typeCount).map(k => '<span style="background:'+(LEAVE_TYPE_COLORS[k]||'#6B7280')+'1A;color:'+(LEAVE_TYPE_COLORS[k]||'#6B7280')+';padding:3px 10px;border-radius:6px;font-size:0.78rem;margin-right:6px">'+(LEAVE_TYPE_LABELS[k]||k)+': '+typeCount[k]+'</span>').join('');
+
+      const stuObj = records[0];
+      const summary = `
+        <div class="card" style="padding:16px;margin-bottom:14px;background:#F0FDF4;border-left:4px solid #10B981">
+          <div style="font-size:1.1rem;font-weight:700;color:#064E3B;margin-bottom:6px">${_esc(stuObj.name)} · ${_esc(stuObj.studentNo)}</div>
+          <div style="font-size:0.85rem;color:#374151;margin-bottom:8px">${_esc(stuObj.cls||'(未分班)')} · ${_esc(stuObj.teacherCh||'-')}/${_esc(stuObj.teacherEn||'-')}</div>
+          <div style="font-size:0.92rem;margin-bottom:8px"><b>累計請假:${totalDays} 天</b></div>
+          <div>${typeStats}</div>
+        </div>`;
+
+      const groups = Object.keys(byMonth).sort().reverse().map(m => {
+        const rows = byMonth[m].map(r => {
+          const tl = LEAVE_TYPE_LABELS[r.leaveType] || r.leaveType;
+          const tc = LEAVE_TYPE_COLORS[r.leaveType] || '#6B7280';
+          return `
+            <tr style="border-bottom:1px solid #eee">
+              <td style="padding:8px;font-size:0.85rem">${_esc(r.date)}</td>
+              <td style="padding:8px"><span style="background:${tc}1A;color:${tc};padding:3px 8px;border-radius:6px;font-size:0.75rem">${tl}</span></td>
+              <td style="padding:8px;font-size:0.82rem">${_esc(r.reason||'(未填)')}</td>
+              <td style="padding:8px;text-align:center">${r.makeup?'✅':'—'}</td>
+              <td style="padding:8px;font-size:0.72rem;color:#9CA3AF;font-family:monospace">${_esc(r.leaveNo)}</td>
+            </tr>`;
+        }).join('');
+        return `
+          <div style="margin-bottom:14px">
+            <div style="background:#374151;color:#fff;padding:8px 14px;border-radius:6px 6px 0 0;font-size:0.92rem;font-weight:600">📅 ${m} (${byMonth[m].length} 筆)</div>
+            <div class="card" style="padding:0;border-radius:0 0 8px 8px">
+              <table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+                <thead><tr style="background:#F9FAFB"><th style="padding:8px;text-align:left;font-size:0.75rem;color:#6B7280">日期</th><th style="padding:8px;text-align:left;font-size:0.75rem;color:#6B7280">類型</th><th style="padding:8px;text-align:left;font-size:0.75rem;color:#6B7280">原因</th><th style="padding:8px;text-align:center;font-size:0.75rem;color:#6B7280">補課</th><th style="padding:8px;text-align:left;font-size:0.75rem;color:#6B7280">編號</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>`;
+      }).join('');
+
+      detail = summary + groups;
+    }
+  }
+
+  return `
+    <div class="card" style="padding:14px;margin-bottom:14px">
+      <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:6px">選一個學生看歷史:</label>
+      <select id="lvTrackSel" style="width:100%;max-width:400px;padding:9px 12px;border:1.5px solid #d4d1ca;border-radius:8px;font-size:0.92rem">${opts}</select>
+    </div>
+    ${detail}`;
+}
+
+function _lvBindTrack() {
+  const sel = document.getElementById('lvTrackSel');
+  if (!sel) return;
+  sel.addEventListener('change', e => { _lvTrackStudent = e.target.value; _lvRenderView(document.getElementById('mainContent')); });
+}
+
+// ─── Stats Tab ───
+function _lvRenderStats() {
+  const monthSet = [...new Set(_lvAll.map(l => l.date.substring(0,7)).filter(Boolean))].sort().reverse();
+  if (monthSet.length === 0) monthSet.push(_lvStatsMonth);
+  if (!monthSet.includes(_lvStatsMonth)) _lvStatsMonth = monthSet[0];
+
+  const monthLeaves = _lvAll.filter(l => l.date.substring(0,7) === _lvStatsMonth && l.status !== 'cancelled');
+  const total = monthLeaves.length;
+
+  // 按班級
+  const byCls = {};
+  monthLeaves.forEach(l => {
+    const k = l.cls || '(未分班)';
+    byCls[k] = (byCls[k]||0)+1;
+  });
+  // 按類型
+  const byType = {};
+  monthLeaves.forEach(l => { byType[l.leaveType] = (byType[l.leaveType]||0)+1; });
+  // 按學生 Top 5
+  const byStudent = {};
+  monthLeaves.forEach(l => {
+    const k = l.name + '||' + l.studentNo;
+    byStudent[k] = (byStudent[k]||0)+1;
+  });
+  const top5 = Object.keys(byStudent).map(k => ({key:k, n:byStudent[k]})).sort((a,b)=>b.n-a.n).slice(0,5);
+
+  const monthOpts = monthSet.map(m => '<option value="'+m+'"'+(m===_lvStatsMonth?' selected':'')+'>'+m+'</option>').join('');
+
+  return `
+    <div class="card" style="padding:14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:0.85rem;color:#374151;font-weight:600">月份:</label>
+      <select id="lvStatsMonthSel" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.92rem">${monthOpts}</select>
+      <span style="font-size:0.78rem;color:#9CA3AF">已取消的請假不算</span>
+    </div>
+
+    <div class="card" style="padding:24px;margin-bottom:14px;background:linear-gradient(135deg,#F59E0B,#D97706);color:#fff">
+      <div style="font-size:0.85rem;opacity:0.9">${_lvStatsMonth} 請假總筆數</div>
+      <div style="font-size:3rem;font-weight:700;line-height:1.1;margin-top:6px">${total}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
+
+      <div class="card" style="padding:18px">
+        <div style="font-size:1rem;font-weight:700;color:#374151;margin-bottom:14px">📊 按班級</div>
+        ${total === 0 ? '<div style="color:#9CA3AF;font-size:0.85rem">本月還沒有請假紀錄</div>' :
+          Object.keys(byCls).sort((a,b)=>byCls[b]-byCls[a]).map(c => {
+            const pct = Math.round(byCls[c]/total*100);
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px">
+                <span style="font-weight:600">${_esc(c)}</span>
+                <span style="color:#6B7280">${byCls[c]} 筆 · ${pct}%</span>
+              </div>
+              <div style="background:#F3F4F6;border-radius:4px;height:6px;overflow:hidden">
+                <div style="background:#10B981;height:100%;width:${pct}%"></div>
+              </div>
+            </div>`;
+          }).join('')
+        }
+      </div>
+
+      <div class="card" style="padding:18px">
+        <div style="font-size:1rem;font-weight:700;color:#374151;margin-bottom:14px">🏷️ 按請假類型</div>
+        ${total === 0 ? '<div style="color:#9CA3AF;font-size:0.85rem">本月還沒有請假紀錄</div>' :
+          Object.keys(byType).sort((a,b)=>byType[b]-byType[a]).map(t => {
+            const pct = Math.round(byType[t]/total*100);
+            const color = LEAVE_TYPE_COLORS[t] || '#6B7280';
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;font-size:0.85rem;margin-bottom:4px">
+                <span style="font-weight:600;color:${color}">${LEAVE_TYPE_LABELS[t]||t}</span>
+                <span style="color:#6B7280">${byType[t]} 筆 · ${pct}%</span>
+              </div>
+              <div style="background:#F3F4F6;border-radius:4px;height:6px;overflow:hidden">
+                <div style="background:${color};height:100%;width:${pct}%"></div>
+              </div>
+            </div>`;
+          }).join('')
+        }
+      </div>
+
+      <div class="card" style="padding:18px;grid-column:1/-1">
+        <div style="font-size:1rem;font-weight:700;color:#374151;margin-bottom:14px">🏆 請假最多 Top 5</div>
+        ${top5.length === 0 ? '<div style="color:#9CA3AF;font-size:0.85rem">本月還沒有請假紀錄</div>' :
+          '<ol style="margin:0;padding-left:24px">' + top5.map(x => {
+            const [name, no] = x.key.split('||');
+            return `<li style="margin-bottom:8px;font-size:0.92rem"><b>${_esc(name)}</b> <span style="color:#9CA3AF;font-size:0.78rem">(${_esc(no)})</span> · <span style="color:#DC2626;font-weight:600">${x.n} 次</span></li>`;
+          }).join('') + '</ol>'
+        }
+      </div>
+
+    </div>`;
+}
+
+function _lvBindStats() {
+  const sel = document.getElementById('lvStatsMonthSel');
+  if (!sel) return;
+  sel.addEventListener('change', e => { _lvStatsMonth = e.target.value; _lvRenderView(document.getElementById('mainContent')); });
+}
+// ===== END 請假紀錄模組 =====
+
+
 
 // 右下角 toast，帶可選 undo 按鈕。5 秒後自動消失。
 function showToast(message, undoLabel, undoFn) {
