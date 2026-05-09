@@ -195,6 +195,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('classes')" id="nav-classes">
         📅 開班資訊
       </div>
+    <div class="sidebar-item" onclick="switchSection('webcal')" id="nav-webcal">
+        🌐 主網站日曆
+      </div>
     <div class="sidebar-item" onclick="switchSection('pickup')" id="nav-pickup">
         🚐 接送排程
       </div>
@@ -664,6 +667,7 @@ function switchSection(sec) {
   else if(sec === 'trial') renderTrial(content);
   else if(sec === 'documents') renderDocuments(content);
   else if(sec === 'students') { if(typeof renderStudents==='function') renderStudents(content); else content.innerHTML='<div style="padding:40px">學生模組未載入</div>'; }
+  else if(sec === 'webcal') { if(typeof renderWebCalendar==='function') renderWebCalendar(content); else content.innerHTML='<div style="padding:40px">主網站日曆模組未載入</div>'; }
   else if(sec === 'pickup') { if(typeof renderPickupSchedule==='function') renderPickupSchedule(content); else content.innerHTML='<div style="padding:40px">接送模組未載入</div>'; }
   else if(sec === 'assignments') { if(typeof renderPickupToday==='function') renderPickupToday(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
   else if(sec === 'transfer') { if(typeof renderTransferAdmin==='function') renderTransferAdmin(content); else content.innerHTML='<div style="padding:40px">模組未載入</div>'; }
@@ -1453,6 +1457,123 @@ async function renderBooking(el) {
     </tr>`;
   }).join('');
 }
+
+// ─── 主網站日曆設定 ─────────────────────────────────────────
+let _wc_settings = null;
+async function renderWebCalendar(el) {
+  el.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF">⏳ 從雲端載入設定中...</div>';
+  try {
+    const resp = await fetch(GW_URL + '?action=calendarSettings', { method: 'GET' });
+    const data = await resp.json();
+    _wc_settings = (data && data.ok && data.settings) ? data.settings : { blockedDates: [], blockedSlots: [] };
+  } catch(e) {
+    _wc_settings = { blockedDates: [], blockedSlots: [] };
+  }
+  if (!Array.isArray(_wc_settings.blockedDates)) _wc_settings.blockedDates = [];
+  if (!Array.isArray(_wc_settings.blockedSlots)) _wc_settings.blockedSlots = [];
+  if (!_wc_settings.summerStart) _wc_settings.summerStart = '2026-07-01';
+  if (!_wc_settings.summerEnd) _wc_settings.summerEnd = '2026-08-26';
+  _wc_render(el);
+}
+function _wc_render(el) {
+  const s = _wc_settings;
+  const blockedDates = (s.blockedDates || []).slice().sort();
+  const blockedSlots = (s.blockedSlots || []).slice().sort((a,b)=> (a.date+a.slot).localeCompare(b.date+b.slot));
+  el.innerHTML = `
+    <div style="padding:24px;max-width:1100px">
+      <h2 style="margin:0 0 6px;font-size:1.5rem">🌐 主網站日曆設定</h2>
+      <p style="color:#7a7974;font-size:0.85rem;margin:0 0 16px">控制主網站預約參訪/檢測的可選日期、時段設定。儲存後主網站立即生效。</p>
+      <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:18px;margin-bottom:16px">
+        <h3 style="margin:0 0 10px;font-size:1.05rem;color:#1F2937">🚫 不可預約日　<small style="color:#9CA3AF;font-weight:400;font-size:0.8rem">國定假日/活動日/不接家長預約的日期</small></h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="date" id="wc-add-date" style="padding:6px 10px;border:1px solid #d4d1ca;border-radius:4px">
+          <button onclick="_wc_addBlockedDate()" style="padding:6px 14px;background:#0F766E;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">➕ 加入不可預約</button>
+          <span style="color:#9CA3AF;font-size:0.8rem;margin-left:8px">共 ${blockedDates.length} 個日期</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;max-height:160px;overflow-y:auto">
+          ${blockedDates.length === 0 ? '<span style="color:#9CA3AF;font-size:0.85rem;padding:8px">尚未加入任何不可預約日</span>' : blockedDates.map(d => { const dObj = new Date(d + 'T00:00:00'); const wd = ['日','一','二','三','四','五','六'][dObj.getDay()]; return `<span style="background:#FEF2F2;border:1px solid #FECACA;color:#991B1B;padding:5px 10px;border-radius:14px;font-size:0.8rem;display:inline-flex;align-items:center;gap:6px">${d} 週${wd} <button onclick="_wc_removeBlockedDate('${d}')" style="background:none;border:none;color:#DC2626;cursor:pointer;font-size:0.95rem;padding:0;line-height:1">×</button></span>`; }).join('')}
+        </div>
+      </div>
+      <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:18px;margin-bottom:16px">
+        <h3 style="margin:0 0 10px;font-size:1.05rem;color:#1F2937">⏰ 週一至週五預設時段</h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="background:#F0F9FF;border-left:3px solid #0EA5E9;padding:12px;border-radius:6px">
+            <strong style="color:#0C4A6E;display:block;margin-bottom:6px">學期中(8/26 以外)</strong>
+            <div style="font-family:monospace;font-size:0.85rem">14:00-15:00 · 19:00-20:00</div>
+            <p style="font-size:0.75rem;color:#6B7280;margin:6px 0 0">週一二三五兩個時段·週四只有下午</p>
+          </div>
+          <div style="background:#FFF7ED;border-left:3px solid #F97316;padding:12px;border-radius:6px">
+            <strong style="color:#9A3412;display:block;margin-bottom:6px">暑期(${s.summerStart} ~ ${s.summerEnd})</strong>
+            <div style="font-family:monospace;font-size:0.85rem">17:00-18:00 · 19:00-20:00</div>
+            <p style="font-size:0.75rem;color:#6B7280;margin:6px 0 0">每天兩個時段</p>
+          </div>
+        </div>
+        <p style="font-size:0.78rem;color:#6B7280;margin:10px 0 0">⚠️ 現階段預設時段是唯讀。如需調整請告知工程協助修改。</p>
+      </div>
+      <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:18px;margin-bottom:16px">
+        <h3 style="margin:0 0 10px;font-size:1.05rem;color:#1F2937">🔒 某天某時段鎖定　<small style="color:#9CA3AF;font-weight:400;font-size:0.8rem">例如 9/15 週一 14:00 不接、但 19:00 可接</small></h3>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <input type="date" id="wc-bs-date" style="padding:6px 10px;border:1px solid #d4d1ca;border-radius:4px">
+          <select id="wc-bs-slot" style="padding:6px 10px;border:1px solid #d4d1ca;border-radius:4px"><option value="14:00-15:00">14:00-15:00</option><option value="17:00-18:00">17:00-18:00</option><option value="19:00-20:00">19:00-20:00</option></select>
+          <button onclick="_wc_addBlockedSlot()" style="padding:6px 14px;background:#7C3AED;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.85rem">➕ 加入鎖定</button>
+          <span style="color:#9CA3AF;font-size:0.8rem;margin-left:8px">共 ${blockedSlots.length} 個鎖定</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;max-height:160px;overflow-y:auto">
+          ${blockedSlots.length === 0 ? '<span style="color:#9CA3AF;font-size:0.85rem;padding:8px">尚未加入任何鎖定</span>' : blockedSlots.map((b, i) => `<span style="background:#F5F3FF;border:1px solid #DDD6FE;color:#5B21B6;padding:5px 10px;border-radius:14px;font-size:0.8rem;display:inline-flex;align-items:center;gap:6px">${b.date} · ${b.slot} <button onclick="_wc_removeBlockedSlot(${i})" style="background:none;border:none;color:#7C3AED;cursor:pointer;font-size:0.95rem;padding:0;line-height:1">×</button></span>`).join('')}
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between">
+        <div style="font-size:0.85rem;color:#6B7280">💡 修改後需點下右〈儲存設定〉、才會同步到主網站</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="renderWebCalendar(document.getElementById('mainContent'))" style="padding:8px 16px;background:#fff;border:1.5px solid #d4d1ca;border-radius:4px;cursor:pointer">↻ 重新載入</button>
+          <button onclick="_wc_save()" id="wc-save-btn" style="padding:8px 22px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">💾 儲存設定</button>
+        </div>
+      </div>
+    </div>`;
+}
+function _wc_addBlockedDate() {
+  const inp = document.getElementById('wc-add-date');
+  const v = inp.value;
+  if (!v) { alert('請選日期'); return; }
+  if (!_wc_settings.blockedDates) _wc_settings.blockedDates = [];
+  if (_wc_settings.blockedDates.indexOf(v) >= 0) { alert('這個日期已在清單裡'); return; }
+  _wc_settings.blockedDates.push(v);
+  inp.value = '';
+  _wc_render(document.getElementById('mainContent'));
+}
+function _wc_removeBlockedDate(d) {
+  _wc_settings.blockedDates = _wc_settings.blockedDates.filter(x => x !== d);
+  _wc_render(document.getElementById('mainContent'));
+}
+function _wc_addBlockedSlot() {
+  const date = document.getElementById('wc-bs-date').value;
+  const slot = document.getElementById('wc-bs-slot').value;
+  if (!date || !slot) { alert('請選日期與時段'); return; }
+  if (!_wc_settings.blockedSlots) _wc_settings.blockedSlots = [];
+  const dup = _wc_settings.blockedSlots.find(b => b.date === date && b.slot === slot);
+  if (dup) { alert('這個日期時段已在鎖定裡'); return; }
+  _wc_settings.blockedSlots.push({ date, slot });
+  document.getElementById('wc-bs-date').value = '';
+  _wc_render(document.getElementById('mainContent'));
+}
+function _wc_removeBlockedSlot(i) {
+  _wc_settings.blockedSlots.splice(i, 1);
+  _wc_render(document.getElementById('mainContent'));
+}
+async function _wc_save() {
+  const btn = document.getElementById('wc-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '儲存中...'; }
+  try {
+    const res = await fetch(GW_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ _action: 'calendar_settings_set', settings: _wc_settings }), redirect: 'follow' });
+    const r = await res.json();
+    if (r && r.success !== false) showToast('✅ 設定儲存成功、主網站已同步');
+    else alert('儲存失敗：' + (r.error || '未知'));
+  } catch(e) {
+    alert('儲存失敗：' + e.message);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '💾 儲存設定'; }
+}
+
 
 // ── 體驗預約一覽 ──────────────────────────────────────────
 // 顯示所有「體驗課」類型的預約、按日期+班分組、檢測重複
