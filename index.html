@@ -8632,7 +8632,7 @@ async function renderPickupSchedule(el) {
       const dateBorder = isFirstOfDay ? 'border-top:2px solid #01696F' : '';
 
       return `<tr data-row="${r.row_index}" style="${bg};${dateBorder}">
-        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.date : ''}</td>
+        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.date + '<br><button class="btn-day-del" data-date="'+_esc(r.date)+'" title="刪除這一天所有路線" style="margin-top:4px;background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;cursor:pointer;font-size:0.7rem;padding:2px 6px;border-radius:4px">🗑 删整天</button>' : ''}</td>
         <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.weekday : ''}</td>
         <td style="padding:6px;text-align:center">
           <select data-field="status" style="border:1px solid #d4d1ca;padding:2px 4px;font-size:0.85rem">
@@ -8711,6 +8711,40 @@ async function renderPickupSchedule(el) {
 
     // 📋 按鈕:開明細 modal
     // ❌ 硬刪除整列
+    // 刪整天 (日期格裡面的按鈕)
+    document.querySelectorAll('#ps-table-wrap .btn-day-del').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.preventDefault();
+        const date = btn.dataset.date;
+        const dayRows = allRows.filter(rr => rr.date === date);
+        if (!dayRows.length) return;
+        const c = await _confirmDialog({
+          title: '刪除整天 ' + date,
+          message: '這一天共 ' + dayRows.length + ' 條路線都會被刪掉（永久刪除、無法復原）。\n\n(若只是明天不上請使用「上班?」欄改為「休」。)',
+          options: [
+            { label: '取消', value: '', color: '#6B7280' },
+            { label: '刪除這一天 ' + dayRows.length + ' 條', value: 'hard', color: '#DC2626' }
+          ]
+        });
+        if (c !== 'hard') return;
+        // 从大到小刪除 (row_index 較大的先刪避免位移)
+        const sortedRows = [...dayRows].sort((a, b) => b.row_index - a.row_index);
+        let okCount = 0, errMsg = '';
+        for (const dr of sortedRows) {
+          try {
+            const r = await api({ action: 'hard_delete', row_index: dr.row_index });
+            if (r && r.success) okCount++;
+            else { errMsg = (r && r.error) || 'unknown'; break; }
+          } catch (err) {
+            errMsg = err.message; break;
+          }
+        }
+        if (errMsg) alert('刪了 ' + okCount + '/' + sortedRows.length + ' 條, 剩的失敗:' + errMsg);
+        else alert('已刪除 ' + date + ' 全部 ' + okCount + ' 條路線');
+        await loadAll();
+      };
+    });
+
     document.querySelectorAll('#ps-table-wrap .btn-route-del').forEach(btn => {
       btn.onclick = async (e) => {
         e.preventDefault();
