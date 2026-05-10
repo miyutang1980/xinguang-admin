@@ -7987,10 +7987,12 @@ async function _pickupCallGateway(originalUrl, payload) {
     return { success: false, error: 'endpoint not yet migrated to Gateway: ' + originalUrl };
   }
 
+  // ⚠️ Content-Type 必須是 text/plain 避免 CORS preflight (Apps Script 不回 CORS headers)
   var res = await fetch(GW_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(gwBody)
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(gwBody),
+    redirect: 'follow'
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   var txt = await res.text();
@@ -8034,16 +8036,18 @@ async function _loadAllStudentsOnce(authPayload) {
   if (_allStudentsCache) return _allStudentsCache;
   try {
     // v2.17: 改走 Gateway students_list (原 N8N webhook 已棄用)
+    // ⚠️ Content-Type 必須是 text/plain 避免 CORS preflight (Apps Script 不回 CORS headers)
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
     var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
     const res = await fetch(GW_URL, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({
         _action: 'students_list',
         adminUser: u.username || 'admin',
         adminPass: pwd
-      })
+      }),
+      redirect: 'follow'
     });
     const r = await res.json();
     // Gateway 返 list:[{studentNo,name,school,...}], 映射為接送模組所需格式
