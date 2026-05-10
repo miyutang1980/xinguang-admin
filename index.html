@@ -7909,14 +7909,93 @@ async function _assessDelete(idx) {
   renderAssess(document.getElementById('mainContent'));
 }
 
+// v2.17: 全部接送相關呼叫都走 Gateway, action 名稱手動 mapping
 async function _pickupCall(url, payload) {
+  // 如果 url 是 N8N webhook (舊代碼), 轉接到 Gateway
+  if (typeof url === 'string' && url.indexOf('miyutang.app.n8n.cloud') >= 0) {
+    return _pickupCallGateway(url, payload);
+  }
+  // 不是 N8N 就原途 (不必走到這裡)
   var res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
+  var txt = await res.text();
+  if (!txt || !txt.trim()) throw new Error('empty body');
+  return JSON.parse(txt);
+}
+
+// N8N webhook -> Gateway action 轉接
+async function _pickupCallGateway(originalUrl, payload) {
+  var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+  var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+  var gwBody = {
+    adminUser: u.username || 'admin',
+    adminPass: pwd
+  };
+  var n8nAction = String(payload.action || '');
+
+  // 接送排程 /admin/route-schedule
+  if (originalUrl.indexOf('/route-schedule') >= 0) {
+    if (n8nAction === 'get_staff') gwBody._action = 'routes_get_staff';
+    else if (n8nAction === 'list') gwBody._action = 'routes_list';
+    else if (n8nAction === 'save') {
+      gwBody._action = 'routes_save';
+      gwBody.row_index = payload.row_index;
+      gwBody.field = payload.field;
+      gwBody.value = payload.value;
+    }
+    else if (n8nAction === 'append') {
+      gwBody._action = 'routes_append';
+      gwBody.rows = payload.rows;
+    }
+    else if (n8nAction === 'batch_save') {
+      gwBody._action = 'routes_batch_save';
+      gwBody.rows = payload.rows;
+    }
+    else if (n8nAction === 'hard_delete') {
+      gwBody._action = 'routes_hard_delete';
+      gwBody.row_index = payload.row_index;
+    }
+    else throw new Error('unknown route-schedule action: ' + n8nAction);
+  }
+  // 接送明細 /admin/pickup-details
+  else if (originalUrl.indexOf('/pickup-details') >= 0) {
+    if (n8nAction === 'get_route_details') {
+      gwBody._action = 'routes_get_details';
+      gwBody.schedule_row = payload.schedule_row;
+      gwBody.session = payload.session;
+    }
+    else if (n8nAction === 'save_route_details') {
+      gwBody._action = 'routes_save_details';
+      gwBody.schedule_row = payload.schedule_row;
+      gwBody.session = payload.session;
+      gwBody.date = payload.date;
+      gwBody.route = payload.route;
+      gwBody.details = payload.details;
+    }
+    else if (n8nAction === 'get_students_by_school') {
+      // 不實作, 讓上層 fallback 走 students_list
+      return { success: true, students: [] };
+    }
+    else throw new Error('unknown pickup-details action: ' + n8nAction);
+  }
+  // 不識識的 endpoint (轉交 / 轉交請求 / 今日接送 — 這些還未搬)
+  else {
+    return { success: false, error: 'endpoint not yet migrated to Gateway: ' + originalUrl };
+  }
+
+  var res = await fetch(GW_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(gwBody)
+  });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  var txt = await res.text();
+  if (!txt || !txt.trim()) throw new Error('Gateway empty body');
+  return JSON.parse(txt);
 }
 
 // ========================================================================
@@ -7954,13 +8033,29 @@ let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 
 async function _loadAllStudentsOnce(authPayload) {
   if (_allStudentsCache) return _allStudentsCache;
   try {
-    const res = await fetch('https://miyutang.app.n8n.cloud/webhook/admin/students', {
+    // v2.17: 改走 Gateway students_list (原 N8N webhook 已棄用)
+    var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+    const res = await fetch(GW_URL, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(Object.assign({action: 'list'}, authPayload || {}))
+      body: JSON.stringify({
+        _action: 'students_list',
+        adminUser: u.username || 'admin',
+        adminPass: pwd
+      })
     });
     const r = await res.json();
-    _allStudentsCache = r.rows || r.students || [];
+    // Gateway 返 list:[{studentNo,name,school,...}], 映射為接送模組所需格式
+    const list = (r.list || r.rows || []).map(s => ({
+      student_id: s.studentNo || s.student_id || '',
+      chinese_name: s.name || s.chinese_name || '',
+      school_name: s.school_name || '',  // Gateway 未存學生來源學校, 以 schoolName 在接送學員表裡存
+      pickup_method: s.pickupMethod || s.pickup_method || '',
+      has_pickup: (s.pickupMethod && s.pickupMethod !== 'walk' && s.pickupMethod !== 'parent') ? true : false,
+      status: (s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
+    }));
+    _allStudentsCache = list;
   } catch (e) {
     console.error('[students-list] failed:', e);
     _allStudentsCache = [];
@@ -8394,6 +8489,7 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
 
 // ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
 async function renderPickupSchedule(el) {
+  // v2.17: ROUTE_API 仍指向舊位址, _pickupCall 會自動轉到 Gateway
   const ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
   const auth = JSON.parse(sessionStorage.getItem('user') || '{}');
   const auth_payload = { admin_username: auth.username || 'admin', admin_role: auth.role || 'admin' };
@@ -8425,25 +8521,8 @@ async function renderPickupSchedule(el) {
   let allRows = [];
 
   async function api(payload) {
-    let resp;
-    try {
-      resp = await fetch(ROUTE_API, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({...payload, ...auth_payload})
-      });
-    } catch(e) {
-      throw new Error('網路連線失敗: ' + e.message);
-    }
-    const txt = await resp.text();
-    if (!txt || !txt.trim()) {
-      throw new Error('N8N webhook 回空 body (HTTP ' + resp.status + ', action=' + payload.action + ')');
-    }
-    try {
-      return JSON.parse(txt);
-    } catch(e) {
-      throw new Error('N8N 回非 JSON 格式: ' + txt.slice(0, 200));
-    }
+    // v2.17: 走 Gateway (透過 _pickupCall 自動轉接)
+    return _pickupCall(ROUTE_API, Object.assign({}, payload, auth_payload));
   }
 
   async function loadAll() {
