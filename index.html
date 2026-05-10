@@ -208,7 +208,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
         📅 開班資訊
       </div>
     <div class="sidebar-item" onclick="switchSection('webcal')" id="nav-webcal">
-        🌐 主網站日曆
+        📅 參訪/檢測日曆設定
       </div>
     <div class="sidebar-item" onclick="switchSection('pickup')" id="nav-pickup">
         🚐 接送排程
@@ -666,6 +666,7 @@ function switchSection(sec) {
     docs:'📖 文件中心',
     links:'🔗 連結中心',
     classes:'📅 開班資訊',
+    webcal:'📅 參訪/檢測日曆設定',
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
     health:'🩺 系統健檢',
@@ -691,7 +692,7 @@ function switchSection(sec) {
   else if(sec === 'leaves') { _lazyRender(content, 'renderLeaves', '請假紀錄模組'); }
   else if(sec === 'docs') { _lazyRender(content, 'renderDocs', '文件中心模組'); }
   else if(sec === 'links') { _lazyRender(content, 'renderLinks', '連結中心模組'); }
-  else if(sec === 'webcal') { _lazyRender(content, 'renderWebCalendar', '主網站日曆模組'); }
+  else if(sec === 'webcal') { _lazyRender(content, 'renderWebCalendar', '參訪/檢測日曆模組'); }
   else if(sec === 'pickup') { _lazyRender(content, 'renderPickupSchedule', '接送模組'); }
   else if(sec === 'assignments') { _lazyRender(content, 'renderPickupToday', '今日接送模組'); }
   else if(sec === 'transfer') { _lazyRender(content, 'renderTransferAdmin', '轉交模組'); }
@@ -1533,7 +1534,7 @@ function _wc_render(el) {
   const blockedSlots = (s.blockedSlots || []).slice().sort((a,b)=> (a.date+a.slot).localeCompare(b.date+b.slot));
   el.innerHTML = `
     <div style="padding:24px;max-width:1100px">
-      <h2 style="margin:0 0 6px;font-size:1.5rem">🌐 主網站日曆設定</h2>
+      <h2 style="margin:0 0 6px;font-size:1.5rem">📅 參訪/檢測日曆設定</h2>
       <p style="color:#7a7974;font-size:0.85rem;margin:0 0 16px">控制主網站預約參訪/檢測的可選日期、時段設定。儲存後主網站立即生效。</p>
       <div style="background:#fff;border:1.5px solid #E5E7EB;border-radius:10px;padding:18px;margin-bottom:16px">
         <h3 style="margin:0 0 10px;font-size:1.05rem;color:#1F2937">🚫 不可預約日　<small style="color:#9CA3AF;font-weight:400;font-size:0.8rem">國定假日/活動日/不接家長預約的日期</small></h3>
