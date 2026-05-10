@@ -8050,13 +8050,15 @@ async function _loadAllStudentsOnce(authPayload) {
       redirect: 'follow'
     });
     const r = await res.json();
-    // Gateway 返 list:[{studentNo,name,school,...}], 映射為接送模組所需格式
+    // Gateway 返 list:[{studentNo,name,englishName,cls,school_name,...}]
+    // v2.17.5: 补齊 english_name + class_code, 接送彈窗顯示用
     const list = (r.list || r.rows || []).map(s => ({
       student_id: s.studentNo || s.student_id || '',
       chinese_name: s.name || s.chinese_name || '',
-      school_name: s.school_name || '',  // Gateway 未存學生來源學校, 以 schoolName 在接送學員表裡存
+      english_name: s.englishName || s.english_name || '',
+      class_code: s.cls || s.class_code || '',
+      school_name: s.school_name || '',
       pickup_method: s.pickupMethod || s.pickup_method || '',
-      has_pickup: (s.pickupMethod && s.pickupMethod !== 'walk' && s.pickupMethod !== 'parent') ? true : false,
       status: (s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
     }));
     _allStudentsCache = list;
@@ -8076,15 +8078,14 @@ async function _getSchoolStudents(schoolName, authPayload) {
     }, authPayload));
     list = (r && r.students) || [];
   } catch (e) {}
-  // Fallback: 讀全部學生 → 前端過濾 (接送彈窗依賴 chinese_name + student_id、用 「has_pickup=true 且 status=active」)
+  // Fallback: 讀全部學生 → 前端過濾 (接送彈窗依賴 chinese_name + student_id)
+  // v2.17.5: 移除 has_pickup filter — 使用者自己選學生加入路線（不管 walk/bus/parent）
   if (list.length === 0) {
     const all = await _loadAllStudentsOnce(authPayload);
     list = all.filter(s => {
       if (s.school_name !== schoolName) return false;
       if (s.status !== 'active') return false;
-      const hp = s.has_pickup;
-      // has_pickup 可能是 boolean true / 'TRUE' / 1 / '是'
-      return hp === true || hp === 'TRUE' || hp === true || hp === 1 || hp === '是' || hp === 'true' || String(hp).toUpperCase() === 'TRUE';
+      return true;
     }).map(s => ({
       student_id: s.student_id,
       chinese_name: s.chinese_name,
