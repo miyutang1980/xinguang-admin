@@ -8425,28 +8425,54 @@ async function renderPickupSchedule(el) {
   let allRows = [];
 
   async function api(payload) {
-    const resp = await fetch(ROUTE_API, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({...payload, ...auth_payload})
-    });
-    return await resp.json();
+    let resp;
+    try {
+      resp = await fetch(ROUTE_API, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...payload, ...auth_payload})
+      });
+    } catch(e) {
+      throw new Error('網路連線失敗: ' + e.message);
+    }
+    const txt = await resp.text();
+    if (!txt || !txt.trim()) {
+      throw new Error('N8N webhook 回空 body (HTTP ' + resp.status + ', action=' + payload.action + ')');
+    }
+    try {
+      return JSON.parse(txt);
+    } catch(e) {
+      throw new Error('N8N 回非 JSON 格式: ' + txt.slice(0, 200));
+    }
   }
 
   async function loadAll() {
-    document.getElementById('ps-status').textContent = '載入中…';
+    const statusEl = document.getElementById('ps-status');
+    statusEl.textContent = '載入中…';
     // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
     window._routeNamesCache = {};
-    const [staffR, listR] = await Promise.all([
-      api({action: 'get_staff'}),
-      api({action: 'list'})
-    ]);
-    staffList = (staffR.staff || []).map(s => s.name);
-    allRows = listR.rows || [];
-    populateWeekFilter();
-    renderTable();
-    document.getElementById('ps-status').innerHTML =
-      `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+    try {
+      const [staffR, listR] = await Promise.all([
+        api({action: 'get_staff'}),
+        api({action: 'list'})
+      ]);
+      staffList = (staffR.staff || []).map(s => s.name);
+      allRows = listR.rows || [];
+      populateWeekFilter();
+      renderTable();
+      statusEl.innerHTML =
+        `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+    } catch(e) {
+      console.error('[接送排程] 載入失敗:', e);
+      statusEl.innerHTML = '<span style="color:#dc2626">⚠️ 載入失敗：' + (e.message || e) + '</span>';
+      document.getElementById('ps-table-wrap').innerHTML =
+        '<div style="padding:40px;text-align:center">' +
+        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ N8N 接送排程 workflow 異常</div>' +
+        '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + (e.message||e) + '</div>' +
+        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">Endpoint: ' + ROUTE_API + '</div>' +
+        '<button onclick="renderPickupSchedule(document.getElementById(\'content\'))" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
+        '</div>';
+    }
   }
 
   function populateWeekFilter() {
