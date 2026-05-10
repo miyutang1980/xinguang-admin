@@ -10107,6 +10107,7 @@ function _renderClassAssignView(el) {
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">中文姓名</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">英文名</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">班級</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">就讀學校</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">中籍師</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">外籍師</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">家長電話</th>
@@ -10130,6 +10131,7 @@ function _renderClassAssignView(el) {
         <td style="padding:4px 6px"><input data-f="name" value="${_esc(s.name)}" style="width:90px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><input data-f="englishName" value="${_esc(s.englishName)}" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><input data-f="cls" value="${_esc(s.cls)}" placeholder="如: 3A" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="school_name" value="${_esc(s.school_name)}" list="ca_schools_dl" placeholder="例: 新光國小" style="width:110px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><select data-f="teacherCh" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(chTeachers, s.teacherCh)}</select></td>
         <td style="padding:4px 6px"><select data-f="teacherEn" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(enTeachers, s.teacherEn)}</select></td>
         <td style="padding:4px 6px"><input data-f="parentPhone" value="${_esc(s.parentPhone)}" placeholder="09xx-xxx-xxx" style="width:120px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
@@ -10145,7 +10147,8 @@ function _renderClassAssignView(el) {
     <div class="card" style="padding:0;overflow:auto">
       <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
         <thead>${head}</thead>
-        <tbody id="caTbody">${rows || '<tr><td colspan="9" style="padding:40px;text-align:center;color:#999">還沒有學生 ── 點上方「+ 新增學生」開始建檔</td></tr>'}</tbody>
+        <datalist id="ca_schools_dl">${SCHOOLS_LIST.map(sc=>'<option value="'+sc.name+'">').join('')}<option value="幼兒園"><option value="文心國小"><option value="坪林國小"><option value="其他"></datalist>
+        <tbody id="caTbody">${rows || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#999">還沒有學生 ── 點上方「+ 新增學生」開始建檔</td></tr>'}</tbody>
       </table>
     </div>`;
 
@@ -10273,9 +10276,16 @@ async function _caAddNew() {
           </select>
         </div>
       </div>
-      <div style="margin-bottom:12px">
-        <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
-        <input id="caf_note" placeholder="(選填)" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">就讀學校</label>
+          <input id="caf_school_name" list="caf_schools_dl" placeholder="例: 新光國小" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+          <datalist id="caf_schools_dl">${SCHOOLS_LIST.map(s=>'<option value="'+s.name+'">').join('')}<option value="幼兒園"><option value="文心國小"><option value="坪林國小"><option value="其他"></datalist>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
+          <input id="caf_note" placeholder="(選填)" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px">
         <button class="btn btn-outline" onclick="closeModal()">取消</button>
@@ -10308,7 +10318,8 @@ async function _caSubmitNew() {
     note: get('caf_note').trim(),
     parent2Name: get('caf_parent2Name').trim(),
     parent2Phone: (function(){ var p2=get('caf_parent2Phone').trim(); return /^9\d{8}$/.test(p2)?'0'+p2:p2; })(),
-    parent2Relation: get('caf_parent2Relation')
+    parent2Relation: get('caf_parent2Relation'),
+    school_name: get('caf_school_name').trim()
   };
   const res = await _caCallGw('students_create', { fields });
   if (res && res.success) {
@@ -10417,9 +10428,16 @@ async function _caEdit(row_index) {
           <select id="cae_hasNursery" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">${yesNoOpt(s.hasNursery)}</select>
         </div>
       </div>
-      <div style="margin-bottom:12px">
-        <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
-        <input id="cae_note" value="${_esc(s.note)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">就讀學校</label>
+          <input id="cae_school_name" value="${_esc(s.school_name)}" list="cae_schools_dl" placeholder="例: 新光國小" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+          <datalist id="cae_schools_dl">${SCHOOLS_LIST.map(sc=>'<option value="'+sc.name+'">').join('')}<option value="幼兒園"><option value="文心國小"><option value="坪林國小"><option value="其他"></datalist>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;font-weight:600;margin-bottom:4px">備註</label>
+          <input id="cae_note" value="${_esc(s.note)}" style="width:100%;padding:8px 12px;border:1.5px solid #d4d1ca;border-radius:6px;font-size:0.92rem">
+        </div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px">
         <button class="btn btn-outline" onclick="closeModal()">取消</button>
@@ -10453,7 +10471,8 @@ async function _caSubmitEdit(row_index) {
     note: get('cae_note').trim(),
     parent2Name: get('cae_parent2Name').trim(),
     parent2Phone: phone2,
-    parent2Relation: get('cae_parent2Relation')
+    parent2Relation: get('cae_parent2Relation'),
+    school_name: get('cae_school_name').trim()
   };
   const res = await _caCallGw('students_update', { row_index, fields });
   if (res && res.success) {
@@ -10473,6 +10492,7 @@ function _caViewDetail(row_index) {
     ['中文姓名', s.name],
     ['英文名', s.englishName],
     ['班級', s.cls],
+    ['就讀學校', s.school_name],
     ['中籍老師', s.teacherCh],
     ['外籍老師', s.teacherEn],
     ['家長姓名', s.parentName],
