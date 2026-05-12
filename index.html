@@ -2433,6 +2433,7 @@ function showAssessDetail(idx) {
     <div class="detail-row"><div class="detail-label">老師備註</div><div class="detail-val">${r.teacherNote||'—'}</div></div>
     <div class="detail-row"><div class="detail-label">時間</div><div class="detail-val">${r.ts||'—'}</div></div>
     <div class="detail-section">下一步</div>
+    ${r.finalClass ? `<button class="btn" style="background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;padding:8px 18px;font-weight:700;cursor:pointer;margin-right:8px" onclick="closeModal();openTrialBooker(${idx})">📅 預約體驗課</button>` : '<div style="color:#999;font-size:0.85rem;margin-bottom:8px">💡 完成分班後即可預約體驗課</div>'}
     <button class="btn btn-green" onclick="goToRegister(${idx})">→ 建立正式報名</button>
   `;
   document.getElementById('modalOverlay').classList.add('open');
