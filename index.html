@@ -2266,7 +2266,7 @@ function renderAssess(el) {
       <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
-        ${r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>` : ''}
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_assessDelete(${realIdx})" title="刪除這筆檢測紀錄">[X]</button></td>
@@ -2433,7 +2433,11 @@ function showAssessDetail(idx) {
     <div class="detail-row"><div class="detail-label">老師備註</div><div class="detail-val">${r.teacherNote||'—'}</div></div>
     <div class="detail-row"><div class="detail-label">時間</div><div class="detail-val">${r.ts||'—'}</div></div>
     <div class="detail-section">下一步</div>
-    <button class="btn btn-green" onclick="goToRegister(${idx})">→ 建立正式報名</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" style="background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;font-weight:700" onclick="closeModal();openTrialBooker(${idx})">📅 預約體驗課</button>
+      <button class="btn btn-green" onclick="goToRegister(${idx})">→ 直接正式報名</button>
+    </div>
+    <div style="margin-top:10px;color:#9CA3AF;font-size:0.78rem">💡 你可以幫家長選「先試體驗課」或「直接報名」兩條路</div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -2792,25 +2796,30 @@ function renderRegister(el) {
   }).join('');
 }
 
+// v2.18.4: 「手動填」空白表單 (不走分級檢測)
+function openAddRegisterBlank() {
+  // 以空物件模擬 fromAssess · 讓現有 form 邏輯能回用
+  openAddRegister({
+    studentName: '',
+    grade: '',
+    finalClass: '',
+    oralLevel: '',
+    teacherNote: '',
+    _isManual: true
+  });
+}
+
 function openAddRegister(fromAssess) {
-  // 如果不是從檢測帶入，提示需要先完成檢測
+  // v2.18.4: 不再強制需要分級檢測 · 提供「手動填」跳「從檢測選」兩條路
   if(!fromAssess) {
     const d = loadData();
     const assessList = d.assessments || [];
+    // 沒檢測紀錄 → 直接開「空白手動填」表單
     if(assessList.length === 0) {
-      document.getElementById('modalTitle').textContent = '⚠️ 尚無檢測紀錄';
-      document.getElementById('modalBody').innerHTML = `
-        <div style="text-align:center;padding:24px 0">
-          <div style="font-size:2.5rem;margin-bottom:12px">📋</div>
-          <div style="font-weight:700;font-size:1rem;margin-bottom:8px">正式報名前，需先完成「分級檢測」</div>
-          <div style="color:var(--text-muted);font-size:0.88rem;margin-bottom:20px;line-height:1.6">請先到「分級檢測」新增檢測紀錄，<br>完成後再點「→ 報名」就能直接帶入分班結果。</div>
-          <button class="btn btn-green" onclick="closeModal();switchSection('assess')">前往分級檢測 →</button>
-        </div>`;
-      document.getElementById('modalOverlay').classList.add('open');
-      return;
+      return openAddRegisterBlank();
     }
-    // 有檢測紀錄：讓老師選一筆
-    document.getElementById('modalTitle').textContent = '選擇檢測紀錄 → 正式報名';
+    // 有檢測紀錄：讓老師選「從檢測選」或「手動填」
+    document.getElementById('modalTitle').textContent = '選擇報名方式';
     const optRows = assessList.map((a,i) => {
       const hasReg = (d.registrations||[]).some(r => r.studentName === a.studentName && r.assessResult === a.finalClass);
       return `<tr style="${hasReg?'opacity:0.45':'cursor:pointer'}" ${hasReg?'':'onclick="closeModal();openAddRegister(loadData().assessments['+i+'])"'}>
@@ -2821,30 +2830,38 @@ function openAddRegister(fromAssess) {
       </tr>`;
     }).join('');
     document.getElementById('modalBody').innerHTML = `
-      <div style="margin-bottom:12px;color:var(--text-muted);font-size:0.85rem;line-height:1.6">正式報名需有檢測紀錄，請選擇要報名的學生：</div>
+      <div style="margin-bottom:12px;color:var(--text-muted);font-size:0.85rem;line-height:1.6">選「從檢測選」會自動帶入分班結果；選「手動填」就以空白表單開始。</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn btn-green" style="flex:1" onclick="closeModal();openAddRegisterBlank()">✏️ 手動填寫 (不走檢測)</button>
+        <button class="btn btn-outline" style="flex:1" onclick="closeModal();switchSection('assess')">＋ 新增檢測紀錄</button>
+      </div>
+      <div style="font-size:0.82rem;color:#6B7280;margin-bottom:6px">或選擇現有檢測紀錄:</div>
       <table class="data-table" style="font-size:0.85rem">
         <thead><tr><th>學生</th><th>年級</th><th>分班</th><th>口說</th><th></th></tr></thead>
         <tbody>${optRows}</tbody>
-      </table>
-      <div style="margin-top:16px;text-align:center">
-        <button class="btn btn-outline" style="font-size:0.82rem" onclick="closeModal();switchSection('assess')">＋ 新增檢測紀錄</button>
-      </div>`;
+      </table>`;
     document.getElementById('modalOverlay').classList.add('open');
     return;
   }
 
   document.getElementById('modalTitle').textContent = '新增正式報名';
   document.getElementById('modalBody').innerHTML = `
+    ${fromAssess._isManual ? `
+    <div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:0.85rem;color:#92400E">
+      ✏️ <strong>手動填寫模式</strong> · 沒走分級檢測, 請填下方資料
+    </div>
+    ` : `
     <div style="background:var(--green-light);border:1px solid var(--green);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:0.85rem">
       <strong>📊 檢測結果：</strong>${fromAssess.studentName||'—'}（${fromAssess.grade||'—'}）→ 分班 <strong style="color:var(--green)">${fromAssess.finalClass||'—'}</strong>　口說 ${fromAssess.oralLevel||'—'}
     </div>
+    `}
     <div class="detail-section">家長 & 學生資料</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">家長姓名 *</label><input type="text" id="reg_parent" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">電話 *</label><input type="tel" id="reg_phone" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">Email</label><input type="email" id="reg_email" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">LINE ID</label><input type="text" id="reg_line" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
-      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">學生姓名 *</label><input type="text" id="reg_student" value="${fromAssess.studentName||''}" readonly style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:var(--surface)"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">學生姓名 *</label><input type="text" id="reg_student" value="${fromAssess.studentName||''}" ${fromAssess._isManual?'':'readonly'} placeholder="請填學生姓名" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;${fromAssess._isManual?'':'background:var(--surface)'}"></div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">年級</label>
         <select id="reg_grade" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">
           <option value="">請選擇</option>
@@ -2860,7 +2877,7 @@ function openAddRegister(fromAssess) {
           ${['浸潤班','菁英班','全民英檢班','安親課輔班','托育班'].map(c=>`<option>${c}</option>`).join('')}
         </select>
       </div>
-      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果</label><input type="text" id="reg_assess" value="${fromAssess.finalClass||''}" readonly style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:var(--surface)"></div>
+      <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果${fromAssess._isManual?' <small style="color:#9CA3AF;font-weight:400">(可以留空)</small>':''}</label><input type="text" id="reg_assess" value="${fromAssess.finalClass||''}" ${fromAssess._isManual?'':'readonly'} placeholder="例: G2A" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;${fromAssess._isManual?'':'background:var(--surface)'}"></div>
       <div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">預計開始日期</label><input type="date" id="reg_start" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>
     </div>
     <div style="margin-bottom:16px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">備註</label><textarea id="reg_note" rows="3" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;resize:vertical">${fromAssess.teacherNote||''}</textarea></div>
