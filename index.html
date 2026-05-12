@@ -2266,6 +2266,7 @@ function renderAssess(el) {
       <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
+        ${!r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FEF3C7;border:1.5px solid #F59E0B;color:#92400E;border-radius:6px;cursor:pointer;font-weight:700" onclick="openQuickAssign(${realIdx})" title="補分班結果">✏️ 補分班</button>` : ''}
         <button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
@@ -2794,6 +2795,64 @@ function renderRegister(el) {
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('registrations',${realIdx})" title="刪除這筆正式報名">❌</button></td>
     </tr>`;
   }).join('');
+}
+
+// v2.18.5: 補分班 (者 finalClass 空的檢測紀錄)
+function openQuickAssign(idx) {
+  var d = loadData();
+  var r = d.assessments[idx];
+  if (!r) return;
+  var levels = ['SA','SB','SC','1A','1B','1C','1D','2A','2B','2C','2D','3A','3B','3C','3D','4A','4B','4C','4D'];
+  document.getElementById('modalTitle').textContent = '✏️ 補分班 · ' + (r.studentName || '');
+  document.getElementById('modalBody').innerHTML = `
+    <div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem;color:#92400E">
+      這筆檢測還沒填分班結果, 請選一個對应班。
+    </div>
+    <div style="margin-bottom:14px;font-size:0.85rem;color:#374151">
+      <strong>學生:</strong> ${(r.studentName||'—')} · <strong>年級:</strong> ${(r.grade||'—')} · <strong>口說:</strong> ${(r.oralLevel||'—')} · <strong>筆試:</strong> ${(r.writtenPaper||'—')}/${(r.writtenScore||'—')}
+    </div>
+    <label style="font-size:0.85rem;font-weight:700;display:block;margin-bottom:6px">分班結果 *</label>
+    <select id="qa_final_class" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:7px;font-size:0.95rem;background:#fff;margin-bottom:14px">
+      <option value="">請選擇</option>
+      ${levels.map(function(l){ return '<option value="'+l+'">'+l+'</option>'; }).join('')}
+    </select>
+    <label style="font-size:0.85rem;font-weight:700;display:block;margin-bottom:6px">老師備註追加 (選填)</label>
+    <textarea id="qa_note" rows="2" placeholder="例: 口說匯認, 但閱讀拍意" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;margin-bottom:14px">${r.teacherNote||''}</textarea>
+    <button class="btn btn-green" style="width:100%" onclick="saveQuickAssign(${idx})">儲存分班結果</button>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function saveQuickAssign(idx) {
+  var d = loadData();
+  var r = d.assessments[idx];
+  if (!r) return;
+  var fc = (document.getElementById('qa_final_class')||{}).value;
+  if (!fc) { alert('請選一個分班結果'); return; }
+  var note = (document.getElementById('qa_note')||{}).value || r.teacherNote || '';
+  if (!r.row_index) {
+    alert('這筆資料可能是舊本機資料 · 請先「重新載入」再補分班');
+    return;
+  }
+  try {
+    var res = await _assessCallGw('assess_update', {
+      row_index: r.row_index,
+      fields: { finalClass: fc, teacherNote: note }
+    });
+    if (!res || !res.success) {
+      alert('儲存失敗: ' + (res && res.error));
+      return;
+    }
+    r.finalClass = fc;
+    r.teacherNote = note;
+    saveData(d);
+    closeModal();
+    showToast('✅ 已分班: ' + fc);
+    if (typeof _assessRefresh === 'function') await _assessRefresh();
+    renderAssess(document.getElementById('mainContent'));
+  } catch (e) {
+    alert('儲存失敗: ' + e.message);
+  }
 }
 
 // v2.18.4: 「手動填」空白表單 (不走分級檢測)
