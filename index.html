@@ -1230,6 +1230,29 @@ function renderDashboard(el) {
   const pending_camp    = d.camp.filter(r=>r.status==='待確認').length;
   const pending_assess  = d.assessments.filter(r=>!r.finalClass).length;
 
+  // 體驗課轉換漏斗 KPI（PRD §7）
+  const _isTrial = b => b.bookingType==='trial' || String(b.type||'').includes('體驗');
+  const _trialBookings = (d.bookings||[]).filter(_isTrial);
+  const _trialBooked   = _trialBookings.filter(b => b.status!=='已取消').length;
+  const _trialCompleted = _trialBookings.filter(b => b.status==='已完成').length;
+  const _trialNoShow   = _trialBookings.filter(b => b.status==='未到' || b.status==='no_show').length;
+  const _assessDone    = (d.assessments||[]).length;
+  const _bookingRate   = _assessDone>0 ? Math.round(_trialBooked / _assessDone * 100) : 0;
+  // 已報名且曾完成體驗的學生數（依姓名比對）
+  const _completedTrialStudents = _trialBookings
+    .filter(b => b.status==='已完成')
+    .map(b => b.child || b.student)
+    .filter(Boolean);
+  const _convertedSet = new Set(
+    (d.registrations||[])
+      .map(r => r.student || r.child || r.studentName)
+      .filter(Boolean)
+  );
+  const _converted = _completedTrialStudents.filter(s => _convertedSet.has(s)).length;
+  const _convRate  = _trialCompleted>0 ? Math.round(_converted / _trialCompleted * 100) : 0;
+  const _directReg = _assessDone>0 ? Math.round(((d.registrations||[]).length - _converted) / _assessDone * 100) : 0;
+  const _noShowRate = _trialBookings.length>0 ? Math.round(_trialNoShow / _trialBookings.length * 100) : 0;
+
   el.innerHTML = `
     <div class="stat-grid">
       <div class="stat-card" style="border-left:4px solid var(--green)">
@@ -1256,6 +1279,36 @@ function renderDashboard(el) {
         <div class="num" style="color:#10B981">${d.registrations.length}</div>
         <div class="label">🎓 正式報名</div>
         <div class="sub">${d.registrations.filter(r=>r.status==='待處理').length} 筆待處理</div>
+      </div>
+    </div>
+
+    <!-- 體驗課轉換漏斗 KPI（PRD §7） -->
+    <div style="margin-top:20px;margin-bottom:10px;font-size:0.95rem;font-weight:800;color:#374151">🎯 體驗課轉換漏斗</div>
+    <div class="stat-grid">
+      <div class="stat-card" style="border-left:4px solid #E8863A" title="預約體驗 ÷ 完成檢測。目標 > 40%">
+        <div class="num" style="color:#E8863A">${_bookingRate}%</div>
+        <div class="label">📅 體驗課預約率</div>
+        <div class="sub">${_trialBooked} / ${_assessDone}（目標 >40%）</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid #10B981" title="完成體驗後報名 ÷ 完成體驗。目標 > 60%">
+        <div class="num" style="color:#10B981">${_convRate}%</div>
+        <div class="label">🎯 體驗→報名轉換率</div>
+        <div class="sub">${_converted} / ${_trialCompleted}（目標 >60%）</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid #6366F1" title="不經體驗直接報名 ÷ 完成檢測">
+        <div class="num" style="color:#6366F1">${_directReg}%</div>
+        <div class="label">⚡ 直接報名率</div>
+        <div class="sub">${Math.max(0,(d.registrations.length - _converted))} 人不經體驗即報名</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid #DC2626" title="未到 ÷ 已預約。目標 < 10%">
+        <div class="num" style="color:#DC2626">${_noShowRate}%</div>
+        <div class="label">❌ No-show 率</div>
+        <div class="sub">${_trialNoShow} / ${_trialBookings.length}（目標 <10%）</div>
+      </div>
+      <div class="stat-card" style="border-left:4px solid #0EA5E9" title="已完成體驗課的人數">
+        <div class="num" style="color:#0EA5E9">${_trialCompleted}</div>
+        <div class="label">✅ 已完成體驗</div>
+        <div class="sub">累計 ${_trialCompleted} 位學生</div>
       </div>
     </div>
     <div class="table-wrap">
@@ -1488,16 +1541,18 @@ async function renderBooking(el) {
     const status=r.status||'待確認';
     const bc=status==='待確認'?'badge-pending':status==='已確認'?'badge-contacted':status==='已完成'?'badge-arranged':'badge-cancelled';
     const realIdx=rows.indexOf(r);
+    // 體驗課預約寫入時 bookingType='trial'，前端顯示為「課程體驗」
+    const displayType = r.bookingType === 'trial' ? '課程體驗' : (r.bookingType || '—');
     const typeColor={
       '參訪校區':'#DBEAFE','英文程度檢測':'#EDE9FE','課程體驗':'#D1FAE5',
       '參訪校區 + 英文程度檢測':'#FEF3C7'
-    }[r.bookingType]||'#F0F4F8';
+    }[displayType]||'#F0F4F8';
     return `<tr>
       <td>${realIdx+1}</td>
       <td>${(r.ts||'').substring(0,16)}</td>
       <td><strong>${r.parent||'—'}</strong></td>
       <td>${r.phone||'—'}</td>
-      <td><span style="background:${typeColor};padding:2px 8px;border-radius:50px;font-size:0.75rem">${r.bookingType||'—'}</span></td>
+      <td><span style="background:${typeColor};padding:2px 8px;border-radius:50px;font-size:0.75rem">${displayType}</span>${r.trialClassLabel?`<div style="font-size:0.7rem;color:#6B7280;margin-top:2px">${r.trialClassLabel}</div>`:''}</td>
       <td>${r.date||'—'}</td>
       <td>${r.slot||'—'}</td>
       <td>${r.child||'—'}</td>
@@ -2266,7 +2321,16 @@ function renderAssess(el) {
       <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
-        ${r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>` : ''}
+        ${(()=>{ 
+          if(!r.finalClass) return '';
+          // 檢查是否已預約過體驗課（依學生姓名 + 檢測時間比對 bookings）
+          const _all = (loadData().bookings||[]);
+          const _booked = _all.find(b => (b.bookingType==='trial' || String(b.type||'').includes('體驗')) && (b.child===r.studentName || b.student===r.studentName) && (b.status!=='已取消'));
+          if(_booked){
+            return `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#F3F4F6;border:1.5px solid #9CA3AF;color:#374151;border-radius:6px;cursor:pointer" onclick="switchSection('booking')" title="已預約：${_booked.date||''} ${_booked.slot||''}">✓ 已預約 ${(_booked.date||'').substring(5)||''}</button>`;
+          }
+          return `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>`;
+        })()}
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_assessDelete(${realIdx})" title="刪除這筆檢測紀錄">[X]</button></td>
