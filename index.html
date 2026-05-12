@@ -8100,6 +8100,12 @@ async function _pickupCallGateway(originalUrl, payload) {
       gwBody._action = 'routes_hard_delete';
       gwBody.row_index = payload.row_index;
     }
+    else if (n8nAction === 'copy_week') {
+      gwBody._action = 'routes_copy_week';
+      gwBody.src_monday = payload.src_monday;
+      gwBody.dst_monday = payload.dst_monday;
+      gwBody.mode = payload.mode || 'skip';
+    }
     else throw new Error('unknown route-schedule action: ' + n8nAction);
   }
   // 接送明細 /admin/pickup-details
@@ -9247,39 +9253,54 @@ async function renderPickupSchedule(el) {
     await loadAll();  // 再重讀、讓名單重新顯示
   }
 
-  // ─── A3: 複製整週 (原本版) ───
+  // ─── A3: 複製整週 (v2.18.7: 改用 Gateway routes_copy_week + 覆蓋選項) ───
   document.getElementById('ps-copy-week').onclick = async () => {
     const srcMon = prompt('來源週次(週一日期, YYYY-MM-DD)?', document.getElementById('ps-filter-week').value || '');
     if (!srcMon || !/^\d{4}-\d{2}-\d{2}$/.test(srcMon)) return;
     const dstMon = prompt('目標週次(週一日期, YYYY-MM-DD)?', '');
     if (!dstMon || !/^\d{4}-\d{2}-\d{2}$/.test(dstMon)) return;
-    const srcD = new Date(srcMon + 'T00:00:00');
+    if (srcMon === dstMon) { alert('來源與目標同週'); return; }
+
+    // 檢查目標週是否已有資料
     const dstD = new Date(dstMon + 'T00:00:00');
-    const offset = Math.round((dstD - srcD) / 86400000);
-    if (offset === 0) { alert('來源與目標同週'); return; }
-    const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
-    const newRows = [];
-    allRows.forEach(r => {
+    const existingDst = allRows.filter(r => {
       const rd = new Date(r.date + 'T00:00:00');
-      if (rd < srcD || rd > new Date(srcD.getTime() + 4*86400000)) return;
-      const newD = new Date(rd.getTime() + offset*86400000);
-      const newDate = _localDateStr(newD);
-      if (allRows.some(x => x.date === newDate && x.route === r.route)) return; // 已存在跳過
-      newRows.push({row_index:99999, fields:{
-        date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
-        noon_vehicle:r.noon_vehicle||'', noon_driver:r.noon_driver||'', noon_driver2:r.noon_driver2||'',
-        noon_school:r.noon_school||'', noon_count:String(r.noon_count||''), noon_time:r.noon_time||'',
-        pm_vehicle:r.pm_vehicle||'', pm_driver:r.pm_driver||'', pm_driver2:r.pm_driver2||'',
-        pm_school:r.pm_school||'', pm_count:String(r.pm_count||''), pm_time:r.pm_time||'',
-        remark:r.remark||''
-      }});
+      return rd >= dstD && rd <= new Date(dstD.getTime() + 4*86400000);
     });
-    if (newRows.length === 0) { alert('來源週無資料 或 目標週已存在'); return; }
-    if (!confirm('將複製 ' + newRows.length + ' 筆排班到 ' + dstMon + ' 那週，確定?')) return;
+
+    let mode = 'skip';
+    if (existingDst.length > 0) {
+      const choice = prompt(
+        '⚠️ 目標週 ' + dstMon + ' 已有 ' + existingDst.length + ' 條資料。\n\n' +
+        '請選擇如何處理:\n' +
+        '  輸入 1 = 強制覆蓋 (先刪目標週再複)\n' +
+        '  輸入 2 = 只補上沒的 (保留舊資料)\n' +
+        '  輸入 3 或取消 = 取消',
+        '1'
+      );
+      if (!choice || choice === '3') return;
+      if (choice === '1') mode = 'overwrite';
+      else if (choice === '2') mode = 'skip';
+      else { alert('取消'); return; }
+    }
+
+    if (mode === 'overwrite') {
+      if (!confirm('即將刪除目標週 ' + dstMon + ' 的 ' + existingDst.length + ' 條舊資料, 並從 ' + srcMon + ' 複製一份, 確定?')) return;
+    } else {
+      if (!confirm('將複製 ' + srcMon + ' 週 → ' + dstMon + ' 週 (mode=' + mode + '), 確定?')) return;
+    }
+
     document.getElementById('ps-status').textContent = '複製中…';
-    const r = await api({action:'append', rows:newRows});
-    if (r && r.success) { showToast('✅ 已複製 ' + newRows.length + ' 筆'); await loadAll(); }
-    else alert('複製失敗: ' + ((r&&r.error)||'未知錯誤'));
+    const r = await api({ action: 'copy_week', src_monday: srcMon, dst_monday: dstMon, mode: mode });
+    if (r && r.success) {
+      var msg = '✅ 複製完成 · 新增 ' + r.inserted + ' 筆';
+      if (r.deleted > 0) msg += ' · 刪舊 ' + r.deleted + ' 筆';
+      if (r.skipped > 0) msg += ' · 跳過 ' + r.skipped + ' 筆(已存在)';
+      showToast(msg);
+      await loadAll();
+    } else {
+      alert('複製失敗: ' + ((r && r.error) || '未知錯誤'));
+    }
   };
 
   // ─── A4: 整週設休 ───
