@@ -2213,12 +2213,25 @@ function showCampChangeModal(idx, action){
 }
 
 // ── 分級檢測 ──────────────────────────────────────────────
+var _assessLastRefresh = 0;
 function renderAssess(el) {
   const d = loadData();
   const rows = d.assessments;
+  // v2.18.3: 背景重拉 (限制 30 秒一次, 避免無限循環)
+  var now = Date.now();
+  if (typeof _assessRefresh === 'function' && (now - _assessLastRefresh) > 30000) {
+    _assessLastRefresh = now;
+    _assessRefresh().then(function() {
+      var content = document.getElementById('mainContent');
+      if (content && content.querySelector('#assessTbody')) {
+        renderAssess(content); // 下一次 (_assessLastRefresh 柢未逾 30s 會跳過)
+      }
+    });
+  }
   el.innerHTML = `
     <div style="margin-bottom:16px;display:flex;gap:10px">
       <button class="btn btn-green" onclick="openAddAssess()">＋ 新增檢測紀錄</button>
+      <button class="btn" style="background:#fff;border:1.5px solid #d4d1ca" onclick="_assessManualRefresh()">🔄 重新載入</button>
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
@@ -2330,13 +2343,31 @@ function autoCalcClass() {
   sel.value = result;
 }
 
-function saveAssessment() {
+// v2.18.3: 分級檢測走 Gateway helper
+async function _assessCallGw(action, extra) {
+  var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+  var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+  var body = Object.assign({
+    _action: action,
+    adminUser: u.username || 'admin',
+    adminPass: pwd
+  }, extra || {});
+  var res = await fetch(GW_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(body),
+    redirect: 'follow'
+  });
+  var txt = await res.text();
+  if (!txt || !txt.trim()) throw new Error('Gateway empty body');
+  return JSON.parse(txt);
+}
+
+async function saveAssessment() {
   const name = (document.getElementById('as_name')||{}).value||'';
   const grade = (document.getElementById('as_grade')||{}).value||'';
   if(!name||!grade){alert('請填寫學生姓名和年級');return;}
-  const data = loadData();
-  data.assessments.push({
-    ts: new Date().toLocaleString('zh-TW'),
+  const fields = {
     studentName: name,
     grade: grade,
     oralLevel: (document.getElementById('as_oral_level')||{}).value||'',
@@ -2345,12 +2376,44 @@ function saveAssessment() {
     writtenPaper:(document.getElementById('as_written_paper')||{}).value||'',
     writtenScore:(document.getElementById('as_written_score')||{}).value||'',
     finalClass: (document.getElementById('as_final_class')||{}).value||'',
-    teacherNote:(document.getElementById('as_note')||{}).value||'',
-  });
-  saveData(data);
-  closeModal();
-  showToast('✅ 檢測紀錄已儲存');
+    teacherNote:(document.getElementById('as_note')||{}).value||''
+  };
+  try {
+    const r = await _assessCallGw('assess_create', { fields });
+    if (!r || !r.success) throw new Error((r && r.error) || 'unknown');
+    // 同步本地記憶 (闋在 _DB 中以即時重繪)
+    const data = loadData();
+    data.assessments.push(Object.assign({ ts: r.ts, row_index: r.row_index }, fields));
+    saveData(data);
+    closeModal();
+    showToast('✅ 檢測紀錄已同步 (row ' + r.row_index + ')');
+    // 重拉雲端資料 · 保證其他人也看到
+    if (typeof _assessRefresh === 'function') await _assessRefresh();
+    renderAssess(document.getElementById('mainContent'));
+  } catch (e) {
+    alert('儲存失敗: ' + e.message);
+  }
+}
+
+// 從 Gateway 重拉 assessments 到 _DB
+async function _assessRefresh() {
+  try {
+    const r = await _assessCallGw('assess_list');
+    if (r && r.success && Array.isArray(r.list)) {
+      const d = loadData();
+      d.assessments = r.list;
+      saveData(d);
+    }
+  } catch(e) { console.error('[assess] refresh err:', e); }
+}
+
+// 手動重拉 (隷「重新載入」按鈕用) · 不受 30s rate limit
+async function _assessManualRefresh() {
+  showToast('⏳ 重拉中…');
+  _assessLastRefresh = Date.now();
+  await _assessRefresh();
   renderAssess(document.getElementById('mainContent'));
+  showToast('✅ 已同步雲端');
 }
 
 function showAssessDetail(idx) {
@@ -7886,28 +7949,29 @@ function _importClassesJson(){
 }
 
 // 分級檢測 軟刪 / 硬刪
+// v2.18.3: 走 Gateway · 唯一一個是「永久刪除 (全人均看不到)」
 async function _assessDelete(idx) {
   var d = loadData();
   var r = d.assessments[idx];
   if (!r) return;
   var name = r.studentName || '（無姓名）';
-  var choice = await _confirmDialog({
-    title: '刪除檢測紀錄：' + name,
-    message: '請選擇刪除方式：',
-    options: [
-      { label: '軟刪除（隱藏，可回復）', value: 'soft', color: '#0EA5E9' },
-      { label: '硬刪除（從本機永久移除）', value: 'hard', color: '#DC2626' },
-      { label: '取消', value: '', color: '#6B7280' }
-    ]
-  });
-  if (!choice) return;
-  if (choice === 'hard') {
-    // 一鍵刪除，不再要打名字。上層已評 confirm。
+  if (!confirm('刪除檢測紀錄：' + name + ' ?\n\n永久刪除、無法復原。\n刪除後所有人都看不到這筆記錄。')) return;
+  try {
+    var rowIdx = r.row_index;
+    if (!rowIdx) {
+      alert('這筆資料可能是舊本機資料 · 請先「從 Google Sheets 同步」再刪');
+      return;
+    }
+    var res = await _assessCallGw('assess_delete', { row_index: rowIdx });
+    if (!res || !res.success) { alert('刪除失敗: ' + (res && res.error)); return; }
+    d.assessments.splice(idx, 1);
+    saveData(d);
+    showToast('✅ 已永久刪除 (row ' + rowIdx + ')');
+    if (typeof _assessRefresh === 'function') await _assessRefresh();
+    renderAssess(document.getElementById('mainContent'));
+  } catch (e) {
+    alert('刪除失敗: ' + e.message);
   }
-  d.assessments.splice(idx, 1);
-  saveData(d);
-  showToast('已' + (choice==='soft'?'軟':'硬') + '刪除');
-  renderAssess(document.getElementById('mainContent'));
 }
 
 // v2.17: 全部接送相關呼叫都走 Gateway, action 名稱手動 mapping
