@@ -2616,10 +2616,31 @@ function _pickTrialBookerDate(date) {
     const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
     return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === date;
   }));
-  // 過濾出 finalClass 對應的優先（例如分班是 3A 就只顯示 3A）
+  // v2.18.9 三層推薦邏輯:
+  //   ⭐ 推薦 = 完全符合 (1A=1A)
+  //   🆗 相近 = 同階不同 AB (1A↛1B) 或 同 AB 差一階 (1A↛2A)
+  //   其他 = 剩的
   const fc = (_trialBookerState.finalClass || '').toUpperCase().trim();
-  const recommended = dayClasses.filter(c => (c.level||'').toUpperCase() === fc);
-  const others = dayClasses.filter(c => (c.level||'').toUpperCase() !== fc);
+  function _parseLevel(lv) {
+    var m = String(lv||'').toUpperCase().match(/^(\d+)([AB])?$/);
+    return m ? { num: parseInt(m[1],10), ab: m[2]||'' } : null;
+  }
+  const fcP = _parseLevel(fc);
+  function _matchTier(cLevel) {
+    var lv = String(cLevel||'').toUpperCase().trim();
+    if (lv === fc) return 'exact';
+    if (!fcP) return 'other';
+    var cP = _parseLevel(lv);
+    if (!cP) return 'other';
+    // 同階不同 AB (1A ↔ 1B)
+    if (cP.num === fcP.num && cP.ab !== fcP.ab) return 'similar';
+    // 同 AB上一階或下一階 (1A ↔ 2A)
+    if (cP.ab === fcP.ab && Math.abs(cP.num - fcP.num) === 1) return 'similar';
+    return 'other';
+  }
+  const recommended = dayClasses.filter(c => _matchTier(c.level) === 'exact');
+  const similar     = dayClasses.filter(c => _matchTier(c.level) === 'similar');
+  const others      = dayClasses.filter(c => _matchTier(c.level) === 'other');
 
   const wrap = document.getElementById('tbSlotsWrap');
   wrap.style.display = 'block';
@@ -2653,11 +2674,19 @@ function _pickTrialBookerDate(date) {
     html += '<div style="font-size:0.82rem;color:#16A34A;font-weight:700;margin-bottom:6px">⭐ 推薦：對應 ' + fc + ' 分班</div>' +
             recommended.map(c => classCard(c, true)).join('');
   }
+  if (similar.length) {
+    html += '<div style="font-size:0.82rem;color:#0EA5E9;font-weight:700;margin:10px 0 6px">🆗 相近階段 (同階不同班 或 上下一階)</div>' +
+            similar.map(c => classCard(c, false)).join('');
+  }
   if (others.length) {
-    html += '<div style="font-size:0.82rem;color:#6B7280;font-weight:700;margin:10px 0 6px">其他可選班次</div>' +
+    html += '<div style="font-size:0.82rem;color:#6B7280;font-weight:700;margin:10px 0 6px">其他可選班次 (跨階段、需老師評估)</div>' +
             others.map(c => classCard(c, false)).join('');
   }
   if (!html) html = '<div style="color:#9CA3AF;text-align:center;padding:20px">這天無可體驗班次</div>';
+  // 變颜的提示 (沒推薦但有其他選項 → 呆醒老師)
+  if (!recommended.length && (similar.length || others.length) && fc) {
+    html = '<div style="background:#FEF3C7;border:1px solid #F59E0B;padding:10px 12px;border-radius:8px;margin-bottom:10px;font-size:0.82rem;color:#92400E">⚠️ 這天沒有 <b>' + fc + '</b> 班開課 · 請由老師評估下方班級是否適合</div>' + html;
+  }
   document.getElementById('tbSlotsList').innerHTML = html;
 }
 
