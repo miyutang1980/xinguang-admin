@@ -2529,7 +2529,28 @@ async function openTrialBooker(assessIdx) {
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
 
-  // 拉班表 + 已預約清單
+  // v2.18.10 拉班表 + 已預約清單 · 先讀 localStorage cache 讓畫面立刻顯示
+  let usedCache = false;
+  try {
+    const lcKey = 'xg_trial_classes_cache';
+    const lcBkKey = 'xg_trial_bookings_cache';
+    const lcTs = parseInt(localStorage.getItem(lcKey + '_ts') || '0', 10);
+    // 5 分鐘內的 cache 立刻使用 (不等 API)
+    if (lcTs && (Date.now() - lcTs) < 5 * 60 * 1000) {
+      try {
+        const cc = JSON.parse(localStorage.getItem(lcKey) || '[]');
+        const bb = JSON.parse(localStorage.getItem(lcBkKey) || '[]');
+        if (cc.length) {
+          _trialBookerState.classes = cc;
+          _trialBookerState.bookings = bb;
+          _renderTrialBookerCal();
+          usedCache = true;
+        }
+      } catch(e) {}
+    }
+  } catch(e) {}
+
+  // 背景拉最新資料 (有 cache 就不互動卡住、沒 cache 才顯示載入中)
   try {
     const [classesResp, bookingsResp] = await Promise.all([
       fetch(GW_URL + '?action=trialClasses').then(r=>r.json()),
@@ -2538,8 +2559,17 @@ async function openTrialBooker(assessIdx) {
     _trialBookerState.classes = classesResp.classes || [];
     _trialBookerState.bookings = bookingsResp.bookings || [];
     _renderTrialBookerCal();
+    // 寫回 localStorage
+    try {
+      localStorage.setItem('xg_trial_classes_cache', JSON.stringify(_trialBookerState.classes));
+      localStorage.setItem('xg_trial_bookings_cache', JSON.stringify(_trialBookerState.bookings));
+      localStorage.setItem('xg_trial_classes_cache_ts', String(Date.now()));
+    } catch(e) {}
   } catch(e) {
-    document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">❌ 載入班表失敗：' + e.message + '</div>';
+    if (!usedCache) {
+      document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">❌ 載入班表失敗：' + e.message + '</div>';
+    }
+    // 有 cache 就静默 fallback,不破壞畫面
   }
 }
 
