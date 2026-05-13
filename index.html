@@ -9419,17 +9419,20 @@ async function renderPickupSchedule(el) {
 async function renderPickupToday(el) {
   el.innerHTML = '<div class="card" style="padding:24px;text-align:center;color:#888">載入中...</div>';
   try {
+    // v2.18.9: 改走 _pickupCall 轉接 Gateway (舊 N8N webhook 已棄用)
     var ROUTE_API_T = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
     var auth = JSON.parse(sessionStorage.getItem('user') || '{}');
     var auth_payload = { admin_username: auth.username || 'admin', admin_role: auth.role || 'admin' };
-    var listResp = await fetch(ROUTE_API_T, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(Object.assign({action:'list'}, auth_payload))
-    });
-    var listJson = await listResp.json();
+    var listJson = await _pickupCall(ROUTE_API_T, Object.assign({action:'list'}, auth_payload));
     var allRows = listJson.rows || [];
-    var reqResp = await _pickupCall(PICKUP_API.requests, _adminPayload({ action:'list', filter:'all' }));
-    var requests = reqResp.requests || [];
+    var requests = [];
+    try {
+      var reqResp = await _pickupCall(PICKUP_API.requests, _adminPayload({ action:'list', filter:'all' }));
+      requests = reqResp.requests || [];
+    } catch (e2) {
+      // 轉交申請 endpoint 還未完成到 Gateway,失敗不打斷今日接送
+      console.warn('[今日接送] 轉交申請讀取失敗:', e2.message);
+    }
     el.innerHTML = _renderTodayUI(allRows, requests);
   } catch (e) {
     el.innerHTML = '<div class="card" style="padding:24px;color:#c00">載入失敗：' + (e.message||e) + '</div>';
