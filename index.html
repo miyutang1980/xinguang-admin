@@ -8598,54 +8598,129 @@ function _renderRouteStudentNames(r){
   return '';
 }
 
-// 背景 lazy-load：v2.18.8 改並行批次 (4 個/一批) + 批完後一次重繪多個 cell
+// 背景 lazy-load：v2.18.9 改一次 batch call
+// 1. localStorage 存取 cache (下次開頁面立刻顯示)
+// 2. 1 次 Apps Script call 拿所有 rows (以前 26 次 → 1 次)
+// 3. 一次 requestAnimationFrame 全重繪
 async function _hydrateRouteNames(rowsToHydrate, authPayload) {
-  // 准备任務列表 (只看需要讀的 cell)
-  const tasks = [];
+  // 0. 先讀 localStorage
+  if (!window._routeNamesLocalLoaded) {
+    try {
+      const lc = JSON.parse(localStorage.getItem('xg_route_names_cache') || '{}');
+      const ts = parseInt(localStorage.getItem('xg_route_names_cache_ts') || '0', 10);
+      // localStorage cache 30 分鐘有效 (避免老資料)
+      if (ts && (Date.now() - ts) < 30 * 60 * 1000) {
+        Object.keys(lc).forEach(rid => {
+          if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = lc[rid];
+        });
+        // 立刻重繪一次,讓使用者看到快取名單
+        _rehydrateRouteCells(rowsToHydrate);
+      }
+    } catch(e) {}
+    window._routeNamesLocalLoaded = true;
+  }
+
+  // 1. 看哪些 row 還沒名單
+  const ridsToFetch = [];
   for (const r of rowsToHydrate) {
     const rid = r.row_index;
     const noonN = parseInt(r.noon_count, 10) || 0;
     const pmN = parseInt(r.pm_count, 10) || 0;
     if (noonN === 0 && pmN === 0) continue;
     if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = {};
-    if (noonN > 0 && !Array.isArray(window._routeNamesCache[rid].noon)) tasks.push({r, rid, session: 'noon'});
-    if (pmN > 0 && !Array.isArray(window._routeNamesCache[rid].pm)) tasks.push({r, rid, session: 'pm'});
+    const needNoon = noonN > 0 && !Array.isArray(window._routeNamesCache[rid].noon);
+    const needPm = pmN > 0 && !Array.isArray(window._routeNamesCache[rid].pm);
+    if (needNoon || needPm) ridsToFetch.push(rid);
   }
-  if (tasks.length === 0) return;
+  if (ridsToFetch.length === 0) return;
 
-  // 並行批次跱 (一次 4 個 request,避免 Apps Script rate limit)
-  const CONCURRENCY = 4;
-  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-    const batch = tasks.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async (t) => {
-      try {
-        const detail = await _getRouteDetails(t.rid, t.session, authPayload);
+  // 2. 一次 batch call
+  try {
+    var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
+    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        _action: 'routes_get_details_batch',
+        adminUser: u.username || 'admin',
+        adminPass: pwd,
+        schedule_rows: ridsToFetch
+      }),
+      redirect: 'follow'
+    });
+    const r = await res.json();
+    const details = (r && r.details) || {};
+    // details = { "<rid>:noon": [{school_name, student_names:[]}], "<rid>:pm": [...] }
+    ridsToFetch.forEach(rid => {
+      ['noon', 'pm'].forEach(session => {
+        const key = rid + ':' + session;
+        const arr = details[key];
         const names = [];
-        (detail.details || []).forEach(d => {
-          (d.student_names || []).forEach(n => names.push(n));
-        });
-        window._routeNamesCache[t.rid][t.session] = names;
-      } catch (e) {
-        window._routeNamesCache[t.rid][t.session] = [];
-      }
-    }));
-    // 一批完成 → 一次重繪這批 cells (减少 layout thrash)
-    requestAnimationFrame(() => {
-      batch.forEach(t => {
-        const cellAttr = t.session === 'noon' ? 'data-noon-cell' : 'data-pm-cell';
-        const td = document.querySelector('#ps-table-wrap td[' + cellAttr + '="' + t.rid + '"]');
-        if (!td) return;
-        const old = td.querySelector('[data-stu-names]');
-        if (old) old.remove();
-        const html = _renderSessionNames(t.r, t.session);
-        if (html) {
-          const tmp = document.createElement('div');
-          tmp.innerHTML = html;
-          if (tmp.firstElementChild) td.appendChild(tmp.firstElementChild);
+        if (Array.isArray(arr)) {
+          arr.forEach(d => (d.student_names || []).forEach(n => names.push(n)));
         }
+        if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = {};
+        // 沒資料也寫 [],不要重複 fetch
+        window._routeNamesCache[rid][session] = names;
       });
     });
+    // 3. 寫 localStorage
+    try {
+      localStorage.setItem('xg_route_names_cache', JSON.stringify(window._routeNamesCache));
+      localStorage.setItem('xg_route_names_cache_ts', String(Date.now()));
+    } catch(e) {}
+  } catch(e) {
+    console.warn('[接送名單batch] 失敗, fallback 到舊版並行:', e.message);
+    // Fallback: 舊版並行批次 (Gateway 還沒部署 v2.18.9 時)
+    const CONCURRENCY = 4;
+    const tasks = [];
+    ridsToFetch.forEach(rid => {
+      const r = rowsToHydrate.find(x => x.row_index === rid);
+      if (!r) return;
+      if ((parseInt(r.noon_count,10) || 0) > 0 && !Array.isArray(window._routeNamesCache[rid].noon)) {
+        tasks.push({r, rid, session: 'noon'});
+      }
+      if ((parseInt(r.pm_count,10) || 0) > 0 && !Array.isArray(window._routeNamesCache[rid].pm)) {
+        tasks.push({r, rid, session: 'pm'});
+      }
+    });
+    for (let i = 0; i < tasks.length; i += CONCURRENCY) {
+      const batch = tasks.slice(i, i + CONCURRENCY);
+      await Promise.all(batch.map(async (t) => {
+        try {
+          const detail = await _getRouteDetails(t.rid, t.session, authPayload);
+          const names = [];
+          (detail.details || []).forEach(d => (d.student_names || []).forEach(n => names.push(n)));
+          window._routeNamesCache[t.rid][t.session] = names;
+        } catch (e2) {
+          window._routeNamesCache[t.rid][t.session] = [];
+        }
+      }));
+    }
   }
+
+  // 4. 一次重繪所有 cells
+  requestAnimationFrame(() => _rehydrateRouteCells(rowsToHydrate));
+}
+
+// 重繪 route 表所有 row 的名單 cell
+function _rehydrateRouteCells(rowsToHydrate) {
+  rowsToHydrate.forEach(r => {
+    ['noon', 'pm'].forEach(session => {
+      const cellAttr = session === 'noon' ? 'data-noon-cell' : 'data-pm-cell';
+      const td = document.querySelector('#ps-table-wrap td[' + cellAttr + '="' + r.row_index + '"]');
+      if (!td) return;
+      const old = td.querySelector('[data-stu-names]');
+      if (old) old.remove();
+      const html = _renderSessionNames(r, session);
+      if (html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        if (tmp.firstElementChild) td.appendChild(tmp.firstElementChild);
+      }
+    });
+  });
 }
 
 // ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
