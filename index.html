@@ -8937,6 +8937,12 @@ async function renderPickupSchedule(el) {
       return monday.toISOString().slice(0,10) === week;
     })).filter(r => !_isWeekend(r.date));
     filtered.forEach(r => { r.weekday = _trueWeekday(r.date); });
+    // v2.18.13: 依 date 排序 (同一天保留原順序·stable sort)
+    filtered.sort((a, b) => {
+      if (a.date < b.date) return -1;
+      if (a.date > b.date) return 1;
+      return (a.row_index || 0) - (b.row_index || 0);
+    });
 
     // === 預生成 options (一次) ===
     const _esc2 = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
