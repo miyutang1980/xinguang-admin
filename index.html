@@ -11473,19 +11473,25 @@ function _docsUserContent() {
 // ===== 連結中心模組 =====
 function renderLinks(el) {
   const parentLinks = [
+    { icon: '👋', name: '歡迎主選單 (LIFF)', url: 'https://liff.line.me/2009757754-ZtkX6Igq', desc: '非在校生入口·自動抓 LINE userId·三大功能選單', bg: 'linear-gradient(135deg,#8B5CF6,#6D28D9)' },
     { icon: '💬', name: '問課諮詢', url: 'https://taipingxinguang.org/#inquiry', desc: '家長填表·詢問課程/班型/費用', bg: 'linear-gradient(135deg,#0EA5E9,#0284C7)' },
     { icon: '🏫', name: '預約參訪 + 檢測', url: 'https://taipingxinguang.org/#booking', desc: '家長選時段·可勾參訪/檢測或兩個都要', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
     { icon: '☀️', name: '夏令營報名', url: 'https://taipingxinguang.org/#camp', desc: '夏令營課程內容 + 線上報名', bg: 'linear-gradient(135deg,#EF4444,#DC2626)' },
     { icon: '📝', name: '正式註冊', url: 'https://taipingxinguang.org/#register', desc: '決定入學·選班、安親、接送設定', bg: 'linear-gradient(135deg,#10B981,#059669)' },
-    { icon: '📝', name: '孩子請假 (LIFF)', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '在讀家長請假 · 手機 LINE 裡點連結進去', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
+    { icon: '🏥', name: '孩子請假 (LIFF)', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '在讀家長請假 · 手機 LINE 裡點連結進去', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
     { icon: '📞', name: 'LINE 官方帳號', url: 'https://lin.ee/tdpTDdu', desc: '家長加 LINE 好友·聊天諮詢', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
   ];
   const adminLinks = [
-    { icon: '🌐', name: '主網站', url: 'https://taipingxinguang.org', desc: '家長看的官方網站 (各見表單 · 佈告)', bg: 'linear-gradient(135deg,#10B981,#059669)' },
-    { icon: '🔐', name: '后台管理', url: 'https://admin.taipingxinguang.org', desc: '你現在這個 · 職員登入管理', bg: 'linear-gradient(135deg,#3B82F6,#1E40AF)' },
-    { icon: '📊', name: 'Google Sheets 資料', url: 'https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit', desc: '所有表單資料 · 請假·在校學生 · LINE好友', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
-    { icon: '⚙️', name: 'Apps Script (Gateway)', url: 'https://script.google.com/home/projects/1VyyN9wiRbi4lyp-skyW-hOywBKFs_aeC5dd5g409kWOY3khp5sMqbUUM/edit', desc: '后端程式碼 · 部署 · 觸發條件', bg: 'linear-gradient(135deg,#6B7280,#374151)' },
-    { icon: '💬', name: 'LINE OA 管理', url: 'https://manager.line.biz/', desc: '設圖文選單 · 推播訊息 · 看家長訊息', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
+    { icon: '🌐', name: '主網站', url: 'https://taipingxinguang.org', desc: '家長看的官方網站 (各表單 · 佈告)', bg: 'linear-gradient(135deg,#10B981,#059669)' },
+    { icon: '🔐', name: '後台管理', url: 'https://admin.taipingxinguang.org', desc: '你現在這個 · 職員登入管理', bg: 'linear-gradient(135deg,#3B82F6,#1E40AF)' },
+    { icon: '📊', name: 'Google Sheets 資料', url: 'https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit', desc: '所有表單資料·請假·在校學生·LINE 好友', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
+    { icon: '⚙️', name: 'Apps Script (Gateway)', url: 'https://script.google.com/d/1vghbVQOqw3IkAe6rZxc2HSY0CVht8HWSlGoeW6RbisNVf5plVzApSLRu/edit', desc: '後端程式碼·部署·觸發條件 (v2.18.7)', bg: 'linear-gradient(135deg,#6B7280,#374151)' },
+    { icon: '💬', name: 'LINE OA 管理', url: 'https://manager.line.biz/', desc: '設圖文選單·推播訊息·看家長訊息', bg: 'linear-gradient(135deg,#06C755,#04A647)' },
+    { icon: '🤖', name: 'BotBonnie 後台', url: 'https://app.botbonnie.com/', desc: '聊天機器人·自動回覆·好友分流', bg: 'linear-gradient(135deg,#F472B6,#DB2777)' },
+    { icon: '🔧', name: 'LINE Developers', url: 'https://developers.line.biz/console/', desc: 'LIFF App 設定·Channel·Messaging API', bg: 'linear-gradient(135deg,#10B981,#047857)' },
+    { icon: '📦', name: 'GitHub - 後台 Repo', url: 'https://github.com/miyutang1980/xinguang-admin', desc: '後台程式碼版本控管', bg: 'linear-gradient(135deg,#1F2937,#000000)' },
+    { icon: '📦', name: 'GitHub - 主網站 Repo', url: 'https://github.com/miyutang1980/xinguang-website', desc: '主網站程式碼版本控管', bg: 'linear-gradient(135deg,#374151,#111827)' },
+    { icon: '☁️', name: 'Cloudflare Pages', url: 'https://dash.cloudflare.com/', desc: '主網站 + 後台部署平台', bg: 'linear-gradient(135deg,#F97316,#EA580C)' }
   ];
   const links = adminLinks; // 保留變數名供下面變數使用、但實際不用
   function buildCards(linkList) {
@@ -11523,7 +11529,20 @@ function renderLinks(el) {
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">${buildCards(adminLinks)}</div>
 
-    <div class="card" style="padding:14px;margin-top:14px;font-size:0.78rem;color:#9CA3AF">💡 考虑加其他連結? GitHub · Cloudflare · N8N · BotBonnie · LINE Developers ·告訴我</div>`;
+    <div class="card" style="padding:18px;margin-top:18px;background:linear-gradient(135deg,#FEF3C7,#FDE68A);border:1px solid #F59E0B">
+      <div style="font-weight:700;color:#92400E;font-size:1rem;margin-bottom:10px">🔑 關鍵資訊速查 (備份用)</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;font-size:0.82rem;color:#78350F">
+        <div><strong>📍 地址:</strong> 台中市太平區新福路 880 號</div>
+        <div><strong>📞 電話:</strong> 04-23960585</div>
+        <div><strong>🕐 學期間:</strong> 12:00 - 21:00</div>
+        <div><strong>🕘 冬夏令營:</strong> 09:00 - 20:00</div>
+        <div><strong>📅 公休:</strong> 週六日 · 國定假日</div>
+        <div><strong>🆔 LIFF 歡迎:</strong> 2009757754-ZtkX6Igq</div>
+        <div><strong>🆔 LIFF 請假:</strong> 2009757754-paHJ5QJO</div>
+        <div><strong>📋 Sheet ID:</strong> 1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w</div>
+      </div>
+    </div>
+    <div class="card" style="padding:14px;margin-top:14px;font-size:0.78rem;color:#9CA3AF">💡 還想加什麼連結? n8n · Pipedream · Buffer · Midjourney·告訴我</div>`;
 }
 function _linkCopy(url, name) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
