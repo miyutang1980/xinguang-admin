@@ -2549,10 +2549,28 @@ function _renderTrialBookerCal() {
     document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">尚無體驗班可排</div>';
     return;
   }
+  // v2.18.10: 同樣的「前·本·後」推薦邏輯·讓月曆「剩 X 班」只算推薦階的班
+  const LEVEL_LADDER = ['SA','SB','1A','1B','1C','2A','2B','2C','3A','3B','3C','4A','4B','4C'];
+  function _extractLvCode(s) {
+    var up = String(s||'').toUpperCase();
+    for (var i = 0; i < LEVEL_LADDER.length; i++) {
+      if (up.indexOf(LEVEL_LADDER[i]) >= 0) return LEVEL_LADDER[i];
+    }
+    return '';
+  }
+  const fcCal = String(_trialBookerState.finalClass || '').toUpperCase().trim();
+  const fcIdxCal = LEVEL_LADDER.indexOf(_extractLvCode(fcCal));
+  const acceptIdxCal = new Set();
+  if (fcIdxCal >= 0) {
+    acceptIdxCal.add(fcIdxCal);
+    if (fcIdxCal - 1 >= 0) acceptIdxCal.add(fcIdxCal - 1);
+    if (fcIdxCal + 1 < LEVEL_LADDER.length) acceptIdxCal.add(fcIdxCal + 1);
+  }
+  // 沒有分班 或 不在階梯上 → 塪紅色警告在月曆上方
+  const hasLadder = fcIdxCal >= 0;
   // 收集所有班的可體驗日期
   const allDates = new Set();
   cls.forEach(c => (c.dates||[]).forEach(dt => {
-    // 統一為 yyyy-mm-dd
     const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
     if (m) allDates.add(m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'));
   }));
@@ -2577,12 +2595,15 @@ function _renderTrialBookerCal() {
           const dateObj = new Date(d+'T00:00:00');
           const dow = ['日','一','二','三','四','五','六'][dateObj.getDay()];
           const dd = parseInt(d.split('-')[2], 10);
-          // 該日有多少班可體驗
-          const dayClasses = cls.filter(c => (c.dates||[]).some(dt => {
+          // 該日所有班
+          const dayClassesAll = cls.filter(c => (c.dates||[]).some(dt => {
             const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
             return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === d;
           }));
-          // 該日已被預約幾班
+          // 只算「前·本·後」階的班 (如果有分班結果)
+          const dayClasses = hasLadder
+            ? dayClassesAll.filter(c => acceptIdxCal.has(LEVEL_LADDER.indexOf(_extractLvCode(c.level))))
+            : dayClassesAll;
           const bookedClasses = _trialBookerState.bookings.filter(b => b.date === d).length;
           const avail = dayClasses.length - bookedClasses;
           const isFull = avail <= 0;
@@ -2616,31 +2637,34 @@ function _pickTrialBookerDate(date) {
     const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
     return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === date;
   }));
-  // v2.18.9 三層推薦邏輯:
-  //   ⭐ 推薦 = 完全符合 (1A=1A)
-  //   🆗 相近 = 同階不同 AB (1A↛1B) 或 同 AB 差一階 (1A↛2A)
-  //   其他 = 剩的
+  // v2.18.10 升級路徑推薦:只看「前一階 · 本階 · 後一階」三個
+  //   順序: SA → SB → 1A → 1B → 1C → 2A → 2B → 2C → 3A → 3B → 3C → 4A → 4B → 4C
+  //   「前·本·後」那天沒班就適略,不顯示跨階到「其他」
+  const LEVEL_LADDER = ['SA','SB','1A','1B','1C','2A','2B','2C','3A','3B','3C','4A','4B','4C'];
   const fc = (_trialBookerState.finalClass || '').toUpperCase().trim();
-  function _parseLevel(lv) {
-    var m = String(lv||'').toUpperCase().match(/^(\d+)([AB])?$/);
-    return m ? { num: parseInt(m[1],10), ab: m[2]||'' } : null;
+  // 只抽出級數代碼 (不管菁英/小菁英前綴) · 如「菁英 1A」 → "1A"
+  function _extractLvCode(s) {
+    var up = String(s||'').toUpperCase();
+    for (var i = 0; i < LEVEL_LADDER.length; i++) {
+      if (up.indexOf(LEVEL_LADDER[i]) >= 0) return LEVEL_LADDER[i];
+    }
+    return '';
   }
-  const fcP = _parseLevel(fc);
-  function _matchTier(cLevel) {
-    var lv = String(cLevel||'').toUpperCase().trim();
-    if (lv === fc) return 'exact';
-    if (!fcP) return 'other';
-    var cP = _parseLevel(lv);
-    if (!cP) return 'other';
-    // 同階不同 AB (1A ↔ 1B)
-    if (cP.num === fcP.num && cP.ab !== fcP.ab) return 'similar';
-    // 同 AB上一階或下一階 (1A ↔ 2A)
-    if (cP.ab === fcP.ab && Math.abs(cP.num - fcP.num) === 1) return 'similar';
-    return 'other';
+  const fcIdx = LEVEL_LADDER.indexOf(_extractLvCode(fc));
+  // 本階 · 前一階 · 後一階 (邊界外就不加)
+  const acceptIdx = new Set();
+  if (fcIdx >= 0) {
+    acceptIdx.add(fcIdx);
+    if (fcIdx - 1 >= 0) acceptIdx.add(fcIdx - 1);
+    if (fcIdx + 1 < LEVEL_LADDER.length) acceptIdx.add(fcIdx + 1);
   }
-  const recommended = dayClasses.filter(c => _matchTier(c.level) === 'exact');
-  const similar     = dayClasses.filter(c => _matchTier(c.level) === 'similar');
-  const others      = dayClasses.filter(c => _matchTier(c.level) === 'other');
+  function _classIdx(c) {
+    return LEVEL_LADDER.indexOf(_extractLvCode(c.level));
+  }
+  const recommended = dayClasses.filter(c => _classIdx(c) === fcIdx);
+  const similar     = dayClasses.filter(c => { var i = _classIdx(c); return i >= 0 && i !== fcIdx && acceptIdx.has(i); });
+  // 以上一階/本階/下一階 的順序排
+  similar.sort((a,b) => _classIdx(a) - _classIdx(b));
 
   const wrap = document.getElementById('tbSlotsWrap');
   wrap.style.display = 'block';
@@ -2669,23 +2693,27 @@ function _pickTrialBookerDate(date) {
     </div>`;
   }
 
+  // 准備推薦階段描述 (前一階·本階·後一階)
+  const _fcCode = _extractLvCode(fc);
+  const _prevLv = (fcIdx - 1 >= 0) ? LEVEL_LADDER[fcIdx - 1] : null;
+  const _nextLv = (fcIdx + 1 < LEVEL_LADDER.length) ? LEVEL_LADDER[fcIdx + 1] : null;
+  const ladderDesc = [_prevLv, _fcCode, _nextLv].filter(Boolean).join(' · ');
+
   let html = '';
   if (recommended.length) {
-    html += '<div style="font-size:0.82rem;color:#16A34A;font-weight:700;margin-bottom:6px">⭐ 推薦：對應 ' + fc + ' 分班</div>' +
+    html += '<div style="font-size:0.82rem;color:#16A34A;font-weight:700;margin-bottom:6px">⭐ 推薦：本階 ' + _fcCode + '</div>' +
             recommended.map(c => classCard(c, true)).join('');
   }
   if (similar.length) {
-    html += '<div style="font-size:0.82rem;color:#0EA5E9;font-weight:700;margin:10px 0 6px">🆗 相近階段 (同階不同班 或 上下一階)</div>' +
+    html += '<div style="font-size:0.82rem;color:#0EA5E9;font-weight:700;margin:10px 0 6px">🆗 相鄰階段 (' + [_prevLv,_nextLv].filter(Boolean).join(' / ') + ')</div>' +
             similar.map(c => classCard(c, false)).join('');
   }
-  if (others.length) {
-    html += '<div style="font-size:0.82rem;color:#6B7280;font-weight:700;margin:10px 0 6px">其他可選班次 (跨階段、需老師評估)</div>' +
-            others.map(c => classCard(c, false)).join('');
+  if (!html) {
+    html = '<div style="background:#FEE2E2;border:1px solid #DC2626;color:#991B1B;text-align:center;padding:16px;border-radius:8px;font-weight:700">❌ 這天無適合班·可試其他日期<br><span style="font-size:0.78rem;font-weight:400;color:#7F1D1D">限定推薦階: ' + ladderDesc + '</span></div>';
   }
-  if (!html) html = '<div style="color:#9CA3AF;text-align:center;padding:20px">這天無可體驗班次</div>';
-  // 變颜的提示 (沒推薦但有其他選項 → 呆醒老師)
-  if (!recommended.length && (similar.length || others.length) && fc) {
-    html = '<div style="background:#FEF3C7;border:1px solid #F59E0B;padding:10px 12px;border-radius:8px;margin-bottom:10px;font-size:0.82rem;color:#92400E">⚠️ 這天沒有 <b>' + fc + '</b> 班開課 · 請由老師評估下方班級是否適合</div>' + html;
+  // 沒推薦 但有相鄰階 → 黃色提示
+  if (!recommended.length && similar.length && _fcCode) {
+    html = '<div style="background:#FEF3C7;border:1px solid #F59E0B;padding:10px 12px;border-radius:8px;margin-bottom:10px;font-size:0.82rem;color:#92400E">⚠️ 這天沒有 <b>' + _fcCode + '</b> 班開課 · 只顯示相鄰階</div>' + html;
   }
   document.getElementById('tbSlotsList').innerHTML = html;
 }
