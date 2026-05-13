@@ -8598,44 +8598,53 @@ function _renderRouteStudentNames(r){
   return '';
 }
 
-// 背景 lazy-load：在 renderTable 後依序逐筆讀名字、寫進快取、寫完一筆重繪一個 cell
+// 背景 lazy-load：v2.18.8 改並行批次 (4 個/一批) + 批完後一次重繪多個 cell
 async function _hydrateRouteNames(rowsToHydrate, authPayload) {
+  // 准备任務列表 (只看需要讀的 cell)
+  const tasks = [];
   for (const r of rowsToHydrate) {
     const rid = r.row_index;
     const noonN = parseInt(r.noon_count, 10) || 0;
     const pmN = parseInt(r.pm_count, 10) || 0;
     if (noonN === 0 && pmN === 0) continue;
     if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = {};
-    for (const session of ['noon', 'pm']) {
-      const count = (session === 'noon' ? noonN : pmN);
-      if (count <= 0) continue;
-      if (Array.isArray(window._routeNamesCache[rid][session])) continue; // 快取連 [] 也跳過
+    if (noonN > 0 && !Array.isArray(window._routeNamesCache[rid].noon)) tasks.push({r, rid, session: 'noon'});
+    if (pmN > 0 && !Array.isArray(window._routeNamesCache[rid].pm)) tasks.push({r, rid, session: 'pm'});
+  }
+  if (tasks.length === 0) return;
+
+  // 並行批次跱 (一次 4 個 request,避免 Apps Script rate limit)
+  const CONCURRENCY = 4;
+  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
+    const batch = tasks.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async (t) => {
       try {
-        const detail = await _getRouteDetails(rid, session, authPayload);
+        const detail = await _getRouteDetails(t.rid, t.session, authPayload);
         const names = [];
         (detail.details || []).forEach(d => {
           (d.student_names || []).forEach(n => names.push(n));
         });
-        window._routeNamesCache[rid][session] = names;
-        // 重新繪製該行該 session 的姓名 cell (在人數輸入框下方)
-        const cellAttr = session === 'noon' ? 'data-noon-cell' : 'data-pm-cell';
-        const td = document.querySelector('#ps-table-wrap td[' + cellAttr + '="' + rid + '"]');
-        if (td) {
-          // 移除舊的 names div、插入新的
-          const old = td.querySelector('[data-stu-names]');
-          if (old) old.remove();
-          const html = _renderSessionNames(r, session);
-          if (html) {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = html;
-            if (tmp.firstElementChild) td.appendChild(tmp.firstElementChild);
-          }
-        }
+        window._routeNamesCache[t.rid][t.session] = names;
       } catch (e) {
-        // 失敗就跳過、下個繼續
-        window._routeNamesCache[rid][session] = [];
+        window._routeNamesCache[t.rid][t.session] = [];
       }
-    }
+    }));
+    // 一批完成 → 一次重繪這批 cells (减少 layout thrash)
+    requestAnimationFrame(() => {
+      batch.forEach(t => {
+        const cellAttr = t.session === 'noon' ? 'data-noon-cell' : 'data-pm-cell';
+        const td = document.querySelector('#ps-table-wrap td[' + cellAttr + '="' + t.rid + '"]');
+        if (!td) return;
+        const old = td.querySelector('[data-stu-names]');
+        if (old) old.remove();
+        const html = _renderSessionNames(t.r, t.session);
+        if (html) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          if (tmp.firstElementChild) td.appendChild(tmp.firstElementChild);
+        }
+      });
+    });
   }
 }
 
@@ -8750,76 +8759,77 @@ async function renderPickupSchedule(el) {
     return dow === 0 || dow === 6;
   }
 
+  // ─── v2.18.8 渲染優化 ───
+  // 1. select options 預生成一次 (不在 row map 裡重算)
+  // 2. selected 用 regex 一次定位 (取代 .replace,且避免 user-input 撞到 special chars)
+  // 3. isFirstOfDay 改 prevDate 變數 (取代 O(n²) indexOf)
+  // 4. innerHTML 一次塞 + table-layout:fixed + contain:content 給 tbody
+  // 5. 名字 hydrate 改 requestIdleCallback + 並行批次
   function renderTable() {
+    const t0 = performance.now();
     const week = document.getElementById('ps-filter-week').value;
     const filtered = (!week ? allRows : allRows.filter(r => {
       if (!r.date) return false;
       const d = new Date(r.date);
       const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay()+6) % 7));
       return monday.toISOString().slice(0,10) === week;
-    })).filter(r => !_isWeekend(r.date));  // 過濾週末、任何週末資料都不顯示
-    // 以正確的 weekday 獲得重新設定 (不修改 allRows、只變顯示用)
-    filtered.forEach(r => {
-      r.weekday = _trueWeekday(r.date);
-    });
+    })).filter(r => !_isWeekend(r.date));
+    filtered.forEach(r => { r.weekday = _trueWeekday(r.date); });
 
-    const driverOpts = ['<option value=""></option>',
-      ...staffList.map(n => `<option value="${n}">${n}</option>`)].join('');
-    const schoolOpts = ['<option value=""></option>',
-      ...SCHOOLS_LIST.map(s => `<option value="${s.name}">${s.name}</option>`)].join('');
-    const vehicleOpts = ['<option value=""></option>',
-      ...VEHICLES_LIST.map(v => `<option value="${v}">${v}</option>`)].join('');
+    // === 預生成 options (一次) ===
+    const _esc2 = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const driverOpts = '<option value=""></option>' +
+      staffList.map(n => `<option value="${_esc2(n)}">${_esc2(n)}</option>`).join('');
+    const schoolOpts = '<option value=""></option>' +
+      SCHOOLS_LIST.map(s => `<option value="${_esc2(s.name)}">${_esc2(s.name)}</option>`).join('');
+    const vehicleOpts = '<option value=""></option>' +
+      VEHICLES_LIST.map(v => `<option value="${_esc2(v)}">${_esc2(v)}</option>`).join('');
 
+    // 把選中的 option 標 selected (用 regex,比 .replace 字串搜尋快 + 不會被特殊字元打到)
+    function _sel(optsHtml, val) {
+      if (val == null || val === '') return optsHtml;
+      const escVal = _esc2(val).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return optsHtml.replace(new RegExp('value="' + escVal + '"'), 'value="' + _esc2(val) + '" selected');
+    }
+
+    // === row HTML ===
+    let prevDate = null;
     const rowsHtml = filtered.map(r => {
       const isHoliday = r.status === '休';
-      const bg = isHoliday ? 'background:#f0efea;color:#999' : '';
-      const isFirstOfDay = filtered.indexOf(r) === 0 ||
-        filtered[filtered.indexOf(r)-1].date !== r.date;
-      const dateBorder = isFirstOfDay ? 'border-top:2px solid #01696F' : '';
+      const isFirstOfDay = r.date !== prevDate;
+      prevDate = r.date;
+      const rowStyle = (isHoliday ? 'background:#f0efea;color:#999' : '') +
+        (isFirstOfDay ? ';border-top:2px solid #01696F' : '');
+      const dis = isHoliday ? ' disabled' : '';
+      const dateCell = isFirstOfDay
+        ? `${r.date}<br><button class="btn-day-del" data-date="${_esc(r.date)}" title="刪除這一天所有路線" style="margin-top:4px;background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;cursor:pointer;font-size:0.7rem;padding:2px 6px;border-radius:4px">🗑 删整天</button>`
+        : '';
+      const wdCell = isFirstOfDay ? r.weekday : '';
 
-      return `<tr data-row="${r.row_index}" style="${bg};${dateBorder}">
-        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.date + '<br><button class="btn-day-del" data-date="'+_esc(r.date)+'" title="刪除這一天所有路線" style="margin-top:4px;background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;cursor:pointer;font-size:0.7rem;padding:2px 6px;border-radius:4px">🗑 删整天</button>' : ''}</td>
-        <td style="padding:6px;text-align:center;font-size:0.85rem">${isFirstOfDay ? r.weekday : ''}</td>
-        <td style="padding:6px;text-align:center">
-          <select data-field="status" style="border:1px solid #d4d1ca;padding:2px 4px;font-size:0.85rem">
-            <option value="上" ${r.status==='上'?'selected':''}>上</option>
-            <option value="休" ${r.status==='休'?'selected':''}>休</option>
-          </select>
-        </td>
-        <td style="padding:6px;font-size:0.85rem">${r.route}</td>
-        <td style="padding:6px;text-align:center;color:#7a7974;font-size:0.85rem">${r.capacity || '-'}</td>
-        <td style="padding:6px"><select data-field="noon_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${vehicleOpts.replace(`value="${r.noon_vehicle||''}"`,`value="${r.noon_vehicle||''}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.noon_driver}"`,`value="${r.noon_driver}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="noon_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.noon_driver2||''}"`,`value="${r.noon_driver2||''}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${schoolOpts.replace(`value="${r.noon_school||''}"`,`value="${r.noon_school||''}" selected`)}</select></td>
-        <td data-noon-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px">
-          <div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
-            <input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px" ${isHoliday?'disabled':''}>
-            <button class="btn-detail" data-session="noon" title="選學校 + 學生" style="padding:3px 8px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600" ${isHoliday?'disabled':''}>📋 選</button>
-          </div>
-          ${isHoliday ? '' : _renderSessionNames(r, 'noon')}
-        </td>
-        <td style="padding:6px"><input data-field="noon_time" type="time" lang="en-GB" step="60" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace" ${isHoliday?'disabled':''}></td>
-        <td style="padding:6px"><select data-field="pm_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${vehicleOpts.replace(`value="${r.pm_vehicle||''}"`,`value="${r.pm_vehicle||''}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver}"`,`value="${r.pm_driver}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="pm_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${driverOpts.replace(`value="${r.pm_driver2||''}"`,`value="${r.pm_driver2||''}" selected`)}</select></td>
-        <td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem" ${isHoliday?'disabled':''}>${schoolOpts.replace(`value="${r.pm_school||''}"`,`value="${r.pm_school||''}" selected`)}</select></td>
-        <td data-pm-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px">
-          <div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
-            <input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px" ${isHoliday?'disabled':''}>
-            <button class="btn-detail" data-session="pm" title="選學校 + 學生" style="padding:3px 8px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600" ${isHoliday?'disabled':''}>📋 選</button>
-          </div>
-          ${isHoliday ? '' : _renderSessionNames(r, 'pm')}
-        </td>
-        <td style="padding:6px"><input data-field="pm_time" type="time" lang="en-GB" step="60" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace" ${isHoliday?'disabled':''}></td>
-        <td style="padding:6px;text-align:center">
-          <button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button>
-        </td>
-      </tr>`;
+      return `<tr data-row="${r.row_index}" style="${rowStyle}">
+<td style="padding:6px;text-align:center;font-size:0.85rem">${dateCell}</td>
+<td style="padding:6px;text-align:center;font-size:0.85rem">${wdCell}</td>
+<td style="padding:6px;text-align:center"><select data-field="status" style="border:1px solid #d4d1ca;padding:2px 4px;font-size:0.85rem"><option value="上"${r.status==='上'?' selected':''}>上</option><option value="休"${r.status==='休'?' selected':''}>休</option></select></td>
+<td style="padding:6px;font-size:0.85rem">${_esc2(r.route)}</td>
+<td style="padding:6px;text-align:center;color:#7a7974;font-size:0.85rem">${r.capacity || '-'}</td>
+<td style="padding:6px"><select data-field="noon_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.noon_vehicle)}</select></td>
+<td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver)}</select></td>
+<td style="padding:6px"><select data-field="noon_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver2)}</select></td>
+<td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(schoolOpts, r.noon_school)}</select></td>
+<td data-noon-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="noon" title="選學校 + 學生" style="padding:3px 8px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'noon')}</td>
+<td style="padding:6px"><input data-field="noon_time" type="time" lang="en-GB" step="60" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
+<td style="padding:6px"><select data-field="pm_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.pm_vehicle)}</select></td>
+<td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver)}</select></td>
+<td style="padding:6px"><select data-field="pm_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver2)}</select></td>
+<td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(schoolOpts, r.pm_school)}</select></td>
+<td data-pm-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="pm" title="選學校 + 學生" style="padding:3px 8px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'pm')}</td>
+<td style="padding:6px"><input data-field="pm_time" type="time" lang="en-GB" step="60" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
+<td style="padding:6px;text-align:center"><button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button></td>
+</tr>`;
     }).join('');
 
     document.getElementById('ps-table-wrap').innerHTML = `
-      <table style="min-width:1700px;border-collapse:collapse;font-size:0.85rem;table-layout:auto">
+      <table style="min-width:1700px;border-collapse:collapse;font-size:0.85rem;table-layout:fixed;contain:layout style">
         <thead style="position:sticky;top:0;background:#1B474D;color:#fff;z-index:1">
           <tr>
             <th style="padding:8px;border:1px solid #1b474d;width:90px">日期</th>
@@ -8848,12 +8858,14 @@ async function renderPickupSchedule(el) {
             <th style="border:none"></th>
           </tr>
         </thead>
-        <tbody>${rowsHtml}</tbody>
+        <tbody style="contain:content">${rowsHtml}</tbody>
       </table>
     `;
+    console.log('[接送排程] renderTable', filtered.length, '列 ·', (performance.now()-t0).toFixed(1), 'ms');
 
-    // 背景逐筆讀名字、寫完重繪該 cell（不阻塞 UI）
-    setTimeout(function(){ _hydrateRouteNames(filtered, auth_payload); }, 50);
+    // 背景並行讀名字、idle 時段才跑 (不阻塞 UI)
+    const _idle = window.requestIdleCallback || function(fn){ return setTimeout(fn, 100); };
+    _idle(function(){ _hydrateRouteNames(filtered, auth_payload); }, { timeout: 800 });
 
     // 📋 按鈕:開明細 modal
     // ❌ 硬刪除整列
