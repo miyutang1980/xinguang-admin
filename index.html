@@ -426,6 +426,7 @@ var _loggedIn = false;
 // ── Google Sheets 雲端帳號 API ───────────────────────────────────
 // AUTH_API_URL: n8n Cloud webhook (Google Sheets 雲端帳號驗證)
 var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
+var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
 
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
@@ -437,6 +438,66 @@ async function doLogin() {
     errEl.textContent = '請輸入帳號和密碼';
     errEl.style.display = 'block';
     return;
+  }
+  
+  // v2.18.18: 主路線 — Gateway 直驗證 (讀 sheet 「員工帳號」, 繞過 n8n)
+  try {
+    errEl.textContent = '驗證中...';
+    errEl.style.display = 'block';
+    errEl.style.color = '#6b7280';
+    const gwResp = await fetch(AUTH_GATEWAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'auth_login', username: u, password: p })
+    });
+    let gwResult = await gwResp.json();
+    if (Array.isArray(gwResult)) gwResult = gwResult[0] || {};
+    if (gwResult.success) {
+      _loggedIn = true;
+      var rawPerms = gwResult.user.permissions;
+      var perms = [];
+      if (Array.isArray(rawPerms)) perms = rawPerms;
+      else if (typeof rawPerms === 'string' && rawPerms.trim()) {
+        try { perms = JSON.parse(rawPerms) || []; } catch(e) { perms = []; }
+      }
+      if (!perms.length && typeof ROLE_PERMS === 'object') {
+        perms = ROLE_PERMS[(gwResult.user.role||'').toLowerCase()] || [];
+      }
+      _currentUser = {
+        username: gwResult.user.username,
+        name: gwResult.user.name || u,
+        role: gwResult.user.role,
+        title: gwResult.user.title || '',
+        englishName: gwResult.user.englishName || '',
+        permissions: perms
+      };
+      try { sessionStorage.setItem('xg_session_pwd', p); localStorage.setItem('xg_admin_pwd', p); } catch(e){}
+      try {
+        var rememberCb = document.getElementById('loginRemember');
+        if (rememberCb && rememberCb.checked){
+          localStorage.setItem('xg_remember', JSON.stringify({
+            username: u, password: p, user: _currentUser,
+            expires: Date.now() + 24*60*60*1000
+          }));
+        } else {
+          localStorage.removeItem('xg_remember');
+        }
+      } catch(e){}
+      errEl.style.display = 'none';
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('appScreen').style.display = 'flex';
+      applyPermissions();
+      initApp();
+      return;
+    } else if (gwResult.error) {
+      // Gateway 明確回錯 · 不再下轉 (避免本地備援結果不一致)
+      errEl.textContent = gwResult.error;
+      errEl.style.color = '#dc2626';
+      errEl.style.display = 'block';
+      return;
+    }
+  } catch (err) {
+    console.warn('Gateway 驗證失敗 · 轉 n8n fallback:', err);
   }
   
   // 先試 Google Sheets 雲端 API（主要驗證方式）
@@ -11874,6 +11935,16 @@ function renderLinks(el) {
     { icon: '🏥', name: '孩子請假 (LIFF)', url: 'https://liff.line.me/2009757754-paHJ5QJO', desc: '在讀家長請假 · 手機 LINE 裡點連結進去', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
     { icon: '📞', name: 'LINE 官方帳號', url: 'https://lin.ee/tdpTDdu', desc: '家長加 LINE 好友·聊天諮詢', bg: 'linear-gradient(135deg,#06C755,#04A647)' }
   ];
+  // v2.18.18: 課程介紹直連 (?course=xxx 自動切 tab + 滾到課程區)
+  const courseLinks = [
+    { icon: '🌱', name: '浸潤班', url: 'https://taipingxinguang.org/?course=immersion', desc: 'Grade K–G3 全美語沉浸 · 每週 10 小時', bg: 'linear-gradient(135deg,#2B7A4B,#1E5733)' },
+    { icon: '🏆', name: '菁英班', url: 'https://taipingxinguang.org/?course=elite', desc: '類浸潤班例全美語·中外師接力教學', bg: 'linear-gradient(135deg,#7C3AED,#5B21B6)' },
+    { icon: '📝', name: '全民英檢班', url: 'https://taipingxinguang.org/?course=gept', desc: 'GEPT 考介備考路徑·創初中高階階梯', bg: 'linear-gradient(135deg,#0EA5E9,#0284C7)' },
+    { icon: '🧸', name: '幼兒美語', url: 'https://taipingxinguang.org/?course=preschool', desc: '3.5–6 歲 · 一週 3 次 · 20 週 · 全外師', bg: 'linear-gradient(135deg,#E8863A,#C2410C)' },
+    { icon: '📚', name: '安親課輔班', url: 'https://taipingxinguang.org/?course=afterschool', desc: '下課後作業輔導 + 閱讀時間', bg: 'linear-gradient(135deg,#F59E0B,#D97706)' },
+    { icon: '🏠', name: '托育班', url: 'https://taipingxinguang.org/?course=daycare', desc: '全日安全照活·彈性接送', bg: 'linear-gradient(135deg,#10B981,#059669)' },
+    { icon: '☀️', name: '夏令營', url: 'https://taipingxinguang.org/?course=camp', desc: '口說·主題·野外裡足活動 (跳到 #camp 區)', bg: 'linear-gradient(135deg,#EF4444,#DC2626)' }
+  ];
   const adminLinks = [
     { icon: '🌐', name: '主網站', url: 'https://taipingxinguang.org', desc: '家長看的官方網站 (各表單 · 佈告)', bg: 'linear-gradient(135deg,#10B981,#059669)' },
     { icon: '🔐', name: '後台管理', url: 'https://admin.taipingxinguang.org', desc: '你現在這個 · 職員登入管理', bg: 'linear-gradient(135deg,#3B82F6,#1E40AF)' },
@@ -11915,6 +11986,12 @@ function renderLinks(el) {
       <div style="font-size:0.78rem;color:#92400E;margin-top:2px">複製、貼到 LINE 傳給家長</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:24px">${buildCards(parentLinks)}</div>
+
+    <div style="background:#FEE2E2;border-left:4px solid #DC2626;padding:12px 16px;border-radius:8px;margin-bottom:12px">
+      <div style="font-weight:700;color:#991B1B;font-size:1rem">📖 課程介紹直連</div>
+      <div style="font-size:0.78rem;color:#991B1B;margin-top:2px">點下去自動切到該課程 tab · 適合貧到 LINE / FB / IG / 圖文選單</div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:24px">${buildCards(courseLinks)}</div>
 
     <div style="background:#DBEAFE;border-left:4px solid #3B82F6;padding:12px 16px;border-radius:8px;margin-bottom:12px">
       <div style="font-weight:700;color:#1E3A8A;font-size:1rem">⚙️ 管理、資料、后台連結</div>
