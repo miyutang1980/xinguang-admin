@@ -10694,6 +10694,30 @@ async function _caCallGw(action, payload) {
   }
 }
 
+// v2.18.19: 一次性匯入小學班級 (讀 grade_class_import_v1.json + 以姓名匹配寫入)
+async function _caImportGradeClass() {
+  if (!confirm('將從預裝記錄檔對每個學生寫入「小學班級」。\n以「姓名」作匹配 · 原班級會被覆蓋。\n確定要匯入嗎?')) return;
+  try {
+    const res = await fetch('/grade_class_import_v1.json?ts=' + Date.now());
+    if (!res.ok) { alert('讀取匯入檔失敗 (HTTP ' + res.status + ')'); return; }
+    const j = await res.json();
+    if (!j.items || !j.items.length) { alert('匯入檔內容為空'); return; }
+    if (typeof showToast === 'function') showToast('⏳ 匯入中 ' + j.items.length + ' 筆...');
+    const r = await _caCallGw('students_import_grade_class', { items: j.items });
+    if (r && r.success) {
+      var msg = '✅ 完成 · 更新 ' + r.updated + ' 筆';
+      if (r.notFound && r.notFound.length) {
+        msg += '\n\n找不到 ' + r.notFound.length + ' 個學生:\n' + r.notFound.join(', ');
+      }
+      alert(msg);
+      // 重新加載
+      renderClassAssign(document.getElementById('mainContent'));
+    } else {
+      alert('❌ 匯入失敗: ' + (r.error || '未知錯誤'));
+    }
+  } catch (e) { alert('匯入错誤: ' + e.message); }
+}
+
 async function renderClassAssign(el) {
   el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
   try {
@@ -10741,6 +10765,7 @@ function _renderClassAssignView(el) {
     <div class="card" style="padding:14px;margin-bottom:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <input id="caKeyword" placeholder="搜尋:姓名/學號/班級/家長電話/老師" value="${_esc(f.keyword)}" style="flex:1;min-width:240px;padding:8px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:0.875rem">
       <button class="btn btn-green" onclick="_caAddNew()">＋ 新增學生</button>
+      ${_currentUser && _currentUser.role === 'admin' ? '<button class="btn btn-outline" onclick="_caImportGradeClass()" style="background:#FEF3C7;border-color:#F59E0B;color:#92400E">📥 匯入小學班級</button>' : ''}
       <button class="btn btn-outline" onclick="renderClassAssign(document.getElementById('mainContent'))">🔄 重新整理</button>
       <span style="color:#777;font-size:0.82rem">共 ${filtered.length} / ${_caStudents.length} 筆</span>
     </div>`;
@@ -10752,6 +10777,7 @@ function _renderClassAssignView(el) {
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">英文名</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">班級</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">就讀學校</th>
+      <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E;width:90px">小學班級</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">中籍師</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">外籍師</th>
       <th style="padding:8px 10px;text-align:left;font-size:0.78rem;color:#0C4A6E">家長電話</th>
@@ -10776,6 +10802,7 @@ function _renderClassAssignView(el) {
         <td style="padding:4px 6px"><input data-f="englishName" value="${_esc(s.englishName)}" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><input data-f="cls" value="${_esc(s.cls)}" placeholder="如: 3A" style="width:80px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
         <td style="padding:4px 6px"><input data-f="school_name" value="${_esc(s.school_name)}" list="ca_schools_dl" placeholder="例: 新光國小" style="width:110px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
+        <td style="padding:4px 6px"><input data-f="gradeClass" value="${_esc(s.gradeClass||'')}" placeholder="例: 304" inputmode="numeric" style="width:70px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem;text-align:center"></td>
         <td style="padding:4px 6px"><select data-f="teacherCh" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(chTeachers, s.teacherCh)}</select></td>
         <td style="padding:4px 6px"><select data-f="teacherEn" style="width:110px;padding:6px 4px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem">${teacherOpts(enTeachers, s.teacherEn)}</select></td>
         <td style="padding:4px 6px"><input data-f="parentPhone" value="${_esc(s.parentPhone)}" placeholder="09xx-xxx-xxx" style="width:120px;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:0.85rem"></td>
@@ -10792,7 +10819,7 @@ function _renderClassAssignView(el) {
       <table style="width:100%;border-collapse:collapse;font-size:0.875rem">
         <thead>${head}</thead>
         <datalist id="ca_schools_dl">${SCHOOLS_LIST.map(sc=>'<option value="'+sc.name+'">').join('')}<option value="幼兒園"><option value="文心國小"><option value="坪林國小"><option value="其他"></datalist>
-        <tbody id="caTbody">${rows || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#999">還沒有學生 ── 點上方「+ 新增學生」開始建檔</td></tr>'}</tbody>
+        <tbody id="caTbody">${rows || '<tr><td colspan="11" style="padding:40px;text-align:center;color:#999">還沒有學生 ── 點上方「+ 新增學生」開始建檔</td></tr>'}</tbody>
       </table>
     </div>`;
 
