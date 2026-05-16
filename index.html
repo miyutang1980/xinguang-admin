@@ -277,11 +277,36 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 
 <script>
 // ── 設定 ──────────────────────────────────────────────────
+// v2.18.17: 后台全部 23 個功能頁 (與 sidebar / switchSection 完全對齊)
+var ALL_PERMS = [
+  'dashboard','inquiry','booking','camp','assess','register','trial','trialBookings',
+  'documents','students','classAssign','leaves','docs','links','classes','webcal',
+  'pickup','assignments','transfer','lineSrc','stats','accounts','health'
+];
+var PERM_LABELS = {
+  dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
+  camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
+  trial:'體驗課排班', trialBookings:'體驗預約一覽',
+  documents:'說明會簡報', students:'學生管理',
+  classAssign:'班級指派', leaves:'請假紀錄',
+  docs:'文件中心', links:'連結中心', classes:'開班資訊',
+  webcal:'參訪/檢測日曆', pickup:'接送排程',
+  assignments:'今日接送', transfer:'強制轉交',
+  lineSrc:'LINE 來源分析', stats:'老師月報',
+  accounts:'帳號管理', health:'系統健檢'
+};
+// 角色預設權限 (個別帳號可覆蓋)
+var ROLE_PERMS = {
+  admin: ALL_PERMS.slice(),
+  teacher: ['dashboard','booking','assess','trial','trialBookings','classAssign','leaves','pickup','assignments','stats'],
+  sales: ['dashboard','inquiry','booking','camp','register','trialBookings','lineSrc'],
+  staff: ['dashboard','inquiry','booking','camp','register','trial','trialBookings','students','classAssign','leaves','docs','links','classes','webcal','pickup','assignments','stats']
+};
 const ADMIN_USERS = {
-  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ['dashboard','inquiry','booking','camp','assess','register','trial','documents','manual','accounts','students','pickup','assignments','transfer','stats','lineSrc'] },
-  'teacher': { password: 'Tcm5XM0x0z', role: 'teacher', name: '教師', permissions: ['dashboard','booking','assess','trial'] },
-  'sales': { password: 'SlLl9lHf39', role: 'sales', name: '業務', permissions: ['dashboard','inquiry','booking','camp','register'] },
-  'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ['dashboard','inquiry','booking','camp','register','trial','students','pickup','assignments','stats'] }
+  'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ROLE_PERMS.admin },
+  'teacher': { password: 'Tcm5XM0x0z', role: 'teacher', name: '教師', permissions: ROLE_PERMS.teacher },
+  'sales': { password: 'SlLl9lHf39', role: 'sales', name: '業務', permissions: ROLE_PERMS.sales },
+  'staff': { password: 'StmMIq66r6', role: 'staff', name: '行政', permissions: ROLE_PERMS.staff }
 };
 var _currentUser = null;
 function canDelete() { return _currentUser && _currentUser.role === 'admin'; }
@@ -433,12 +458,24 @@ async function doLogin() {
       
       if (result.success) {
         _loggedIn = true;
+        // v2.18.17: permissions 可能是 JSON 字串 (從 Sheet col K 來) 或已是陣列
+        var rawPerms = result.user.permissions;
+        var perms = [];
+        if (Array.isArray(rawPerms)) {
+          perms = rawPerms;
+        } else if (typeof rawPerms === 'string' && rawPerms.trim()) {
+          try { perms = JSON.parse(rawPerms) || []; } catch(e) { perms = []; }
+        }
+        // 空 perms → 依角色預設 (applyPermissions 會再補一次,這裡先設好避免闃闃 token)
+        if (!perms.length && typeof ROLE_PERMS === 'object') {
+          perms = ROLE_PERMS[(result.user.role||'').toLowerCase()] || [];
+        }
         _currentUser = {
           username: result.user.username,
           name: result.user.name || u,
           role: result.user.role,
           title: result.user.title || '',
-          permissions: result.user.permissions || []
+          permissions: perms
         };
         // 暫存密碼到 sessionStorage（帳號管理頁面需要驗證 admin 身份）
         // sessionStorage 關掛瀏覽器就清除，比 localStorage 安全
@@ -492,31 +529,17 @@ async function doLogin() {
 }
 function applyPermissions() {
   if (!_currentUser) return;
-  const perms = _currentUser.permissions || [];
-  // Hide/show sidebar items based on permissions
-  var navMap = {
-    'dashboard': 'nav-dashboard',
-    'inquiry': 'nav-inquiry',
-    'booking': 'nav-booking',
-    'trialBookings': 'nav-trialBookings',
-    'camp': 'nav-camp',
-    'assess': 'nav-assess',
-    'register': 'nav-register',
-    'trial': 'nav-trial',
-    'documents': 'nav-documents',
-    'manual': 'nav-manual',
-    'accounts': 'nav-accounts',
-    'students': 'nav-students',
-    'pickup': 'nav-pickup',
-    'assignments': 'nav-assignments',
-    'transfer': 'nav-transfer',
-    'stats': 'nav-stats',
-    'lineSrc': 'nav-lineSrc'
-  };
-  Object.keys(navMap).forEach(function(key) {
-    var el = document.getElementById(navMap[key]);
+  // v2.18.17: 空 permissions 則套角色預設 (向下相容舊帳號)
+  var perms = _currentUser.permissions;
+  if (!Array.isArray(perms) || perms.length === 0) {
+    perms = ROLE_PERMS[_currentUser.role] || [];
+    _currentUser.permissions = perms;
+  }
+  // v2.18.17: 全部 23 個功能頁都能控 (與 ALL_PERMS 對齊)
+  ALL_PERMS.forEach(function(key) {
+    var el = document.getElementById('nav-' + key);
     if (el) {
-      el.style.display = perms.includes(key) ? '' : 'none';
+      el.style.display = perms.indexOf(key) >= 0 ? '' : 'none';
     }
   });
   // Set body class for permission-based CSS
@@ -635,6 +658,14 @@ function updateBadges(data) {
 }
 
 function switchSection(sec) {
+  // v2.18.17: 權限防衛 — 避免繞過 sidebar 隱藏
+  if (_currentUser && Array.isArray(_currentUser.permissions) && _currentUser.permissions.length > 0) {
+    if (typeof ALL_PERMS !== 'undefined' && ALL_PERMS.indexOf(sec) >= 0 && _currentUser.permissions.indexOf(sec) < 0) {
+      if (typeof showToast === 'function') showToast('⛔ 你沒有權限進入這個頁面');
+      else alert('你沒有權限進入這個頁面');
+      return;
+    }
+  }
   // 帳號管理頁面
   if (sec === 'accounts') {
     document.getElementById('pageTitle').textContent = '帳號管理';
@@ -6799,13 +6830,14 @@ function showCreateAccountModal(){
   },50);
 }
 
-// v2.18.16: 編輯帳號 modal (姓名/英文名/職稱/角色)
+// v2.18.16: 編輯帳號 modal (姓名/英文名/職稱/角色 + 明碼密碼 可改)
 function showEditAccountModal(account){
   var u = _cloudAccounts.find(function(x){return x.account.toLowerCase()===String(account).toLowerCase()});
   if(!u){ alert('找不到這個帳號'); return; }
   var esc = function(s){ return String(s||'').replace(/"/g,'&quot;'); };
+  var origPw = String(u.password||'');
   var h='<div style="max-width:460px">';
-  h+='<div style="margin-bottom:14px;padding:12px 14px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;color:#6D28D9;font-size:0.85rem">編輯 <strong>'+account+'</strong> 的資料·密碼請用「🔑 改密碼」按鈕</div>';
+  h+='<div style="margin-bottom:14px;padding:12px 14px;background:#F5F3FF;border:1px solid #DDD6FE;border-radius:8px;color:#6D28D9;font-size:0.85rem">編輯 <strong>'+account+'</strong> 的資料 · 密碼可直接覆蓋修改</div>';
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">';
   h+='<div><label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px">姓名 *</label>';
   h+='<input id="editAccName" type="text" value="'+esc(u.name)+'" style="width:100%;padding:9px 12px;border:1.5px solid #ddd;border-radius:6px;font-size:0.9rem;box-sizing:border-box"></div>';
@@ -6824,6 +6856,43 @@ function showEditAccountModal(account){
   });
   h+='</select></div>';
   h+='</div>';
+  // 密碼 (明碼可見可改) + 一鍵複製
+  h+='<div style="margin-bottom:10px;padding:10px 12px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px">';
+  h+='<label style="font-weight:600;font-size:0.82rem;display:block;margin-bottom:4px;color:#92400E">🔑 密碼 (明碼)</label>';
+  h+='<div style="display:flex;gap:6px;align-items:center">';
+  h+='<input id="editAccPwd" type="text" value="'+esc(origPw)+'" autocomplete="off" spellcheck="false" style="flex:1;padding:9px 12px;border:1.5px solid #FCD34D;background:#fff;border-radius:6px;font-size:0.95rem;font-family:ui-monospace,monospace;letter-spacing:0.5px;box-sizing:border-box">';
+  h+='<button id="btnCopyPwd" type="button" style="padding:9px 12px;background:#fff;border:1.5px solid #FCD34D;border-radius:6px;cursor:pointer;font-size:0.85rem;white-space:nowrap">📋 複製</button>';
+  h+='</div>';
+  h+='<div style="font-size:0.75rem;color:#92400E;margin-top:6px">直接修改文字框即可改密碼 · 留空則維持原密碼</div>';
+  h+='</div>';
+  // v2.18.17: 功能頁權限勾選 (個別帳號可覆蓋角色預設)
+  var existingPerms = [];
+  try {
+    if (Array.isArray(u.permissions)) existingPerms = u.permissions.slice();
+    else if (typeof u.permissions === 'string' && u.permissions.trim()) existingPerms = JSON.parse(u.permissions);
+  } catch(e) { existingPerms = []; }
+  var useCustom = existingPerms.length > 0;
+  h+='<div style="margin-bottom:10px;padding:12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:8px">';
+  h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+  h+='<label style="font-weight:700;font-size:0.85rem;color:#1E40AF">🔓 功能頁權限</label>';
+  h+='<label style="font-size:0.8rem;cursor:pointer;color:#1E40AF"><input id="editAccUseCustom" type="checkbox"'+(useCustom?' checked':'')+' style="vertical-align:middle;margin-right:4px"> 個別設定 (不照角色預設)</label>';
+  h+='</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:8px">';
+  h+='<button id="btnPermAll" type="button" style="padding:5px 10px;background:#fff;border:1px solid #BFDBFE;border-radius:5px;font-size:0.75rem;cursor:pointer">全選</button>';
+  h+='<button id="btnPermNone" type="button" style="padding:5px 10px;background:#fff;border:1px solid #BFDBFE;border-radius:5px;font-size:0.75rem;cursor:pointer">全不選</button>';
+  h+='<button id="btnPermRole" type="button" style="padding:5px 10px;background:#fff;border:1px solid #BFDBFE;border-radius:5px;font-size:0.75rem;cursor:pointer">套用角色預設</button>';
+  h+='</div>';
+  h+='<div id="editAccPermsGrid" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;max-height:200px;overflow-y:auto;padding:8px;background:#fff;border:1px solid #DBEAFE;border-radius:6px">';
+  var currentRole = (u.role||'').toLowerCase();
+  var rolePreset = ROLE_PERMS[currentRole] || [];
+  var checkedSet = useCustom ? existingPerms : rolePreset;
+  ALL_PERMS.forEach(function(k){
+    var checked = checkedSet.indexOf(k) >= 0;
+    h+='<label style="font-size:0.82rem;cursor:pointer;display:flex;align-items:center;gap:5px;'+(useCustom?'':'opacity:0.7;')+'"><input type="checkbox" class="editAccPerm" data-perm="'+k+'"'+(checked?' checked':'')+(useCustom?'':' disabled')+' style="margin:0">'+PERM_LABELS[k]+'</label>';
+  });
+  h+='</div>';
+  h+='<div style="font-size:0.72rem;color:#1E40AF;margin-top:6px">未勾「個別設定」時,以角色預設為準 · 勾了才能個別調整</div>';
+  h+='</div>';
   h+='<div id="editAccMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>';
   h+='<div style="display:flex;gap:10px">';
   h+='<button id="btnSaveEditAcc" style="flex:1;background:#6D28D9;color:#fff;border:none;padding:12px;border-radius:8px;font-weight:700;cursor:pointer">✅ 儲存變更</button>';
@@ -6834,21 +6903,77 @@ function showEditAccountModal(account){
   document.getElementById('modalOverlay').classList.add('open');
   setTimeout(function(){
     document.getElementById('btnCancelEditAcc').onclick=function(){closeModal()};
+    document.getElementById('btnCopyPwd').onclick=function(){
+      var v = document.getElementById('editAccPwd').value || '';
+      try { navigator.clipboard.writeText(v); } catch(e){}
+      var b = document.getElementById('btnCopyPwd');
+      var old = b.textContent;
+      b.textContent = '✅ 已複製';
+      setTimeout(function(){ b.textContent = old; }, 1200);
+    };
+    // v2.18.17: 個別設定開關 — 勾了才能勾選個別項目
+    var ucCb = document.getElementById('editAccUseCustom');
+    var permBoxes = function(){ return document.querySelectorAll('#editAccPermsGrid input.editAccPerm'); };
+    var permLabels = function(){ return document.querySelectorAll('#editAccPermsGrid label'); };
+    function syncPermDisabled(){
+      var custom = ucCb.checked;
+      permBoxes().forEach(function(b){ b.disabled = !custom; });
+      permLabels().forEach(function(l){ l.style.opacity = custom ? '1' : '0.7'; });
+      // 切換時如果收回成角色預設, 重新勾預設值
+      if (!custom) {
+        var roleNow = (document.getElementById('editAccRole').value||'').toLowerCase();
+        var preset = ROLE_PERMS[roleNow] || [];
+        permBoxes().forEach(function(b){ b.checked = preset.indexOf(b.getAttribute('data-perm')) >= 0; });
+      }
+    }
+    ucCb.addEventListener('change', syncPermDisabled);
+    document.getElementById('editAccRole').addEventListener('change', function(){
+      // 角色變了 + 未個別設定 → 重拽預設勾選
+      if (!ucCb.checked) syncPermDisabled();
+    });
+    document.getElementById('btnPermAll').onclick = function(){
+      if(!ucCb.checked){ ucCb.checked = true; syncPermDisabled(); }
+      permBoxes().forEach(function(b){ b.checked = true; });
+    };
+    document.getElementById('btnPermNone').onclick = function(){
+      if(!ucCb.checked){ ucCb.checked = true; syncPermDisabled(); }
+      permBoxes().forEach(function(b){ b.checked = false; });
+    };
+    document.getElementById('btnPermRole').onclick = function(){
+      if(!ucCb.checked){ ucCb.checked = true; syncPermDisabled(); }
+      var roleNow = (document.getElementById('editAccRole').value||'').toLowerCase();
+      var preset = ROLE_PERMS[roleNow] || [];
+      permBoxes().forEach(function(b){ b.checked = preset.indexOf(b.getAttribute('data-perm')) >= 0; });
+    };
     document.getElementById('btnSaveEditAcc').onclick=async function(){
       var name=(document.getElementById('editAccName').value||'').trim();
       var englishName=(document.getElementById('editAccEnglish').value||'').trim();
       var title=(document.getElementById('editAccTitle').value||'').trim();
       var role=document.getElementById('editAccRole').value;
+      var newPw=(document.getElementById('editAccPwd').value||'').trim();
       var msg=document.getElementById('editAccMsg');
       if(!name){msg.textContent='請填姓名';return;}
       var btn=document.getElementById('btnSaveEditAcc');
       btn.disabled=true; btn.textContent='⏳ 儲存中...';
-      var r=await callAccountApi('updateAccount', { row_index: u._row, fields: { name: name, englishName: englishName, title: title, role: role } });
+      var fields = { name: name, englishName: englishName, title: title, role: role };
+      // 只在密碼有變動時才送 password (後端: 空字串會被忽略,維持原密碼)
+      var pwChanged = (newPw && newPw !== origPw);
+      if(pwChanged) fields.password = newPw;
+      // v2.18.17: 權限 — 個別設定才送 perms JSON,空 JSON 表示「依角色預設」
+      if (ucCb.checked) {
+        var picks = [];
+        permBoxes().forEach(function(b){ if(b.checked) picks.push(b.getAttribute('data-perm')); });
+        fields.permissions = JSON.stringify(picks);
+      } else {
+        fields.permissions = '';  // 清空 → 依角色預設
+      }
+      var r=await callAccountApi('updateAccount', { row_index: u._row, fields: fields });
       if(r.success){
         markUnsaved('編輯帳號');
-        addAccountLog('編輯', account, '變更: '+name+(englishName?' ('+englishName+')':'')+' · '+title+' · '+role);
+        var permNote = ucCb.checked ? ' · 🔓個別權限' : '';
+        addAccountLog('編輯', account, '變更: '+name+(englishName?' ('+englishName+')':'')+' · '+title+' · '+role+(pwChanged?' · 🔑改密碼':'')+permNote);
         closeModal();
-        if(typeof showToast==='function') showToast('✅ 帳號資料已更新');
+        if(typeof showToast==='function') showToast('✅ 帳號資料已更新'+(pwChanged?' (密碼已更新)':''));
         _cloudAccounts=[];
         await reloadCloudAccounts();
         switchSection('accounts');
