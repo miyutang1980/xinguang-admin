@@ -847,13 +847,20 @@ function escapeHtml(s){
 
 // ── 說明會簡報下載區 ──────────────────────────────────────────────────────
 // ===== 系統健檢模組 =====
-// v2.18.16: 加 LINE userId 欄 (Gateway 自動加的不是「多出」)
+// v2.18.16: 加 LINE userId 欄為「選填」 (有不算多出·沒也不算缺)
 window.SHEET_EXPECTED_HEADERS = {
-  '問課諮詢':   ['時間','家長','電話','Email','LINE','孩子','班型','問題','狀態','LINE userId'],
-  '預約紀錄':   ['時間','家長','電話','孩子','類型','日期','時段','狀態','LINE userId'],
-  '夏令營報名': ['時間','家長','電話','LINE','孩子','課程','飲食','狀態','LINE userId'],
-  '正式註冊':   ['時間','家長','電話','Email','學生','年級','班型','分班','附加服務','狀態','LINE userId'],
+  '問課諮詢':   ['時間','家長','電話','Email','LINE','孩子','班型','問題','狀態'],
+  '預約紀錄':   ['時間','家長','電話','孩子','類型','日期','時段','狀態'],
+  '夏令營報名': ['時間','家長','電話','LINE','孩子','課程','飲食','狀態'],
+  '正式註冊':   ['時間','家長','電話','Email','學生','年級','班型','分班','附加服務','狀態'],
   'LINE好友':    ['userId','displayName','電話','加入時間','來源','sentMessages']
+};
+// 選填欄位 (有有沒沒都不算錯)
+window.SHEET_OPTIONAL_HEADERS = {
+  '問課諮詢':   ['LINE userId'],
+  '預約紀錄':   ['LINE userId'],
+  '夏令營報名': ['LINE userId'],
+  '正式註冊':   ['LINE userId']
 };
 
 window.healthState = { lastReport: null, isChecking: false };
@@ -931,9 +938,11 @@ async function runHealthCheck(){
     try {
       var headers = await fetchSheetHeaders(name);
       var nonEmpty = headers.filter(function(h){ return h && String(h).trim() !== ''; });
+      var optional = (window.SHEET_OPTIONAL_HEADERS && window.SHEET_OPTIONAL_HEADERS[name]) || [];
       var missing  = expected.filter(function(k){ return nonEmpty.indexOf(k) < 0; });
       var pollutedMeta = nonEmpty.filter(function(k){ return /^_/.test(String(k)); });
-      var extra = nonEmpty.filter(function(k){ return expected.indexOf(k) < 0 && pollutedMeta.indexOf(k) < 0; });
+      // extra: 不在 expected 也不在 optional 才算多出
+      var extra = nonEmpty.filter(function(k){ return expected.indexOf(k) < 0 && optional.indexOf(k) < 0 && pollutedMeta.indexOf(k) < 0; });
       var status = '✅';
       if (missing.length) status = '❌';
       else if (pollutedMeta.length || extra.length) status = '⚠️';
