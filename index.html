@@ -490,11 +490,18 @@ async function doLogin() {
       initApp();
       return;
     } else if (gwResult.error) {
-      // Gateway 明確回錯 · 不再下轉 (避免本地備援結果不一致)
-      errEl.textContent = gwResult.error;
-      errEl.style.color = '#dc2626';
-      errEl.style.display = 'block';
-      return;
+      // v2.18.18b: 辨識 Gateway 是否未部署新版 _authLogin
+      var errStr = String(gwResult.error || '');
+      if (errStr.indexOf('invalid type') >= 0 || errStr.indexOf('Unknown') >= 0 || errStr.indexOf('not found') >= 0) {
+        console.warn('Gateway 未部署新版 _authLogin · 下轉 n8n fallback');
+        // 不 return,繼續走下面的 n8n 路線
+      } else {
+        // 「帳號或密碼錯誤」·「此帳號已停用」等 · 顯示不轉
+        errEl.textContent = gwResult.error;
+        errEl.style.color = '#dc2626';
+        errEl.style.display = 'block';
+        return;
+      }
     }
   } catch (err) {
     console.warn('Gateway 驗證失敗 · 轉 n8n fallback:', err);
