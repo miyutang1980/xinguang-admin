@@ -3294,15 +3294,20 @@ async function updateStatus(collection, idx, newStatus) {
     data[collection][idx].status = newStatus;
     saveData(data);
     showToast('✅ 狀態已更新：' + newStatus);
-    // 如果是 bookings，同步到 Gateway
-    if (collection === 'bookings') {
+    // v2.18.20: bookings/camp/inquiries/registrations 都同步到 Gateway (以免重新載入後被覆蓋)
+    const SYNC_COLLECTIONS = ['bookings', 'camp', 'inquiries', 'registrations'];
+    if (SYNC_COLLECTIONS.indexOf(collection) >= 0) {
       const rec = data[collection][idx];
       if (rec._rowIndex) {
         try {
-          const r = await _formsDataWrite('update', 'bookings', { status: newStatus }, rec._rowIndex);
+          const r = await _formsDataWrite('update', collection, { status: newStatus }, rec._rowIndex);
           if (r.ok) showToast('✅ 雲端已同步');
           else showToast('⚠️ 雲端同步失敗 - ' + r.msg);
         } catch(e) { showToast('⚠️ 雲端同步失敗'); }
+      } else {
+        // 沒 _rowIndex 表示這筆沒被雲端變出 · 提醒使用者
+        console.warn('[' + collection + '][' + idx + '] 沒有 _rowIndex,重載入會被雲端覆蓋');
+        showToast('⚠️ 這筆是本地筆 · 重新載入會遵雲端',  );
       }
     }
   }
@@ -7848,7 +7853,8 @@ function _genFormSubmit(ev) {
 // ====================================================================
 // 嘗試寫回 HQ Sheets — 失敗給警告但不擋
 async function _formsDataWrite(action, collection, payload, rowIndex) {
-  // 預約紀錄 走 Apps Script Gateway (booking_*) — 其他 collection 繼續走 N8N forms-data
+  // v2.18.20: bookings/camp/inquiries/registrations 都走 Gateway (不再勍 n8n)
+  // 只有 update 走 Gateway · create/delete 暂時繼續走 n8n (避免動到另外三個端點)
   if (collection === 'bookings') {
     try {
       var gwAction = action === 'create' ? 'booking_create'
@@ -7866,6 +7872,25 @@ async function _formsDataWrite(action, collection, payload, rowIndex) {
       var r = {};
       try { r = await res.json(); } catch(e){}
       return { ok: r.success !== false, msg: r.error || '', row: r.row };
+    } catch (e) {
+      return { ok: false, msg: e.message };
+    }
+  }
+  // v2.18.20: camp/inquiries/registrations 狀態更新 走 Gateway
+  if (action === 'update' && (collection === 'camp' || collection === 'inquiries' || collection === 'registrations')) {
+    try {
+      var gwActionMap = { camp: 'camp_update', inquiries: 'inquiry_update', registrations: 'register_update' };
+      var gwBody2 = { _action: gwActionMap[collection], fields: payload };
+      if (rowIndex) gwBody2.row_index = rowIndex;
+      var res2 = await fetch(GW_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(gwBody2),
+        redirect: 'follow'
+      });
+      var r2 = {};
+      try { r2 = await res2.json(); } catch(e){}
+      return { ok: r2.success !== false, msg: r2.error || '' };
     } catch (e) {
       return { ok: false, msg: e.message };
     }
