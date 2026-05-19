@@ -1615,6 +1615,7 @@ async function renderBooking(el) {
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openBookingForm(${realIdx})" title="編輯預約">✏️</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #F59E0B;color:#92400E;border-radius:6px;cursor:pointer" onclick="_bookingCancelAdmin(${realIdx})" title="取消預約 (推三邊 + 釋放時段)">❌</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer" onclick="_formRepush('bookings',${realIdx})" title="補推這筆到招生群">📤</button></td><td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button></td>
     </tr>`;
   }).join('');
@@ -12145,6 +12146,35 @@ var _FORM_META = {
 
 // 主入口：預設軟刪除（隱藏此筆、Sheets 仍保留）、附 toast undo。
 // 要永久刪除請到 Google Sheets 手動處理。
+// v2.18.23: 後台取消預約 (狀態變「已取消」 + 推三邊 + 釋放時段)
+async function _bookingCancelAdmin(idx) {
+  var d = loadData();
+  var r = (d.bookings || [])[idx];
+  if (!r) { alert('找不到這筆預約'); return; }
+  if (!r._rowIndex) { alert('這筆沒有 Sheet 行號 · 請改到 Sheet 手動改狀態'); return; }
+  if (r.status === '已取消') { alert('這筆已取消過'); return; }
+  var displayName = (r.parent || r.pname || '這筆預約') + (r.child ? ' (' + r.child + ')' : '');
+  var reason = prompt('取消「' + displayName + '」?\n\n可填取消原因 (選填):', '');
+  if (reason === null) return;
+  var cancelBy = (_currentUser && _currentUser.name) || 'admin';
+  try {
+    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+    var res = await fetch(GW_URL_LOCAL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'booking_cancel', row_index: r._rowIndex, cancel_by: cancelBy, reason: reason })
+    });
+    var j = await res.json();
+    if (j && j.success) {
+      r.status = '已取消'; saveData(d);
+      if (typeof showToast === 'function') showToast('✅ 已取消 · 時段釋放 · 招生群+家長已通知');
+      if (typeof switchSection === 'function') switchSection('booking');
+    } else {
+      alert('❌ 取消失敗: ' + (j.error || '未知錯誤'));
+    }
+  } catch (e) { alert('取消錯誤: ' + e.message); }
+}
+
 // v2.18.22: 手動补推某筆表單到招生群
 async function _formRepush(collection, idx) {
   var d = loadData();
