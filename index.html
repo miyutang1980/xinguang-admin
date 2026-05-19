@@ -1473,7 +1473,7 @@ function renderInquiry(el) {
       </td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showInquiryDetail(${realIdx})">查看</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openInquiryForm(${realIdx})" title="編輯這筆問課">✏️</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('inquiries',${realIdx})" title="刪除這筆問課諮詢">[X]</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer" onclick="_formRepush('inquiries',${realIdx})" title="補推這筆到招生群">📤</button></td><td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('inquiries',${realIdx})" title="刪除這筆問課諮詢">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -1615,7 +1615,7 @@ async function renderBooking(el) {
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openBookingForm(${realIdx})" title="編輯預約">✏️</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer" onclick="_formRepush('bookings',${realIdx})" title="補推這筆到招生群">📤</button></td><td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -1853,7 +1853,7 @@ function renderTrialBookings(el) {
       </select></td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button>
-        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formRepush('bookings',${realIdx})" title="補推到招生群">📤</button><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
       </td>
     </tr>`;
   }).join('');
@@ -2187,7 +2187,7 @@ function renderCamp(el) {
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showCampDetail(${realIdx})">查看</button></td>
       <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2B7A4B;color:#2B7A4B;border-radius:6px;cursor:pointer" onclick="openCampForm(${realIdx})" title="編輯夏令營">✏️</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('camp',${realIdx})" title="刪除這筆夏令營報名">[X]</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer" onclick="_formRepush('camp',${realIdx})" title="補推這筆到招生群">📤</button></td><td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('camp',${realIdx})" title="刪除這筆夏令營報名">[X]</button></td>
     </tr>`;
   }).join('');
 }
@@ -2988,7 +2988,7 @@ function renderRegister(el) {
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td><button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showRegDetail(${realIdx})">查看</button></td>
-      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('registrations',${realIdx})" title="刪除這筆正式報名">❌</button></td>
+      <td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer" onclick="_formRepush('registrations',${realIdx})" title="補推這筆到招生群">📤</button></td><td><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer" onclick="_formDelete('registrations',${realIdx})" title="刪除這筆正式報名">❌</button></td>
     </tr>`;
   }).join('');
 }
@@ -12145,6 +12145,35 @@ var _FORM_META = {
 
 // 主入口：預設軟刪除（隱藏此筆、Sheets 仍保留）、附 toast undo。
 // 要永久刪除請到 Google Sheets 手動處理。
+// v2.18.22: 手動补推某筆表單到招生群
+async function _formRepush(collection, idx) {
+  var d = loadData();
+  var arr = (d[collection] || []);
+  var r = arr[idx];
+  if (!r) { alert('找不到這筆'); return; }
+  if (!r._rowIndex) { alert('這筆沒有 Sheet 行號 · 無法补推·請改用「+手動新增」'); return; }
+  var typeMap = { inquiries: 'inquiry', bookings: 'booking', camp: 'camp', registrations: 'register', assessments: 'assess' };
+  var formType = typeMap[collection];
+  if (!formType) { alert('不支援補推: ' + collection); return; }
+  var displayName = r.parent || r.pname || r.studentName || r.sname || '這筆';
+  if (!confirm('手動推「' + displayName + '」到招生群?\n\n推出去的卡上會有「🔄 手動补推」標記·不會讓人誤以為是新一筆。')) return;
+  if (typeof showToast === 'function') showToast('⏳ 补推中...');
+  try {
+    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+    var res = await fetch(GW_URL_LOCAL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'form_repush', form_type: formType, row_index: r._rowIndex })
+    });
+    var j = await res.json();
+    if (j && j.success) {
+      showToast('✅ 已推「' + (j.parent || displayName) + '」到招生群');
+    } else {
+      alert('❌ 补推失敗: ' + (j.error || '未知錯誤'));
+    }
+  } catch (e) { alert('補推錯誤: ' + e.message); }
+}
+
 async function _formDelete(collection, idx) {
   var d = loadData();
   var arr = (d[collection] || []);
