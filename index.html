@@ -1019,16 +1019,22 @@ async function runHealthCheck(){
     when: new Date().toLocaleString('zh-TW',{timeZone:'Asia/Taipei'}),
     services: {}, sheets: {}, issues: [], warnings: []
   };
+  // v2.18.28: 服務列表 · n8n 標「已棄用」 · 不計入嚴重問題
   var serviceTargets = [
-    { key:'main',  label:'主網站',  url:'https://taipingxinguang.org/' },
-    { key:'admin', label:'後台',     url:'https://admin.taipingxinguang.org/' },
-    { key:'n8n',   label:'n8n 服務', url:'https://miyutang.app.n8n.cloud/' }
+    { key:'main',  label:'主網站',  url:'https://taipingxinguang.org/', deprecated:false },
+    { key:'admin', label:'後台',     url:'https://admin.taipingxinguang.org/', deprecated:false },
+    { key:'n8n',   label:'n8n 服務 (已棄用)', url:'https://miyutang.app.n8n.cloud/', deprecated:true }
   ];
   for (var i=0; i<serviceTargets.length; i++){
     var t = serviceTargets[i];
     var r = await checkUrlAlive(t.url);
-    report.services[t.key] = { label:t.label, url:t.url, ok:r.ok, status:r.ok?'✅':'❌', detail:r.status };
-    if (!r.ok) report.issues.push(t.label + ' 連線失敗：' + r.status);
+    var statusIcon = r.ok ? '✅' : (t.deprecated ? '⚫' : '❌');
+    report.services[t.key] = { label:t.label, url:t.url, ok:r.ok, status:statusIcon, detail:r.status, deprecated: t.deprecated };
+    // 棄用服務不計「嚴重問題」 · 只計 warning
+    if (!r.ok) {
+      if (t.deprecated) report.warnings.push(t.label + ' 連線失敗 (可忽略)');
+      else report.issues.push(t.label + ' 連線失敗：' + r.status);
+    }
   }
   var sheetNames = Object.keys(window.SHEET_EXPECTED_HEADERS);
   for (var j=0; j<sheetNames.length; j++){
@@ -1102,8 +1108,11 @@ async function renderHealth(el){
   var skeys = ['main','admin','n8n'];
   for (var sk=0; sk<skeys.length; sk++){
     var s = report.services[skeys[sk]]; if (!s) continue;
-    var bg = s.ok ? '#F0FDF4' : '#FEF2F2';
-    var bc = s.ok ? '#2B7A4B' : '#C0392B';
+    // v2.18.28: 棄用服務用中性灰色·不用紅色警告
+    var bg, bc;
+    if (s.deprecated) { bg = '#F3F4F6'; bc = '#9CA3AF'; }
+    else if (s.ok)    { bg = '#F0FDF4'; bc = '#2B7A4B'; }
+    else              { bg = '#FEF2F2'; bc = '#C0392B'; }
     html += '<div style="background:' + bg + ';border:1.5px solid ' + bc + ';border-radius:8px;padding:14px;text-align:center"><div style="font-size:0.78rem;color:#666;margin-bottom:4px">' + healthEscape(s.label) + '</div><div style="font-size:1.5rem">' + s.status + '</div></div>';
   }
   html += '</div></div>';
