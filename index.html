@@ -201,6 +201,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
     <div class="sidebar-item" onclick="switchSection('docs')" id="nav-docs">
         📖 文件中心
       </div>
+    <div class="sidebar-item" onclick="switchSection('announce')" id="nav-announce">
+        📢 公告
+      </div>
     <div class="sidebar-item" onclick="switchSection('links')" id="nav-links">
         🔗 連結中心
       </div>
@@ -289,7 +292,7 @@ var PERM_LABELS = {
   trial:'體驗課排班', trialBookings:'體驗預約一覽',
   documents:'說明會簡報', students:'學生管理',
   classAssign:'班級指派', leaves:'請假紀錄',
-  docs:'文件中心', links:'連結中心', classes:'開班資訊',
+  docs:'文件中心', announce:'公告', links:'連結中心', classes:'開班資訊',
   webcal:'參訪/檢測日曆', pickup:'接送排程',
   assignments:'今日接送', transfer:'強制轉交',
   lineSrc:'LINE 來源分析', stats:'老師月報',
@@ -790,6 +793,7 @@ function switchSection(sec) {
   else if(sec === 'classAssign') { _lazyRender(content, 'renderClassAssign', '班級指派模組'); }
   else if(sec === 'leaves') { _lazyRender(content, 'renderLeaves', '請假紀錄模組'); }
   else if(sec === 'docs') { _lazyRender(content, 'renderDocs', '文件中心模組'); }
+  else if(sec === 'announce') { _lazyRender(content, 'renderAnnounce', '公告模組'); }
   else if(sec === 'links') { _lazyRender(content, 'renderLinks', '連結中心模組'); }
   else if(sec === 'webcal') { _lazyRender(content, 'renderWebCalendar', '參訪/檢測日曆模組'); }
   else if(sec === 'pickup') { _lazyRender(content, 'renderPickupSchedule', '接送模組'); }
@@ -12250,6 +12254,253 @@ async function _formDelete(collection, idx) {
   meta.render();
   showToast('✅ ' + meta.name + '已隱藏');
 }
+
+// ===== 📢 公告模組 (v2.18.32) =====
+let _annTab = 'pending';  // 'pending' | 'create' | 'published' | 'rejected'
+let _annCache = { pending: null, published: null, rejected: null };
+
+async function renderAnnounce(el) {
+  const tabBar = `
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="${_annTab==='pending'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('pending')">⏳ 待審核 <span id="annPendingCount" style="opacity:0.7"></span></button>
+      <button class="${_annTab==='create'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('create')">✍️ 提報公告</button>
+      <button class="${_annTab==='published'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('published')">✅ 已發佈</button>
+      <button class="${_annTab==='rejected'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('rejected')">❌ 已拒絕</button>
+    </div>
+    <div id="annBody"></div>
+  `;
+  el.innerHTML = tabBar;
+  _annRenderBody();
+}
+
+function _annSwitchTab(t) {
+  _annTab = t;
+  renderAnnounce(document.getElementById('mainContent'));
+}
+
+async function _annRenderBody() {
+  const body = document.getElementById('annBody');
+  if (!body) return;
+  if (_annTab === 'create') { body.innerHTML = _annRenderForm(); return; }
+  body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">載入中...</div>';
+  const statusMap = { pending: '待審核', published: '已發佈', rejected: '已拒絕' };
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_list', status: statusMap[_annTab], limit: 100 })
+    });
+    const r = await res.json();
+    if (!r.success) { body.innerHTML = '<div class="card" style="padding:20px;color:#DC2626">❌ ' + (r.error || '載入失敗') + '</div>'; return; }
+    const list = r.announcements || [];
+    if (_annTab === 'pending') {
+      const cnt = document.getElementById('annPendingCount');
+      if (cnt) cnt.textContent = list.length ? '(' + list.length + ')' : '';
+    }
+    if (!list.length) {
+      body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">' + _annEmptyText() + '</div>';
+      return;
+    }
+    body.innerHTML = list.map(a => _annRenderCard(a)).join('');
+  } catch (e) {
+    body.innerHTML = '<div class="card" style="padding:20px;color:#DC2626">❌ 連線錯誤: ' + e.message + '</div>';
+  }
+}
+
+function _annEmptyText() {
+  if (_annTab === 'pending') return '現在沒有待審公告';
+  if (_annTab === 'published') return '還沒有已發佈的公告';
+  if (_annTab === 'rejected') return '沒有拒絕記錄';
+  return '';
+}
+
+function _annCategoryStyle(cat) {
+  const map = {
+    '獎勵': { icon: '🏆', color: '#10B981', bg: '#ECFDF5' },
+    '懲處': { icon: '⚠️', color: '#DC2626', bg: '#FEF2F2' },
+    '人事': { icon: '👥', color: '#3B82F6', bg: '#EFF6FF' },
+    '活動': { icon: '📅', color: '#F59E0B', bg: '#FEF3C7' }
+  };
+  return map[cat] || { icon: '📢', color: '#6B7280', bg: '#F9FAFB' };
+}
+
+function _annRenderCard(a) {
+  const cs = _annCategoryStyle(a.category);
+  const isPending = a.status === '待審核';
+  const isPublished = a.status === '已發佈';
+  const isRejected = a.status === '已拒絕';
+  let actions = '';
+  if (isPending) {
+    actions = `
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-green" onclick="_annApproveCard(${a.row})" style="flex:1">✓ 同意發布</button>
+        <button class="btn btn-outline" onclick="_annRejectCard(${a.row})" style="flex:1;color:#DC2626;border-color:#DC2626">✕ 拒絕</button>
+      </div>`;
+  } else if (isPublished && a.pdfUrl) {
+    actions = `
+      <div style="margin-top:12px">
+        <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block">📄 下載 PDF</a>
+      </div>`;
+  }
+  let metaLine = '提報人: <b>' + _esc(a.submitter) + '</b>';
+  if (a.target) metaLine += ' · 對象: <b>' + _esc(a.target) + '</b>';
+  metaLine += ' · ' + a.time;
+  let statusBadge = '';
+  if (isPending) statusBadge = '<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">⏳ 待審核</span>';
+  if (isPublished) statusBadge = '<span style="background:#D1FAE5;color:#065F46;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">✅ 已發佈</span>';
+  if (isRejected) statusBadge = '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">❌ 已拒絕</span>';
+  let rejectInfo = '';
+  if (isRejected) {
+    rejectInfo = '<div style="margin-top:8px;padding:8px 12px;background:#FEE2E2;border-radius:6px;font-size:0.85rem;color:#991B1B">拒絕人: ' + _esc(a.approver) + ' · 原因: ' + _esc(a.rejectReason) + '</div>';
+  }
+  let approveInfo = '';
+  if (isPublished) {
+    approveInfo = '<div style="margin-top:8px;font-size:0.8rem;color:#9CA3AF">✓ ' + _esc(a.approver) + ' 於 ' + a.approvedAt + ' 審核通過</div>';
+  }
+  return `
+    <div class="card" style="padding:16px;margin-bottom:12px;border-left:4px solid ${cs.color}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:6px;font-size:0.8rem;color:${cs.color};font-weight:700">
+            ${cs.icon} ${a.category} · ${a.no}
+            ${statusBadge}
+          </div>
+          <h3 style="margin:6px 0;font-size:1.1rem;color:#1F2937">${_esc(a.title)}</h3>
+          <div style="font-size:0.82rem;color:#6B7280;margin-bottom:8px">${metaLine}</div>
+          <div style="font-size:0.9rem;color:#374151;line-height:1.6;white-space:pre-wrap">${_esc(a.contentPreview)}${a.contentPreview.length >= 100 ? '...' : ''}</div>
+          ${approveInfo}
+          ${rejectInfo}
+        </div>
+      </div>
+      ${actions}
+    </div>`;
+}
+
+function _annRenderForm() {
+  return `
+    <div class="card" style="padding:20px">
+      <h3 style="margin:0 0 16px;font-size:1.15rem">✍️ 提報新公告</h3>
+      <div style="display:grid;gap:14px">
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;margin-bottom:4px;font-weight:600">類別 *</label>
+          <select id="annCategory" style="width:100%;padding:9px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem">
+            <option value="獎勵">🏆 獎勵 (嘉獎/小功/大功)</option>
+            <option value="懲處">⚠️ 懲處 (申誡/記小過/記大過)</option>
+            <option value="人事">👥 人事 (晉升/調任/新人到职)</option>
+            <option value="活動">📅 活動 (說明會/生日會/聚餐)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;margin-bottom:4px;font-weight:600">標題 *</label>
+          <input id="annTitle" type="text" placeholder="例: 恭賀王老師獲選月度最佳老師" style="width:100%;padding:9px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.85rem;color:#374151;margin-bottom:4px;font-weight:600">內文 *</label>
+          <textarea id="annContent" rows="8" placeholder="詳細記述事蹟/事由..." style="width:100%;padding:9px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem;font-family:inherit;line-height:1.6;resize:vertical"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label style="display:block;font-size:0.85rem;color:#374151;margin-bottom:4px;font-weight:600">提報人 *</label>
+            <input id="annSubmitter" type="text" placeholder="例: 湯敦郁" style="width:100%;padding:9px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem">
+          </div>
+          <div>
+            <label style="display:block;font-size:0.85rem;color:#374151;margin-bottom:4px;font-weight:600">被表揚/懲處人 (選填)</label>
+            <input id="annTarget" type="text" placeholder="例: 王老師 · 或留空用於人事/活動" style="width:100%;padding:9px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem">
+          </div>
+        </div>
+        <div style="padding:10px 14px;background:#EFF6FF;border-left:3px solid #3B82F6;border-radius:6px;font-size:0.85rem;color:#1E40AF">
+          💡 送出後 · 三位主管 (湯敦郁 / 湯璟聖 / 郭育慧) 會同時收到 LINE 審核卡 · 任一主管點同意即可發佈。
+        </div>
+        <button id="annSubmitBtn" class="btn btn-green" onclick="_annSubmit()" style="padding:12px;font-size:1rem;font-weight:700">📢 提交公告 · 送主管審核</button>
+        <div id="annSubmitMsg" style="font-size:0.9rem"></div>
+      </div>
+    </div>
+  `;
+}
+
+async function _annSubmit() {
+  const btn = document.getElementById('annSubmitBtn');
+  const msg = document.getElementById('annSubmitMsg');
+  const body = {
+    _action: 'announce_create',
+    category: document.getElementById('annCategory').value,
+    title: document.getElementById('annTitle').value.trim(),
+    content: document.getElementById('annContent').value.trim(),
+    submitter: document.getElementById('annSubmitter').value.trim(),
+    target: document.getElementById('annTarget').value.trim(),
+    source: '後台'
+  };
+  if (!body.title) { msg.innerHTML = '<span style="color:#DC2626">❌ 請填標題</span>'; return; }
+  if (!body.content) { msg.innerHTML = '<span style="color:#DC2626">❌ 請填內文</span>'; return; }
+  if (!body.submitter) { msg.innerHTML = '<span style="color:#DC2626">❌ 請填提報人</span>'; return; }
+  btn.disabled = true;
+  btn.textContent = '送出中...';
+  msg.innerHTML = '';
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(body)
+    });
+    const r = await res.json();
+    if (!r.success) {
+      msg.innerHTML = '<span style="color:#DC2626">❌ ' + (r.error || '送出失敗') + '</span>';
+      btn.disabled = false;
+      btn.textContent = '📢 提交公告 · 送主管審核';
+      return;
+    }
+    msg.innerHTML = '<div style="padding:12px;background:#D1FAE5;border-radius:6px;color:#065F46">✅ 公告已送出 · 編號: <b>' + r.no + '</b> · 三位主管已收到 LINE 審核卡</div>';
+    // 清空表單
+    document.getElementById('annTitle').value = '';
+    document.getElementById('annContent').value = '';
+    document.getElementById('annTarget').value = '';
+    btn.disabled = false;
+    btn.textContent = '📢 提交公告 · 送主管審核';
+    setTimeout(() => { _annTab = 'pending'; renderAnnounce(document.getElementById('mainContent')); }, 1500);
+  } catch (e) {
+    msg.innerHTML = '<span style="color:#DC2626">❌ 連線錯誤: ' + e.message + '</span>';
+    btn.disabled = false;
+    btn.textContent = '📢 提交公告 · 送主管審核';
+  }
+}
+
+async function _annApproveCard(row) {
+  const approver = prompt('請輸入您的姓名 (作為審核記錄):');
+  if (!approver) return;
+  if (!confirm('確定同意發布這份公告? 發布後會自動生成 PDF 並推送到全體員工群。')) return;
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_approve', row: row, approver: approver })
+    });
+    const r = await res.json();
+    if (!r.success) { alert('❌ ' + r.error); return; }
+    showToast('✅ 公告已發布 · ' + r.no);
+    _annRenderBody();
+  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+}
+
+async function _annRejectCard(row) {
+  const approver = prompt('請輸入您的姓名:');
+  if (!approver) return;
+  const reason = prompt('拒絕原因:');
+  if (!reason) return;
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_reject', row: row, approver: approver, reason: reason })
+    });
+    const r = await res.json();
+    if (!r.success) { alert('❌ ' + r.error); return; }
+    showToast('公告已拒絕');
+    _annRenderBody();
+  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+}
+
+// ===== END 公告模組 =====
+
 </script>
 </body>
 </html>
