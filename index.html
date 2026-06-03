@@ -12264,7 +12264,7 @@ async function renderAnnounce(el) {
     <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
       <button class="${_annTab==='pending'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('pending')">⏳ 待審核 <span id="annPendingCount" style="opacity:0.7"></span></button>
       <button class="${_annTab==='create'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('create')">✍️ 提報公告</button>
-      <button class="${_annTab==='published'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('published')">✅ 已發佈</button>
+      <button class="${_annTab==='published'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('published')">✅ 已發布</button>
       <button class="${_annTab==='rejected'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('rejected')">❌ 已拒絕</button>
     </div>
     <div id="annBody"></div>
@@ -12283,7 +12283,7 @@ async function _annRenderBody() {
   if (!body) return;
   if (_annTab === 'create') { body.innerHTML = _annRenderForm(); return; }
   body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">載入中...</div>';
-  const statusMap = { pending: '待審核', published: '已發佈', rejected: '已拒絕' };
+  const statusMap = { pending: '待審核', published: '已發布', rejected: '已拒絕' };
   try {
     const res = await fetch(GW_URL, {
       method: 'POST',
@@ -12309,7 +12309,7 @@ async function _annRenderBody() {
 
 function _annEmptyText() {
   if (_annTab === 'pending') return '現在沒有待審公告';
-  if (_annTab === 'published') return '還沒有已發佈的公告';
+  if (_annTab === 'published') return '還沒有已發布的公告';
   if (_annTab === 'rejected') return '沒有拒絕記錄';
   return '';
 }
@@ -12328,7 +12328,7 @@ function _annCategoryStyle(cat) {
 function _annRenderCard(a) {
   const cs = _annCategoryStyle(a.category);
   const isPending = a.status === '待審核';
-  const isPublished = a.status === '已發佈';
+  const isPublished = a.status === '已發布';
   const isRejected = a.status === '已拒絕';
   let actions = '';
   if (isPending) {
@@ -12339,8 +12339,14 @@ function _annRenderCard(a) {
       </div>`;
   } else if (isPublished && a.pdfUrl) {
     actions = `
-      <div style="margin-top:12px">
+      <div style="margin-top:12px;display:flex;gap:8px">
         <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block">📄 下載 PDF</a>
+        <button class="btn btn-outline" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem">🔄 重生 PDF</button>
+      </div>`;
+  } else if (isPublished && !a.pdfUrl) {
+    actions = `
+      <div style="margin-top:12px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:0.85rem;color:#92400E">
+        ⚠️ PDF 生成失敗 · <button class="btn btn-green" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem;padding:4px 12px;margin-left:8px">🔄 重生 PDF</button>
       </div>`;
   }
   let metaLine = '提報人: <b>' + _esc(a.submitter) + '</b>';
@@ -12348,7 +12354,7 @@ function _annRenderCard(a) {
   metaLine += ' · ' + a.time;
   let statusBadge = '';
   if (isPending) statusBadge = '<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">⏳ 待審核</span>';
-  if (isPublished) statusBadge = '<span style="background:#D1FAE5;color:#065F46;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">✅ 已發佈</span>';
+  if (isPublished) statusBadge = '<span style="background:#D1FAE5;color:#065F46;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">✅ 已發布</span>';
   if (isRejected) statusBadge = '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">❌ 已拒絕</span>';
   let rejectInfo = '';
   if (isRejected) {
@@ -12479,6 +12485,21 @@ async function _annApproveCard(row) {
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('✅ 公告已發布 · ' + r.no);
+    _annRenderBody();
+  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+}
+
+async function _annRegenPdf(row) {
+  if (!confirm('重生 PDF? 原有 PDF 如果有也會被取代。')) return;
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_regen_pdf', row: row })
+    });
+    const r = await res.json();
+    if (!r.success) { alert('❌ ' + r.error); return; }
+    showToast('✅ PDF 已重生 · ' + r.no);
     _annRenderBody();
   } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
 }
