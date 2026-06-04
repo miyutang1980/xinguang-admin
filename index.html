@@ -12345,6 +12345,7 @@ function _annRenderCard(a) {
       <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
         <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block">📄 下載 PDF</a>
         <button class="btn btn-outline" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem">🔄 重生 PDF</button>
+        <button class="btn btn-outline" onclick="_annCloneToDraft(${a.row})" style="font-size:0.85rem;color:#0F4A3E;border-color:#0F4A3E">📋 複製為新稿</button>
         <button class="btn btn-outline" onclick="_annWithdraw(${a.row})" style="font-size:0.85rem;color:#DC2626;border-color:#DC2626;margin-left:auto">↩ 撤回</button>
       </div>`;
   } else if (isPublished && !a.pdfUrl) {
@@ -12352,13 +12353,20 @@ function _annRenderCard(a) {
       <div style="margin-top:12px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:0.85rem;color:#92400E">
         ⚠️ PDF 生成失敗 · <button class="btn btn-green" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem;padding:4px 12px;margin-left:8px">🔄 重生 PDF</button>
       </div>
-      <div style="margin-top:8px;text-align:right">
+      <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="_annCloneToDraft(${a.row})" style="font-size:0.85rem;color:#0F4A3E;border-color:#0F4A3E">📋 複製為新稿</button>
         <button class="btn btn-outline" onclick="_annWithdraw(${a.row})" style="font-size:0.85rem;color:#DC2626;border-color:#DC2626">↩ 撤回</button>
       </div>`;
-  } else if (isWithdrawn && a.pdfUrl) {
+  } else if (isWithdrawn) {
+    actions = `
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        ${a.pdfUrl ? `<a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block;color:#6B7280">📄 查看作廢 PDF</a>` : ''}
+        <button class="btn btn-green" onclick="_annCloneToDraft(${a.row})" style="font-size:0.85rem">📋 複製為新稿修改</button>
+      </div>`;
+  } else if (isRejected) {
     actions = `
       <div style="margin-top:12px">
-        <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block;color:#6B7280">📄 查看作廢 PDF</a>
+        <button class="btn btn-green" onclick="_annCloneToDraft(${a.row})" style="font-size:0.85rem">📋 複製為新稿修改</button>
       </div>`;
   }
   let metaLine = '提報人: <b>' + _esc(a.submitter) + '</b>';
@@ -12517,6 +12525,48 @@ async function _annRegenPdf(row) {
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('✅ PDF 已重生 · ' + r.no);
     _annRenderBody();
+  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+}
+
+// v2.18.38: 複製公告為新稿 · 拿原稿資料 → 跳提報表單預填內容
+async function _annCloneToDraft(row) {
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_get', row: row })
+    });
+    const r = await res.json();
+    if (!r.success || !r.announcement) { alert('❌ 無法拿到原稿: ' + (r.error || '')); return; }
+    const a = r.announcement;
+    // 切到 create tab
+    _annTab = 'create';
+    renderAnnounce(document.getElementById('mainContent'));
+    // 等 DOM 渲染完再填欄 (innerHTML 改完需一個 tick)
+    setTimeout(() => {
+      const cat = document.getElementById('annCategory');
+      const ttl = document.getElementById('annTitle');
+      const cnt = document.getElementById('annContent');
+      const sub = document.getElementById('annSubmitter');
+      const tgt = document.getElementById('annTarget');
+      if (cat) cat.value = a.category || '獎勵';
+      // 標題加「[修正版]」前綴 (避免重複加)
+      let newTitle = a.title || '';
+      if (newTitle.indexOf('[修正版]') < 0) newTitle = '[修正版] ' + newTitle;
+      if (ttl) ttl.value = newTitle;
+      if (cnt) cnt.value = a.content || '';
+      if (sub) sub.value = a.submitter || '';
+      if (tgt) tgt.value = a.target || '';
+      // 提示
+      const msg = document.getElementById('annSubmitMsg');
+      if (msg) {
+        msg.innerHTML = '<div style="padding:10px 14px;background:#ECFDF5;border-left:3px solid #10B981;border-radius:6px;color:#065F46">✅ 已複製原稿 · 請修改內容後送出</div>';
+      }
+      // 滾動到頂部 + focus 到標題讓您馬上能改
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (ttl) { ttl.focus(); ttl.select(); }
+      showToast('📋 已複製 · 請修改後送出');
+    }, 100);
   } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
 }
 
