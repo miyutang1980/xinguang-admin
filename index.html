@@ -12266,6 +12266,7 @@ async function renderAnnounce(el) {
       <button class="${_annTab==='create'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('create')">✍️ 提報公告</button>
       <button class="${_annTab==='published'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('published')">✅ 已發布</button>
       <button class="${_annTab==='rejected'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('rejected')">❌ 已拒絕</button>
+      <button class="${_annTab==='withdrawn'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('withdrawn')">↩ 已撤回</button>
     </div>
     <div id="annBody"></div>
   `;
@@ -12283,7 +12284,7 @@ async function _annRenderBody() {
   if (!body) return;
   if (_annTab === 'create') { body.innerHTML = _annRenderForm(); return; }
   body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">載入中...</div>';
-  const statusMap = { pending: '待審核', published: '已發布', rejected: '已拒絕' };
+  const statusMap = { pending: '待審核', published: '已發布', rejected: '已拒絕', withdrawn: '已撤回' };
   try {
     const res = await fetch(GW_URL, {
       method: 'POST',
@@ -12311,6 +12312,7 @@ function _annEmptyText() {
   if (_annTab === 'pending') return '現在沒有待審公告';
   if (_annTab === 'published') return '還沒有已發布的公告';
   if (_annTab === 'rejected') return '沒有拒絕記錄';
+  if (_annTab === 'withdrawn') return '沒有撤回紀錄';
   return '';
 }
 
@@ -12330,6 +12332,7 @@ function _annRenderCard(a) {
   const isPending = a.status === '待審核';
   const isPublished = a.status === '已發布';
   const isRejected = a.status === '已拒絕';
+  const isWithdrawn = a.status === '已撤回';
   let actions = '';
   if (isPending) {
     actions = `
@@ -12339,14 +12342,23 @@ function _annRenderCard(a) {
       </div>`;
   } else if (isPublished && a.pdfUrl) {
     actions = `
-      <div style="margin-top:12px;display:flex;gap:8px">
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
         <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block">📄 下載 PDF</a>
         <button class="btn btn-outline" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem">🔄 重生 PDF</button>
+        <button class="btn btn-outline" onclick="_annWithdraw(${a.row})" style="font-size:0.85rem;color:#DC2626;border-color:#DC2626;margin-left:auto">↩ 撤回</button>
       </div>`;
   } else if (isPublished && !a.pdfUrl) {
     actions = `
       <div style="margin-top:12px;padding:8px 12px;background:#FEF3C7;border-radius:6px;font-size:0.85rem;color:#92400E">
         ⚠️ PDF 生成失敗 · <button class="btn btn-green" onclick="_annRegenPdf(${a.row})" style="font-size:0.85rem;padding:4px 12px;margin-left:8px">🔄 重生 PDF</button>
+      </div>
+      <div style="margin-top:8px;text-align:right">
+        <button class="btn btn-outline" onclick="_annWithdraw(${a.row})" style="font-size:0.85rem;color:#DC2626;border-color:#DC2626">↩ 撤回</button>
+      </div>`;
+  } else if (isWithdrawn && a.pdfUrl) {
+    actions = `
+      <div style="margin-top:12px">
+        <a href="${a.pdfUrl}" target="_blank" class="btn btn-outline" style="text-decoration:none;display:inline-block;color:#6B7280">📄 查看作廢 PDF</a>
       </div>`;
   }
   let metaLine = '提報人: <b>' + _esc(a.submitter) + '</b>';
@@ -12356,16 +12368,20 @@ function _annRenderCard(a) {
   if (isPending) statusBadge = '<span style="background:#FEF3C7;color:#92400E;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">⏳ 待審核</span>';
   if (isPublished) statusBadge = '<span style="background:#D1FAE5;color:#065F46;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">✅ 已發布</span>';
   if (isRejected) statusBadge = '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">❌ 已拒絕</span>';
+  if (isWithdrawn) statusBadge = '<span style="background:#FEE2E2;color:#991B1B;padding:2px 8px;border-radius:4px;font-size:0.75rem;margin-left:8px">↩ 已撤回</span>';
   let rejectInfo = '';
   if (isRejected) {
     rejectInfo = '<div style="margin-top:8px;padding:8px 12px;background:#FEE2E2;border-radius:6px;font-size:0.85rem;color:#991B1B">拒絕人: ' + _esc(a.approver) + ' · 原因: ' + _esc(a.rejectReason) + '</div>';
+  }
+  if (isWithdrawn) {
+    rejectInfo = '<div style="margin-top:8px;padding:8px 12px;background:#FEE2E2;border-radius:6px;font-size:0.85rem;color:#991B1B;font-weight:600">↩ ' + _esc(a.rejectReason || '已撤回') + '</div>';
   }
   let approveInfo = '';
   if (isPublished) {
     approveInfo = '<div style="margin-top:8px;font-size:0.8rem;color:#9CA3AF">✓ ' + _esc(a.approver) + ' 於 ' + a.approvedAt + ' 審核通過</div>';
   }
   return `
-    <div class="card" style="padding:16px;margin-bottom:12px;border-left:4px solid ${cs.color}">
+    <div class="card" style="padding:16px;margin-bottom:12px;border-left:4px solid ${isWithdrawn ? '#9CA3AF' : cs.color};${isWithdrawn ? 'opacity:0.65;background:#F9FAFB;' : ''}">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
         <div style="flex:1">
           <div style="display:flex;align-items:center;gap:6px;font-size:0.8rem;color:${cs.color};font-weight:700">
@@ -12500,6 +12516,23 @@ async function _annRegenPdf(row) {
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('✅ PDF 已重生 · ' + r.no);
+    _annRenderBody();
+  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+}
+
+async function _annWithdraw(row) {
+  if (!confirm('確定要撤回這則公告？\n\n· Sheet 狀態會改成「已撤回」\n· 原 PDF 會標記作廢 + 生成一份 VOID 水印版\n· 提報人會收到 LINE 通知\n\n此動作不可取消。')) return;
+  const operator = prompt('請輸入您的姓名 (用作撤回記錄):');
+  if (!operator) return;
+  try {
+    const res = await fetch(GW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ _action: 'announce_withdraw', row: row, operator: operator })
+    });
+    const r = await res.json();
+    if (!r.success) { alert('❌ ' + r.error); return; }
+    showToast('↩ 公告已撤回 · ' + r.no);
     _annRenderBody();
   } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
 }
