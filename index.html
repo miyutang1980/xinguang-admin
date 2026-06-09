@@ -1211,10 +1211,25 @@ window.SEMESTER_CLASSES = {
 };
 
 function renderClasses(el){
-  try {
-    var saved = localStorage.getItem('xinguangSemesterClasses');
-    if (saved) window.SEMESTER_CLASSES = JSON.parse(saved);
-  } catch(e){}
+  // v2.18.42: 從 Gateway 拿 Sheet 資料 · 儲存結果到 window 快取
+  if (!window._classesLoaded) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF">🔄 讀取班別設定中...</div>';
+    fetch(GW_URL + '?action=classes')
+      .then(r => r.json())
+      .then(r => {
+        if (r.success && r.data) {
+          window.SEMESTER_CLASSES = r.data;
+          window._classesUpdatedAt = r.updatedAt || '';
+          window._classesOperator = r.operator || '';
+        }
+        window._classesLoaded = true;
+        renderClasses(el);
+      })
+      .catch(e => {
+        el.innerHTML = '<div style="padding:40px;text-align:center;color:#DC2626">❌ 讀取班別設定失敗: ' + e.message + '</div>';
+      });
+    return;
+  }
   var s = window.SEMESTER_CLASSES;
 
   function renderSlot(slotKey){
@@ -1249,7 +1264,8 @@ function renderClasses(el){
 
   // 頭部
   html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">';
-  html += '<div><h2 style="margin:0;font-size:1.2rem">📅 本學期開班資訊</h2><div style="font-size:0.78rem;color:#6B7280;margin-top:4px">太平新光分校 · 班別、上課時段與上課日</div></div>';
+  var updInfo = window._classesUpdatedAt ? ' · 最後更新 ' + window._classesUpdatedAt + (window._classesOperator ? ' (' + window._classesOperator + ')' : '') : '';
+  html += '<div><h2 style="margin:0;font-size:1.2rem">📅 本學期開班資訊</h2><div style="font-size:0.78rem;color:#6B7280;margin-top:4px">太平新光分校 · 班別、上課時段與上課日' + updInfo + '</div></div>';
   html += '<div style="display:flex;gap:8px">';
   html += '<button onclick="window.print()" style="padding:8px 16px;background:#fff;color:#374151;border:1.5px solid #D1D5DB;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:600">🖨️ 列印</button>';
   html += '<button onclick="openClassEditModal()" style="padding:8px 16px;background:#fff;color:#2B7A4B;border:1.5px solid #2B7A4B;border-radius:7px;cursor:pointer;font-size:0.82rem;font-weight:700">✏️ 編輯班別</button>';
@@ -8354,16 +8370,16 @@ function _campFormSubmit(ev) {
 
 // 課程班別 編輯 modal（本地變更 SEMESTER_CLASSES，持久化收近 localStorage）
 function openClassEditModal() {
-  // 讀取 localStorage 或預設值
-  try {
-    var saved = localStorage.getItem('xinguangSemesterClasses');
-    if (saved) window.SEMESTER_CLASSES = JSON.parse(saved);
-  } catch(e){}
+  // v2.18.42: 讀取 window 快取 (renderClasses 已經從 Gateway 讀過)
   var s = window.SEMESTER_CLASSES;
+  if (!s) {
+    alert('請先等班別設定讀取完成再編輯');
+    return;
+  }
   var jsonText = JSON.stringify(s, null, 2);
   var html = '<div style="max-width:760px">';
   html += '<div style="background:#F0FDF4;border-left:4px solid #2B7A4B;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:0.84rem;color:#166534;line-height:1.6">';
-  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存。選「儲存班別」寫入本機；要在其他裝置/帳號同步，請用「匯出 JSON」下載檔案，再到另一台「匯入 JSON」。';
+  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存在 Google Sheet。選「儲存班別」會寫回伺服器，家長端主網站刷新後即可看到最新內容。';
   html += '</div>';
   html += '<textarea id="_classesJson" rows="20" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
   html += '<div id="_classesMsg" style="font-size:0.82rem;color:#DC2626;margin-top:8px;min-height:18px"></div>';
@@ -8381,18 +8397,34 @@ function openClassEditModal() {
 function _saveClassesJson() {
   var msg = document.getElementById('_classesMsg');
   var txt = (document.getElementById('_classesJson')||{}).value || '';
+  var obj;
   try {
-    var obj = JSON.parse(txt);
+    obj = JSON.parse(txt);
     if (typeof obj !== 'object' || !obj) throw new Error('資料格式錯誤');
-    window.SEMESTER_CLASSES = obj;
-    localStorage.setItem('xinguangSemesterClasses', JSON.stringify(obj));
-    if(typeof markUnsaved === 'function') markUnsaved('更新班別設定');
-    closeModal();
-    showToast('班別已更新到本機');
-    renderClasses(document.getElementById('mainContent'));
   } catch(e) {
     msg.textContent = 'JSON 格式錯誤：' + e.message;
+    return;
   }
+  // v2.18.42: 寫到 Sheet · 主網站同步
+  msg.textContent = '🔄 儲存中...';
+  var operator = (window.AUTH_USER && window.AUTH_USER.name) || '未署名';
+  fetch(GW_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ _action: 'classes_save', data: obj, operator: operator })
+  })
+  .then(r => r.json())
+  .then(r => {
+    if (!r.success) { msg.textContent = '❌ 儲存失敗: ' + (r.error||''); return; }
+    window.SEMESTER_CLASSES = obj;
+    window._classesUpdatedAt = r.updatedAt;
+    window._classesOperator = r.operator;
+    window._classesLoaded = true;
+    closeModal();
+    showToast('✅ 班別已同步到主網站 · ' + r.updatedAt);
+    renderClasses(document.getElementById('mainContent'));
+  })
+  .catch(e => { msg.textContent = '❌ 連線失敗: ' + e.message; });
 }
 function _exportClassesJson(){
   var txt = (document.getElementById('_classesJson')||{}).value || '';
