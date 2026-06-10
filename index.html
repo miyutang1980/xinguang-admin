@@ -8368,31 +8368,174 @@ function _campFormSubmit(ev) {
   return false;
 }
 
-// 課程班別 編輯 modal（本地變更 SEMESTER_CLASSES，持久化收近 localStorage）
+// v2.18.44: 課程班別編輯 modal · 表格 UI (可點哪個欄位改哪個)
 function openClassEditModal() {
-  // v2.18.42: 讀取 window 快取 (renderClasses 已經從 Gateway 讀過)
   var s = window.SEMESTER_CLASSES;
-  if (!s) {
-    alert('請先等班別設定讀取完成再編輯');
-    return;
-  }
-  var jsonText = JSON.stringify(s, null, 2);
-  var html = '<div style="max-width:760px">';
-  html += '<div style="background:#F0FDF4;border-left:4px solid #2B7A4B;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:0.84rem;color:#166534;line-height:1.6">';
-  html += '<strong>班別表說明：</strong> 班別設定以 JSON 儲存在 Google Sheet。選「儲存班別」會寫回伺服器，家長端主網站刷新後即可看到最新內容。';
+  if (!s) { alert('請先等班別設定讀取完成再編輯'); return; }
+  // 深度複製避免修改原物件 (取消按鈕能還原)
+  window._classesEdit = JSON.parse(JSON.stringify(s));
+  _renderClassEditTable();
+}
+
+function _renderClassEditTable() {
+  var s = window._classesEdit;
+  // 確保 modal 打開
+  var ov = document.getElementById('modalOverlay');
+  if (ov) ov.classList.add('open');
+  var html = '<div style="max-width:900px">';
+  html += '<div style="background:#F0FDF4;border-left:4px solid #2B7A4B;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;color:#166534">';
+  html += '<strong>使用說明：</strong>點任何欄位可直接編輯 · 「+加班」新增班級 · 「×」刪除 · 按「儲存班別」上傳到主網站';
   html += '</div>';
-  html += '<textarea id="_classesJson" rows="20" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
+
+  ['slot1', 'slot2', 'slot3'].forEach(function(slotKey, idx) {
+    var slot = s[slotKey];
+    if (!slot) return;
+    var slotName = idx === 0 ? '時段一' : (idx === 1 ? '時段二' : '時段三');
+    var bg = idx === 0 ? '#ECFDF5' : (idx === 1 ? '#FEF3C7' : '#DBEAFE');
+    var color = idx === 0 ? '#065F46' : (idx === 1 ? '#92400E' : '#1E40AF');
+
+    html += '<div style="margin-bottom:18px;border:1.5px solid ' + slot.color + ';border-radius:10px;overflow:hidden">';
+    // 時段標頭 (可編輯 title 與 tag)
+    html += '<div style="background:' + bg + ';padding:10px 14px;border-bottom:1.5px solid ' + slot.color + '">';
+    html += '<div style="font-size:0.78rem;color:' + color + ';font-weight:700;margin-bottom:6px">' + slotName + '</div>';
+    html += '<input type="text" value="' + _classEsc(slot.title) + '" onchange="_classFieldUpdate(\'' + slotKey + '\',\'title\',this.value)" style="width:100%;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.95rem;font-weight:700;margin-bottom:6px" placeholder="時段標題">';
+    html += '<input type="text" value="' + _classEsc(slot.tag) + '" onchange="_classFieldUpdate(\'' + slotKey + '\',\'tag\',this.value)" style="width:100%;padding:6px 8px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.82rem" placeholder="說明標籤">';
+    html += '</div>';
+
+    // 班別表格
+    html += '<table style="width:100%;border-collapse:collapse;font-size:0.86rem">';
+    html += '<thead><tr style="background:#F9FAFB;border-bottom:1px solid #E5E7EB">';
+    html += '<th style="padding:8px;text-align:left;width:36px"></th>';
+    html += '<th style="padding:8px;text-align:left">班別</th>';
+    html += '<th style="padding:8px;text-align:left">時間</th>';
+    html += '<th style="padding:8px;text-align:left">上課日</th>';
+    html += '<th style="padding:8px;text-align:left">備註</th>';
+    html += '<th style="padding:8px;width:36px"></th>';
+    html += '</tr></thead><tbody>';
+
+    (slot.rows || []).forEach(function(row, ri) {
+      html += '<tr style="border-bottom:1px solid #F3F4F6">';
+      html += '<td style="padding:6px 8px;color:#9CA3AF;font-size:0.78rem;text-align:center">' + (ri + 1) + '</td>';
+      for (var ci = 0; ci < 4; ci++) {
+        var v = row[ci] || '';
+        var ph = ci === 0 ? '例: 1C' : (ci === 1 ? '16:30–19:00' : (ci === 2 ? '週一、三、五' : '(可留空)'));
+        html += '<td style="padding:4px 6px"><input type="text" value="' + _classEsc(v) + '" placeholder="' + ph + '" onchange="_classRowUpdate(\'' + slotKey + '\',' + ri + ',' + ci + ',this.value)" style="width:100%;padding:5px 7px;border:1px solid #E5E7EB;border-radius:5px;font-size:0.86rem"></td>';
+      }
+      html += '<td style="padding:6px 8px;text-align:center"><button onclick="_classRowDelete(\'' + slotKey + '\',' + ri + ')" style="background:#FEE2E2;color:#DC2626;border:none;width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:0.9rem;font-weight:700" title="刪除">×</button></td>';
+      html += '</tr>';
+    });
+
+    if (!slot.rows || slot.rows.length === 0) {
+      html += '<tr><td colspan="6" style="padding:18px;text-align:center;color:#9CA3AF;font-size:0.82rem">此時段還沒有班別 · 點下面「+ 加班」新增</td></tr>';
+    }
+    html += '</tbody></table>';
+
+    // 「加班」按鈕
+    html += '<div style="padding:8px 14px;background:#F9FAFB;border-top:1px solid #E5E7EB">';
+    html += '<button onclick="_classRowAdd(\'' + slotKey + '\')" style="background:' + slot.color + ';color:#fff;border:none;padding:5px 12px;border-radius:6px;font-size:0.82rem;cursor:pointer;font-weight:700">+ 加一班到' + slotName + '</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+
   html += '<div id="_classesMsg" style="font-size:0.82rem;color:#DC2626;margin-top:8px;min-height:18px"></div>';
   html += '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;flex-wrap:wrap">';
-  html += '<div style="display:flex;gap:6px"><button class="btn btn-outline" onclick="_exportClassesJson()" style="padding:8px 14px">📤 匯出 JSON</button>';
-  html += '<button class="btn btn-outline" onclick="_importClassesJson()" style="padding:8px 14px">📥 匯入 JSON</button></div>';
+  html += '<div style="display:flex;gap:6px">';
+  html += '<button class="btn btn-outline" onclick="_openJsonAdvanced()" style="padding:7px 12px;font-size:0.82rem">⚡ 高階 (JSON)</button>';
+  html += '</div>';
   html += '<div style="display:flex;gap:8px">';
   html += '<button class="btn btn-outline" onclick="closeModal()">取消</button>';
-  html += '<button class="btn btn-green" onclick="_saveClassesJson()">💾 儲存班別</button>';
+  html += '<button class="btn btn-green" onclick="_saveClassesTable()">💾 儲存班別</button>';
   html += '</div></div></div>';
   document.getElementById('modalTitle').textContent = '編輯課程班別';
   document.getElementById('modalBody').innerHTML = html;
-  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function _classEsc(s){ return String(s||'').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+function _classFieldUpdate(slotKey, field, val) {
+  if (window._classesEdit[slotKey]) window._classesEdit[slotKey][field] = val;
+}
+function _classRowUpdate(slotKey, ri, ci, val) {
+  var s = window._classesEdit[slotKey];
+  if (!s || !s.rows[ri]) return;
+  s.rows[ri][ci] = val;
+}
+function _classRowDelete(slotKey, ri) {
+  var s = window._classesEdit[slotKey];
+  if (!s || !s.rows[ri]) return;
+  var name = s.rows[ri][0] || '未命名';
+  if (!confirm('刪除班別「' + name + '」?')) return;
+  s.rows.splice(ri, 1);
+  _renderClassEditTable();
+}
+function _classRowAdd(slotKey) {
+  var s = window._classesEdit[slotKey];
+  if (!s) return;
+  if (!s.rows) s.rows = [];
+  // 預填指定時段的預設時間
+  var defaultTime = (slotKey === 'slot1') ? '14:00–16:00' : (slotKey === 'slot2' ? '16:30–19:00' : '19:00–21:00');
+  s.rows.push(['', defaultTime, '', '']);
+  _renderClassEditTable();
+  // 滾動到新增的那行
+  setTimeout(function() {
+    var inputs = document.querySelectorAll('#modalBody input');
+    if (inputs.length > 0) {
+      var lastClassNameInput = null;
+      inputs.forEach(function(inp) {
+        if (inp.placeholder === '例: 1C') lastClassNameInput = inp;
+      });
+      if (lastClassNameInput) { lastClassNameInput.focus(); lastClassNameInput.scrollIntoView({behavior:'smooth',block:'center'}); }
+    }
+  }, 100);
+}
+
+// 高階: 跳出 JSON 編輯模式 (原版)
+function _openJsonAdvanced() {
+  var jsonText = JSON.stringify(window._classesEdit, null, 2);
+  var html = '<div style="max-width:760px">';
+  html += '<div style="background:#FEF3C7;border-left:4px solid #F59E0B;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.82rem;color:#92400E">';
+  html += '⚡ <strong>高階模式：</strong>直接編輯 JSON · 請確保格式正確 · <a href="#" onclick="_renderClassEditTable();return false" style="color:#92400E;text-decoration:underline">← 返回表格</a>';
+  html += '</div>';
+  html += '<textarea id="_classesJson" rows="22" style="width:100%;padding:12px;border:1.5px solid #ccc;border-radius:8px;font-family:monospace;font-size:0.82rem;line-height:1.5">' + jsonText.replace(/</g,'&lt;') + '</textarea>';
+  html += '<div id="_classesMsg" style="font-size:0.82rem;color:#DC2626;margin-top:8px;min-height:18px"></div>';
+  html += '<div style="display:flex;gap:8px;justify-content:space-between;margin-top:12px">';
+  html += '<button class="btn btn-outline" onclick="_renderClassEditTable()">← 返回表格</button>';
+  html += '<div style="display:flex;gap:8px">';
+  html += '<button class="btn btn-outline" onclick="closeModal()">取消</button>';
+  html += '<button class="btn btn-green" onclick="_saveClassesJson()">💾 儲存</button>';
+  html += '</div></div></div>';
+  document.getElementById('modalBody').innerHTML = html;
+}
+
+// 表格模式的儲存 (來自 _classesEdit 物件)
+function _saveClassesTable() {
+  var obj = window._classesEdit;
+  if (!obj) { alert('沒有編輯中的資料'); return; }
+  // 清除空班別 (row[0] 為空的)
+  ['slot1', 'slot2', 'slot3'].forEach(function(k) {
+    if (obj[k] && obj[k].rows) {
+      obj[k].rows = obj[k].rows.filter(function(r) { return String(r[0]||'').trim(); });
+    }
+  });
+  var msg = document.getElementById('_classesMsg');
+  if (msg) msg.textContent = '🔄 儲存中...';
+  var operator = (window.AUTH_USER && window.AUTH_USER.name) || '未署名';
+  fetch(GW_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ _action: 'classes_save', data: obj, operator: operator })
+  })
+  .then(r => r.json())
+  .then(r => {
+    if (!r.success) { if (msg) msg.textContent = '❌ 儲存失敗: ' + (r.error||''); return; }
+    window.SEMESTER_CLASSES = obj;
+    window._classesUpdatedAt = r.updatedAt;
+    window._classesOperator = r.operator;
+    window._classesLoaded = true;
+    closeModal();
+    showToast('✅ 班別已同步到主網站 · ' + r.updatedAt);
+    renderClasses(document.getElementById('mainContent'));
+  })
+  .catch(e => { if (msg) msg.textContent = '❌ 連線失敗: ' + e.message; });
 }
 function _saveClassesJson() {
   var msg = document.getElementById('_classesMsg');
