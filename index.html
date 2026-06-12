@@ -3537,19 +3537,32 @@ function gwCallJson(action, params) { return gwCall(action, params).then(functio
   var origFetch = window.fetch;
   window.fetch = function(url, opts) {
     try {
-      if (typeof url === 'string' && url.indexOf(GW_URL) === 0 && opts && (opts.method === 'POST' || opts.method === 'post')) {
-        var bodyStr = opts.body;
+      var u = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
+      var method = opts && opts.method ? String(opts.method).toUpperCase() : 'GET';
+      // 包含 GW_URL 在中間 (例幾個 patchFetch 包裝內) 也要打中
+      if (u && u.indexOf('script.google.com/macros') >= 0 && method === 'POST') {
+        var bodyStr = opts && opts.body;
         if (typeof bodyStr === 'string' && bodyStr) {
           var parsed = JSON.parse(bodyStr);
           if (parsed && parsed._action) {
             var action = parsed._action;
             delete parsed._action;
-            // 重嵌返 gwCall 路線
-            return gwCall(action, parsed);
+            console.log('[gwIntercept] POST', action, '→ GET');
+            var qs = new URLSearchParams();
+            qs.append('_action', action);
+            Object.keys(parsed).forEach(function(k){
+              var v = parsed[k];
+              if (v === null || v === undefined) return;
+              if (typeof v === 'object') qs.append(k + '_json', JSON.stringify(v));
+              else qs.append(k, String(v));
+            });
+            // 拆 GW_URL 出來 (以防不同套裝函式用不同 URL)
+            var baseUrl = u.split('?')[0];
+            return origFetch.call(window, baseUrl + '?' + qs.toString());
           }
         }
       }
-    } catch (e) { /* fallback to orig */ }
+    } catch (e) { console.warn('[gwIntercept] error:', e.message); }
     return origFetch.call(window, url, opts);
   };
 })();
@@ -10909,8 +10922,9 @@ let _caFilter = { keyword: '' };
 
 async function _caCallGw(action, payload) {
   const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
-  if (!u.username || u.role !== 'admin') {
-    return { success:false, error:'只有管理員可以操作' };
+  // v2.18.47: 接受 admin/staff/teacher (Gateway 同步同不加限, 前後對齊)
+  if (!u.username || (u.role !== 'admin' && u.role !== 'staff' && u.role !== 'teacher')) {
+    return { success:false, error:'需要登入帳號' };
   }
   let adminPass = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
   if (!adminPass) {
@@ -11459,8 +11473,7 @@ const LEAVE_TYPE_COLORS = {
 
 async function _lvCallGw(action, payload) {
   const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
-  if (!u.username || u.role !== 'admin') {
-    return { success:false, error:'只有管理員可以操作' };
+  if (!u.username || (u.role !== 'admin' && u.role !== 'staff' && u.role !== 'teacher')) { return { success:false, error:'需要登入帳號' };
   }
   let adminPass = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
   if (!adminPass) {
@@ -11479,8 +11492,9 @@ async function _lvCallGw(action, payload) {
 }
 
 async function renderLeaves(el) {
-  if (!_currentUser || _currentUser.role !== 'admin') {
-    el.innerHTML = '<div style="padding:40px;text-align:center;color:#999">⛔ 只有管理員可以存取此頁面</div>';
+  // v2.18.47: 接受 admin/staff/teacher
+  if (!_currentUser || (_currentUser.role !== 'admin' && _currentUser.role !== 'staff' && _currentUser.role !== 'teacher')) {
+    el.innerHTML = '<div style="padding:40px;text-align:center;color:#999">⛔ 請先登入</div>';
     return;
   }
   el.innerHTML = '<div class="card" style="padding:24px;color:#666">載入中...</div>';
