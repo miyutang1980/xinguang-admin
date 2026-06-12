@@ -429,7 +429,7 @@ var _loggedIn = false;
 // ── Google Sheets 雲端帳號 API ───────────────────────────────────
 // AUTH_API_URL: n8n Cloud webhook (Google Sheets 雲端帳號驗證)
 var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
-var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
 
 async function doLogin() {
   const u = document.getElementById('loginUser').value.trim();
@@ -3482,11 +3482,7 @@ function getTrialDatesAdmin(){
 async function renderTrial(el) {
   el.innerHTML = '<div style="padding:24px;text-align:center;color:#888">載入中…</div>';
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({_action:'trial_classes_get'})
-    });
+    const res = await gwCall('trial_classes_get');
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '讀取失敗');
     _trialClasses = data.classes || [];
@@ -3509,7 +3505,54 @@ async function renderTrial(el) {
   _renderTrialUI(el);
 }
 
-const GW_URL = 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+const GW_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
+
+// v2.18.47: Workspace 擋 POST · 使用 GET-as-POST 包裝
+// 用法: gwCall('students_list', { adminUser: 'x', adminPass: 'y' }) → 返 fetch promise
+// 複雜物件 (data: {...} 或 details: [...]) 請加 _json 後綴: gwCall('classes_save', { data_json: JSON.stringify(obj), operator: 'me' })
+function gwCall(action, params) {
+  params = params || {};
+  var qs = new URLSearchParams();
+  qs.append('_action', action);
+  Object.keys(params).forEach(function(k) {
+    var v = params[k];
+    if (v === null || v === undefined) return;
+    if (typeof v === 'object') {
+      // 物件/陣列 · 從全都包裝為 _json 后綴 · Gateway 會解析
+      qs.append(k + '_json', JSON.stringify(v));
+    } else {
+      qs.append(k, String(v));
+    }
+  });
+  return fetch(GW_URL + '?' + qs.toString());
+}
+// 便利函數: 直接拿 JSON
+function gwCallJson(action, params) { return gwCall(action, params).then(function(r){ return r.json(); }); }
+
+// v2.18.47: 全域 fetch 拦截 · fetch(GW_URL, {method:'POST', body:JSON.stringify({_action:xxx, ...})}) 自動轉 GET
+// 這樣所有現有代碼不用動手改, 都會走 GET-as-POST
+(function patchFetchForGwGet(){
+  if (window.__gwGetPatched) return;
+  window.__gwGetPatched = true;
+  var origFetch = window.fetch;
+  window.fetch = function(url, opts) {
+    try {
+      if (typeof url === 'string' && url.indexOf(GW_URL) === 0 && opts && (opts.method === 'POST' || opts.method === 'post')) {
+        var bodyStr = opts.body;
+        if (typeof bodyStr === 'string' && bodyStr) {
+          var parsed = JSON.parse(bodyStr);
+          if (parsed && parsed._action) {
+            var action = parsed._action;
+            delete parsed._action;
+            // 重嵌返 gwCall 路線
+            return gwCall(action, parsed);
+          }
+        }
+      }
+    } catch (e) { /* fallback to orig */ }
+    return origFetch.call(window, url, opts);
+  };
+})();
 
 // 2026/05/09: 包裝 fetch · 加 timeout(15s) + 客戶端快取 (60s)
 // 避免 Gateway 冷啟動造成「未載入」永遠卡住
@@ -4023,11 +4066,7 @@ async function _trialSave(){
     if(classes.length === 0){
       if(!confirm('班表是空的，真的要把班表全部清掉嗎？')){ btn.disabled=false; btn.textContent='💾 儲存到主網站'; return; }
     }
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: {'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({_action:'trial_classes_set', classes: classes})
-    });
+    const res = await gwCall('trial_classes_set', {classes: classes});
     const data = await res.json();
     if(data.ok){
       if(typeof showToast==='function') showToast('✅ 已儲存 '+data.count+' 班，主網站 1-2 分鐘內同步');
@@ -8519,11 +8558,7 @@ function _saveClassesTable() {
   var msg = document.getElementById('_classesMsg');
   if (msg) msg.textContent = '🔄 儲存中...';
   var operator = (window.AUTH_USER && window.AUTH_USER.name) || '未署名';
-  fetch(GW_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ _action: 'classes_save', data: obj, operator: operator })
-  })
+  gwCall('classes_save', { data: obj, operator: operator })
   .then(r => r.json())
   .then(r => {
     if (!r.success) { if (msg) msg.textContent = '❌ 儲存失敗: ' + (r.error||''); return; }
@@ -8551,11 +8586,7 @@ function _saveClassesJson() {
   // v2.18.42: 寫到 Sheet · 主網站同步
   msg.textContent = '🔄 儲存中...';
   var operator = (window.AUTH_USER && window.AUTH_USER.name) || '未署名';
-  fetch(GW_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ _action: 'classes_save', data: obj, operator: operator })
-  })
+  gwCall('classes_save', { data: obj, operator: operator })
   .then(r => r.json())
   .then(r => {
     if (!r.success) { msg.textContent = '❌ 儲存失敗: ' + (r.error||''); return; }
@@ -12346,7 +12377,7 @@ async function _bookingCancelAdmin(idx) {
   if (reason === null) return;
   var cancelBy = (_currentUser && _currentUser.name) || 'admin';
   try {
-    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
     var res = await fetch(GW_URL_LOCAL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -12377,7 +12408,7 @@ async function _formRepush(collection, idx) {
   if (!confirm('手動推「' + displayName + '」到招生群?\n\n推出去的卡上會有「🔄 手動补推」標記·不會讓人誤以為是新一筆。')) return;
   if (typeof showToast === 'function') showToast('⏳ 补推中...');
   try {
-    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbyvNnb5NR5spLWmgNzeG4wswzR_o5n0DISR3Ohj9qFK6RUaRhZ0E0jxV7ZVmmfPqblc3Q/exec';
+    var GW_URL_LOCAL = (typeof GW_URL !== 'undefined') ? GW_URL : 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
     var res = await fetch(GW_URL_LOCAL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -12461,11 +12492,7 @@ async function _annRenderBody() {
   body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">載入中...</div>';
   const statusMap = { pending: '待審核', published: '已發布', rejected: '已拒絕', withdrawn: '已撤回' };
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_list', status: statusMap[_annTab], limit: 100 })
-    });
+    const res = await gwCall('announce_list', { status: statusMap[_annTab], limit: 100 });
     const r = await res.json();
     if (!r.success) { body.innerHTML = '<div class="card" style="padding:20px;color:#DC2626">❌ ' + (r.error || '載入失敗') + '</div>'; return; }
     const list = r.announcements || [];
@@ -12676,11 +12703,7 @@ async function _annApproveCard(row) {
   if (!approver) return;
   if (!confirm('確定同意發布這份公告? 發布後會自動生成 PDF 並推送到全體員工群。')) return;
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_approve', row: row, approver: approver })
-    });
+    const res = await gwCall('announce_approve', { row: row, approver: approver });
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('✅ 公告已發布 · ' + r.no);
@@ -12691,11 +12714,7 @@ async function _annApproveCard(row) {
 async function _annRegenPdf(row) {
   if (!confirm('重生 PDF? 原有 PDF 如果有也會被取代。')) return;
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_regen_pdf', row: row })
-    });
+    const res = await gwCall('announce_regen_pdf', { row: row });
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('✅ PDF 已重生 · ' + r.no);
@@ -12706,11 +12725,7 @@ async function _annRegenPdf(row) {
 // v2.18.38: 複製公告為新稿 · 拿原稿資料 → 跳提報表單預填內容
 async function _annCloneToDraft(row) {
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_get', row: row })
-    });
+    const res = await gwCall('announce_get', { row: row });
     const r = await res.json();
     if (!r.success || !r.announcement) { alert('❌ 無法拿到原稿: ' + (r.error || '')); return; }
     const a = r.announcement;
@@ -12750,11 +12765,7 @@ async function _annWithdraw(row) {
   const operator = prompt('請輸入您的姓名 (用作撤回記錄):');
   if (!operator) return;
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_withdraw', row: row, operator: operator })
-    });
+    const res = await gwCall('announce_withdraw', { row: row, operator: operator });
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('↩ 公告已撤回 · ' + r.no);
@@ -12768,11 +12779,7 @@ async function _annRejectCard(row) {
   const reason = prompt('拒絕原因:');
   if (!reason) return;
   try {
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ _action: 'announce_reject', row: row, approver: approver, reason: reason })
-    });
+    const res = await gwCall('announce_reject', { row: row, approver: approver, reason: reason });
     const r = await res.json();
     if (!r.success) { alert('❌ ' + r.error); return; }
     showToast('公告已拒絕');
