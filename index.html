@@ -186,6 +186,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       <div class="sidebar-item" onclick="switchSection('trialBookings')" id="nav-trialBookings">
         📅 體驗預約 <span class="badge" id="badge-trialBookings">0</span>
       </div>
+    <div class="sidebar-item" onclick="switchSection('leads')" id="nav-leads">
+        💰 潛客名單 <span class="badge" id="badge-leads">0</span>
+      </div>
     <div class="sidebar-item" onclick="switchSection('documents')" id="nav-documents">
         📎 說明會簡報
       </div>
@@ -283,14 +286,14 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 // v2.18.17: 后台全部 23 個功能頁 (與 sidebar / switchSection 完全對齊)
 var ALL_PERMS = [
   'dashboard','inquiry','booking','camp','assess','register','trial','trialBookings',
-  'documents','students','classAssign','leaves','docs','links','classes','webcal',
+  'leads','documents','students','classAssign','leaves','docs','links','classes','webcal',
   'pickup','assignments','transfer','lineSrc','stats','accounts','health'
 ];
 var PERM_LABELS = {
   dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
   camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
   trial:'體驗課排班', trialBookings:'體驗預約一覽',
-  documents:'說明會簡報', students:'學生管理',
+  leads:'潛客名單', documents:'說明會簡報', students:'學生管理',
   classAssign:'班級指派', leaves:'請假紀錄',
   docs:'文件中心', announce:'公告', links:'連結中心', classes:'開班資訊',
   webcal:'參訪/檢測日曆', pickup:'接送排程',
@@ -302,8 +305,8 @@ var PERM_LABELS = {
 var ROLE_PERMS = {
   admin: ALL_PERMS.slice(),
   teacher: ['dashboard','booking','assess','trial','trialBookings','classAssign','leaves','pickup','assignments','stats'],
-  sales: ['dashboard','inquiry','booking','camp','register','trialBookings','lineSrc'],
-  staff: ['dashboard','inquiry','booking','camp','register','trial','trialBookings','students','classAssign','leaves','docs','links','classes','webcal','pickup','assignments','stats']
+  sales: ['dashboard','inquiry','booking','camp','register','trialBookings','leads','lineSrc'],
+  staff: ['dashboard','inquiry','booking','camp','register','trial','trialBookings','leads','students','classAssign','leaves','docs','links','classes','webcal','pickup','assignments','stats']
 };
 const ADMIN_USERS = {
   'admin': { password: 'Xgp0p2TEh5', role: 'admin', name: '管理員', permissions: ROLE_PERMS.admin },
@@ -772,7 +775,8 @@ function switchSection(sec) {
     pickup:'🚐 接送排程', assignments:'🚶 今日接送',
     transfer:'🔄 強制轉交', stats:'📊 老師月報',
     health:'🩺 系統健檢',
-    lineSrc:'📈 LINE 來源分析'
+    lineSrc:'📈 LINE 來源分析',
+    leads:'💰 潛客名單'
   };
   document.getElementById('pageTitle').textContent = titles[sec] || sec;
   const content = document.getElementById('mainContent');
@@ -803,6 +807,7 @@ function switchSection(sec) {
   else if(sec === 'health') { _lazyRender(content, 'renderHealth', '健檢模組'); }
   else if(sec === 'classes') { _lazyRender(content, 'renderClasses', '開班資訊模組'); }
   else if(sec === 'lineSrc') { renderLineSourceAnalysis(content); }
+  else if(sec === 'leads') { _lazyRender(content, 'renderLeads', '潛客名單模組'); }
 }
 
 /**
@@ -12802,6 +12807,321 @@ async function _annRejectCard(row) {
 }
 
 // ===== END 公告模組 =====
+
+// ============================================================
+// v2.18.48: 潛客名單模組 (Block A · 售課漏斗階段 2)
+// Sheet: '潛客名單' · API: leads_list / leads_update
+// ============================================================
+var _leadsData = [];        // 最新一次拉回來的全部潛客
+var _leadsTab = 'all';      // all / new / contacted / booked / done / lost
+var _leadsSearch = '';
+var _leadsRefreshTimer = null;
+
+var LEAD_STATUS_LIST = ['新名單', '已聯絡', '已預約', '已成交', '已放棄'];
+var LEAD_STATUS_STYLE = {
+  '新名單':  { color: '#DC2626', bg: '#FEE2E2', icon: '🆕' },
+  '已聯絡':  { color: '#F59E0B', bg: '#FEF3C7', icon: '📞' },
+  '已預約':  { color: '#3B82F6', bg: '#DBEAFE', icon: '📅' },
+  '已成交':  { color: '#10B981', bg: '#D1FAE5', icon: '✅' },
+  '已放棄':  { color: '#6B7280', bg: '#F3F4F6', icon: '❌' }
+};
+
+function _leadsAuth() {
+  var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || '';
+  if (!pwd && _currentUser && _currentUser.password) pwd = _currentUser.password;
+  return {
+    adminUser: (_currentUser && _currentUser.username) || 'admin',
+    adminPass: pwd
+  };
+}
+
+async function renderLeads(el) {
+  if (!_currentUser) { el.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#DC2626">⛔ 請先登入</div>'; return; }
+  var auth = _leadsAuth();
+  if (!auth.adminPass) {
+    var p = prompt('需要確認您的後台密碼以讀取潛客名單：');
+    if (!p) { el.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">已取消</div>'; return; }
+    sessionStorage.setItem('xg_session_pwd', p);
+    localStorage.setItem('xg_admin_pwd', p);
+  }
+
+  el.innerHTML =
+    '<div style="padding:4px 0 14px">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+        '<input id="leadsSearch" type="text" placeholder="🔍 搜尋姓名 / 電話 / Email / 來源" ' +
+          'oninput="_leadsOnSearch(this.value)" ' +
+          'style="flex:1;min-width:220px;padding:9px 12px;border:1px solid #D1D5DB;border-radius:6px;font-size:0.9rem">' +
+        '<button class="btn btn-outline" onclick="_leadsReload()" style="font-size:0.85rem">🔄 重新載入</button>' +
+        '<button class="btn btn-outline" onclick="_leadsExportCsv()" style="font-size:0.85rem">⬇ 匯出 CSV</button>' +
+      '</div>' +
+      '<div id="leadsTabBar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>' +
+      '<div id="leadsSummary" style="font-size:0.8rem;color:#6B7280;margin-bottom:10px"></div>' +
+      '<div id="leadsBody"><div class="card" style="padding:30px;text-align:center;color:#9CA3AF">載入中…</div></div>' +
+    '</div>';
+
+  await _leadsFetch();
+}
+
+function _leadsOnSearch(v) {
+  _leadsSearch = String(v || '').trim().toLowerCase();
+  _leadsRenderBody();
+}
+
+async function _leadsReload() {
+  var body = document.getElementById('leadsBody');
+  if (body) body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">🔄 重新載入…</div>';
+  await _leadsFetch(true);
+}
+
+async function _leadsFetch(bustCache) {
+  var auth = _leadsAuth();
+  try {
+    var params = { adminUser: auth.adminUser, adminPass: auth.adminPass };
+    if (bustCache) params._t = Date.now();  // 避 60s 客戶端快取
+    var r = await gwCallJson('leads_list', params);
+    if (!r.success) {
+      document.getElementById('leadsBody').innerHTML =
+        '<div class="card" style="padding:20px;color:#DC2626">❌ ' + _esc(r.error || '拉取失敗') + '</div>';
+      return;
+    }
+    _leadsData = r.leads || [];
+    _leadsRenderTabs();
+    _leadsRenderBody();
+    _leadsUpdateSidebarBadge();
+  } catch (e) {
+    document.getElementById('leadsBody').innerHTML =
+      '<div class="card" style="padding:20px;color:#DC2626">❌ 連線錯誤: ' + _esc(e.message) + '</div>';
+  }
+}
+
+function _leadsCounts() {
+  var c = { all: _leadsData.length, '新名單': 0, '已聯絡': 0, '已預約': 0, '已成交': 0, '已放棄': 0 };
+  _leadsData.forEach(function(L) { if (c[L.status] !== undefined) c[L.status]++; });
+  return c;
+}
+
+function _leadsRenderTabs() {
+  var bar = document.getElementById('leadsTabBar');
+  if (!bar) return;
+  var c = _leadsCounts();
+  var tabs = [
+    { key: 'all',     label: '全部', count: c.all,        color: '#0F4A3E' },
+    { key: 'new',     label: '🆕 新名單', count: c['新名單'], color: '#DC2626' },
+    { key: 'contacted', label: '📞 已聯絡', count: c['已聯絡'], color: '#F59E0B' },
+    { key: 'booked',  label: '📅 已預約', count: c['已預約'], color: '#3B82F6' },
+    { key: 'done',    label: '✅ 已成交', count: c['已成交'], color: '#10B981' },
+    { key: 'lost',    label: '❌ 已放棄', count: c['已放棄'], color: '#6B7280' }
+  ];
+  bar.innerHTML = tabs.map(function(t) {
+    var active = _leadsTab === t.key;
+    var cnt = t.count > 0 ? ' <span style="opacity:0.75">(' + t.count + ')</span>' : '';
+    return '<button class="' + (active ? 'btn btn-green' : 'btn btn-outline') + '" ' +
+      'style="font-size:0.82rem;padding:7px 14px" onclick="_leadsSwitchTab(\'' + t.key + '\')">' +
+      t.label + cnt + '</button>';
+  }).join('');
+}
+
+function _leadsSwitchTab(k) {
+  _leadsTab = k;
+  _leadsRenderTabs();
+  _leadsRenderBody();
+}
+
+function _leadsFiltered() {
+  var tabMap = { new: '新名單', contacted: '已聯絡', booked: '已預約', done: '已成交', lost: '已放棄' };
+  var arr = _leadsData;
+  if (_leadsTab !== 'all') arr = arr.filter(function(L) { return L.status === tabMap[_leadsTab]; });
+  if (_leadsSearch) {
+    arr = arr.filter(function(L) {
+      return (L.name + L.phone + L.email + L.source + L.interest + L.grade + L.note).toLowerCase().indexOf(_leadsSearch) >= 0;
+    });
+  }
+  return arr;
+}
+
+function _leadsRenderBody() {
+  var body = document.getElementById('leadsBody');
+  var sum = document.getElementById('leadsSummary');
+  if (!body) return;
+  var list = _leadsFiltered();
+  if (sum) sum.textContent = '共 ' + list.length + ' 筆' + (_leadsSearch ? ' · 搜尋「' + _leadsSearch + '」' : '');
+  if (!list.length) {
+    body.innerHTML = '<div class="card" style="padding:30px;text-align:center;color:#9CA3AF">' +
+      (_leadsSearch ? '沒有符合的潛客' : '這個分類目前空的') + '</div>';
+    return;
+  }
+  body.innerHTML = list.map(_leadsCard).join('');
+}
+
+function _leadsCard(L) {
+  var s = LEAD_STATUS_STYLE[L.status] || LEAD_STATUS_STYLE['新名單'];
+  var phoneDigits = String(L.phone || '').replace(/\D/g, '');
+  var statusOptions = LEAD_STATUS_LIST.map(function(st) {
+    return '<option value="' + st + '"' + (L.status === st ? ' selected' : '') + '>' + st + '</option>';
+  }).join('');
+
+  var lineFields = [];
+  if (L.email) lineFields.push('<span style="color:#6B7280">✉ ' + _esc(L.email) + '</span>');
+  if (L.grade) lineFields.push('<span style="color:#6B7280">年級: <b style="color:#374151">' + _esc(L.grade) + '</b></span>');
+  if (L.interest) lineFields.push('<span style="color:#6B7280">興趣: <b style="color:#374151">' + _esc(L.interest) + '</b></span>');
+  if (L.source) lineFields.push('<span style="color:#6B7280">來源: <span style="background:#F3F4F6;padding:1px 6px;border-radius:3px;font-size:0.75rem;color:#374151">' + _esc(L.source) + '</span></span>');
+
+  return '<div class="card" style="padding:14px 16px;margin-bottom:10px;border-left:4px solid ' + s.color + '">' +
+    '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:240px">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
+          '<span style="background:' + s.bg + ';color:' + s.color + ';padding:2px 8px;border-radius:4px;font-size:0.72rem;font-weight:700">' +
+            s.icon + ' ' + L.status + '</span>' +
+          '<span style="font-size:0.72rem;color:#9CA3AF">' + _esc(L.ts) + '</span>' +
+        '</div>' +
+        '<div style="font-size:1.05rem;font-weight:700;color:#1F2937;margin-bottom:2px">' + _esc(L.name || '—') +
+          '<a href="tel:' + phoneDigits + '" style="margin-left:10px;color:#2563EB;font-size:0.9rem;text-decoration:none">📞 ' + _esc(L.phone) + '</a>' +
+          '<button onclick="_leadsCopyPhone(\'' + phoneDigits + '\')" style="margin-left:6px;background:#F3F4F6;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.72rem;color:#374151">📋</button>' +
+        '</div>' +
+        (lineFields.length ? '<div style="font-size:0.82rem;line-height:1.7;display:flex;gap:12px;flex-wrap:wrap">' + lineFields.join('') + '</div>' : '') +
+      '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+        '<select onchange="_leadsUpdateStatus(' + L.row + ', this.value, this)" ' +
+          'style="padding:6px 8px;border:1px solid #D1D5DB;border-radius:5px;font-size:0.82rem;background:#fff">' +
+          statusOptions + '</select>' +
+        '<input type="date" value="' + _esc(L.followUpDate || '') + '" ' +
+          'onchange="_leadsUpdateFollowUp(' + L.row + ', this.value, this)" ' +
+          'style="padding:5px 6px;border:1px solid #D1D5DB;border-radius:5px;font-size:0.78rem" title="下次跟進日">' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin-top:10px;display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end">' +
+      '<div>' +
+        '<div style="font-size:0.72rem;color:#9CA3AF;margin-bottom:2px">📝 備註 / 跟進紀錄</div>' +
+        '<textarea id="leadNote-' + L.row + '" rows="1" placeholder="點此帶跟進備註…" ' +
+          'style="width:100%;padding:6px 8px;border:1px solid #E5E7EB;border-radius:5px;font-size:0.82rem;font-family:inherit;resize:vertical;line-height:1.4">' +
+          _esc(L.note || '') + '</textarea>' +
+      '</div>' +
+      '<button class="btn btn-outline" style="font-size:0.78rem;padding:6px 12px" onclick="_leadsSaveNote(' + L.row + ')">💾 存備註</button>' +
+    '</div>' +
+  '</div>';
+}
+
+async function _leadsUpdateStatus(row, value, selectEl) {
+  var orig = selectEl.getAttribute('data-orig') || '';
+  selectEl.disabled = true;
+  try {
+    var auth = _leadsAuth();
+    var r = await gwCallJson('leads_update', { adminUser: auth.adminUser, adminPass: auth.adminPass, row: row, status: value });
+    if (!r.success) { alert('❌ ' + r.error); selectEl.disabled = false; return; }
+    // 更新本地快取
+    var lead = _leadsData.find(function(L) { return L.row === row; });
+    if (lead) lead.status = value;
+    showToast('✅ 狀態已更新為「' + value + '」');
+    selectEl.disabled = false;
+    _leadsRenderTabs();
+    _leadsRenderBody();
+    _leadsUpdateSidebarBadge();
+  } catch (e) {
+    alert('❌ 連線錯誤: ' + e.message);
+    selectEl.disabled = false;
+  }
+}
+
+async function _leadsUpdateFollowUp(row, value, inputEl) {
+  inputEl.disabled = true;
+  try {
+    var auth = _leadsAuth();
+    var r = await gwCallJson('leads_update', {
+      adminUser: auth.adminUser, adminPass: auth.adminPass,
+      row: row, followUpDate: value, followUpBy: (_currentUser && _currentUser.name) || ''
+    });
+    if (!r.success) { alert('❌ ' + r.error); inputEl.disabled = false; return; }
+    var lead = _leadsData.find(function(L) { return L.row === row; });
+    if (lead) { lead.followUpDate = value; lead.followUpBy = (_currentUser && _currentUser.name) || ''; }
+    showToast('📅 跟進日已存');
+    inputEl.disabled = false;
+  } catch (e) {
+    alert('❌ 連線錯誤: ' + e.message);
+    inputEl.disabled = false;
+  }
+}
+
+async function _leadsSaveNote(row) {
+  var ta = document.getElementById('leadNote-' + row);
+  if (!ta) return;
+  var note = ta.value.trim();
+  try {
+    var auth = _leadsAuth();
+    var r = await gwCallJson('leads_update', { adminUser: auth.adminUser, adminPass: auth.adminPass, row: row, note: note });
+    if (!r.success) { alert('❌ ' + r.error); return; }
+    var lead = _leadsData.find(function(L) { return L.row === row; });
+    if (lead) lead.note = note;
+    showToast('💾 備註已存');
+  } catch (e) {
+    alert('❌ 連線錯誤: ' + e.message);
+  }
+}
+
+function _leadsCopyPhone(digits) {
+  if (!digits) return;
+  try {
+    navigator.clipboard.writeText(digits);
+    showToast('📋 電話已複製: ' + digits);
+  } catch (e) {
+    var ta = document.createElement('textarea'); ta.value = digits; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); showToast('📋 電話已複製: ' + digits); } catch(_){}
+    document.body.removeChild(ta);
+  }
+}
+
+function _leadsExportCsv() {
+  var list = _leadsFiltered();
+  if (!list.length) { alert('沒有可匯出的潛客'); return; }
+  var headers = ['時間', '姓名', '電話', 'Email', '年級', '興趣課程', '來源', '狀態', '跟進日', '跟進人', '備註', '轉化結果'];
+  var rows = list.map(function(L) {
+    return [L.ts, L.name, L.phone, L.email, L.grade, L.interest, L.source, L.status, L.followUpDate, L.followUpBy, L.note, L.result];
+  });
+  var csv = '\uFEFF' + [headers].concat(rows).map(function(r) {
+    return r.map(function(c) {
+      c = String(c == null ? '' : c);
+      if (c.indexOf(',') >= 0 || c.indexOf('"') >= 0 || c.indexOf('\n') >= 0) c = '"' + c.replace(/"/g, '""') + '"';
+      return c;
+    }).join(',');
+  }).join('\n');
+  var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '潛客名單_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+  setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+  showToast('⬇ 已匯出 ' + list.length + ' 筆');
+}
+
+// sidebar badge: 未跟進的「新名單」筆數
+function _leadsUpdateSidebarBadge() {
+  var el = document.getElementById('badge-leads');
+  if (!el) return;
+  var n = _leadsData.filter(function(L) { return L.status === '新名單'; }).length;
+  el.textContent = n;
+  el.style.display = n > 0 ? '' : 'none';
+}
+
+// 登入後/頁面 init 時拉一次 badge (不重渲列表 · 只更新數字)
+async function _leadsPrefetchBadge() {
+  if (!_currentUser) return;
+  if (_currentUser.permissions && _currentUser.permissions.indexOf('leads') < 0) return;
+  var auth = _leadsAuth();
+  if (!auth.adminPass) return;  // 沒密碼不 prompt · 進頁再 prompt
+  try {
+    var r = await gwCallJson('leads_list', { adminUser: auth.adminUser, adminPass: auth.adminPass });
+    if (r && r.success) {
+      _leadsData = r.leads || [];
+      _leadsUpdateSidebarBadge();
+    }
+  } catch (e) {}
+}
+// 登入後 2 秒 · 拉 badge
+setTimeout(_leadsPrefetchBadge, 2000);
+// 每 3 分鐘 · 刷 badge (非到頁面也推新名單數)
+setInterval(_leadsPrefetchBadge, 180000);
+
+// ===== END 潛客名單模組 =====
 
 </script>
 </body>
