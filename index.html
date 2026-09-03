@@ -4330,10 +4330,13 @@ checkSession();
    * @returns {string} 完整 URL
    */
   function csvUrl(sheetName) {
+    // v2.18.49 修正 · 加 headers=1 確保 gviz 包含 header 列
+    // 之前 gviz 預設不包 header · 造成 rowsToObjects 把第 1 筆資料誤當 header
+    // 結果資料少一筆 + 欄位全空 + status 預設英文 'pending'
     return (
       'https://docs.google.com/spreadsheets/d/' +
       SHEET_ID +
-      '/gviz/tq?tqx=out:csv&sheet=' +
+      '/gviz/tq?tqx=out:csv&headers=1&sheet=' +
       encodeURIComponent(sheetName)
     );
   }
@@ -4455,7 +4458,7 @@ checkSession();
       bookingType: row['類型'] || row['預約類型'] || '',
       date:        row['日期'] || '',
       slot:        row['時段'] || '',
-      status:      row['狀態'] || 'pending',
+      status:      row['狀態'] || '待回電',
       _rowIndex:   row._rowIndex
     };
   }
