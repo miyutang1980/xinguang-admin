@@ -2810,6 +2810,11 @@ function _renderTrialBookerCal() {
     if (fcIdxCal - 1 >= 0) acceptIdxCal.add(fcIdxCal - 1);
     if (fcIdxCal + 1 < LEVEL_LADDER.length) acceptIdxCal.add(fcIdxCal + 1);
   }
+  // v2.18.60 · 菁英 → 英檢推薦映射
+  // 2B/2C/3A/3B → 初級-初試; 3C/4A/4B → 中級-初試
+  var _geptRecoCal = '';
+  if (['2B','2C','3A','3B'].indexOf(_extractLvCode(fcCal)) >= 0) _geptRecoCal = '初級-初試';
+  else if (['3C','4A','4B'].indexOf(_extractLvCode(fcCal)) >= 0) _geptRecoCal = '中級-初試';
   // 沒有分班 或 不在階梯上 → 塪紅色警告在月曆上方
   const hasLadder = fcIdxCal >= 0;
   // 收集所有班的可體驗日期
@@ -2844,7 +2849,13 @@ function _renderTrialBookerCal() {
             return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === d;
           }));
           const dayClasses = hasLadder
-            ? dayClassesAll.filter(c => acceptIdxCal.has(LEVEL_LADDER.indexOf(_extractLvCode(c.level))))
+            ? dayClassesAll.filter(function(c){
+                var lv = _extractLvCode(c.level);
+                if (acceptIdxCal.has(LEVEL_LADDER.indexOf(lv))) return true;
+                // v2.18.60 · 菁英 → 英檢推薦對應
+                if (_geptRecoCal && (c.level||'').indexOf(_geptRecoCal) >= 0) return true;
+                return false;
+              })
             : dayClassesAll;
           // v2.18.59 · 將班別標簽列入方格
           const classTags = dayClasses.map(c => {
@@ -2911,10 +2922,18 @@ function _pickTrialBookerDate(date) {
     if (fcIdx - 1 >= 0) acceptIdx.add(fcIdx - 1);
     if (fcIdx + 1 < LEVEL_LADDER.length) acceptIdx.add(fcIdx + 1);
   }
+  // v2.18.60 · 菁英 → 英檢推薦對應
+  var _geptReco = '';
+  if (['2B','2C','3A','3B'].indexOf(_extractLvCode(fc)) >= 0) _geptReco = '初級-初試';
+  else if (['3C','4A','4B'].indexOf(_extractLvCode(fc)) >= 0) _geptReco = '中級-初試';
   function _classIdx(c) {
     return LEVEL_LADDER.indexOf(_extractLvCode(c.level));
   }
+  function _isGeptReco(c) {
+    return _geptReco && (c.level||'').indexOf(_geptReco) >= 0;
+  }
   const recommended = dayClasses.filter(c => _classIdx(c) === fcIdx);
+  const geptRecommended = dayClasses.filter(c => _isGeptReco(c));
   const similar     = dayClasses.filter(c => { var i = _classIdx(c); return i >= 0 && i !== fcIdx && acceptIdx.has(i); });
   // 以上一階/本階/下一階 的順序排
   similar.sort((a,b) => _classIdx(a) - _classIdx(b));
@@ -2960,6 +2979,11 @@ function _pickTrialBookerDate(date) {
   if (similar.length) {
     html += '<div style="font-size:0.82rem;color:#0EA5E9;font-weight:700;margin:10px 0 6px">🆗 相鄰階段 (' + [_prevLv,_nextLv].filter(Boolean).join(' / ') + ')</div>' +
             similar.map(c => classCard(c, false)).join('');
+  }
+  // v2.18.60 · 英檢推薦區
+  if (geptRecommended.length) {
+    html += '<div style="font-size:0.82rem;color:#7C3AED;font-weight:700;margin:10px 0 6px">🎓 英檢推薦：' + _geptReco + '</div>' +
+            geptRecommended.map(c => classCard(c, true)).join('');
   }
   if (!html) {
     html = '<div style="background:#FEE2E2;border:1px solid #DC2626;color:#991B1B;text-align:center;padding:16px;border-radius:8px;font-weight:700">❌ 這天無適合班·可試其他日期<br><span style="font-size:0.78rem;font-weight:400;color:#7F1D1D">限定推薦階: ' + ladderDesc + '</span></div>';
