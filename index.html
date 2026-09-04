@@ -1939,17 +1939,91 @@ async function renderTrialBookings(el) {
       </td>
       <td><span style="background:#F0FDF4;padding:2px 8px;border-radius:50px;font-size:0.8rem;font-family:monospace;color:#166534">${slot}</span></td>
       <td>${isConflict ? `<span style="color:#DC2626;font-weight:700">⚠️ ${conflictRows.length} 人</span>` : '<span style="color:#10B981">✓</span>'}</td>
-      <td><select class="status-select" onchange="updateStatus('bookings',${realIdx},this.value)">
+      <td><select class="status-select" onchange="_trialBkgUpdateStatus(${r._rowIndex||0},${realIdx},this.value)">
         ${statusOpts.map(s=>`<option${s===status?' selected':''}>${s}</option>`).join('')}
       </select></td>
       <td>
-        <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button>
-        ${isTrialBk?`<button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;margin-left:4px;font-weight:700" onclick="_trialBkgChange(${realIdx})" title="換班/改日期">🔄 改班</button>`:''}
-        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
+        <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="_trialBkgShowDetail(${r._rowIndex||0},${realIdx})">查看</button>
+        ${isTrialBk?`<button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;margin-left:4px;font-weight:700" onclick="_trialBkgChangeByRow(${r._rowIndex||0},${realIdx})" title="換班/改日期">🔄 改班</button>`:''}
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_trialBkgDelete(${r._rowIndex||0},${realIdx})" title="刪除這筆預約">[X]</button>
       </td>
     </tr>`;
   }).join('');
 }
+
+// v2.18.74 · 體驗預約專用 handler (以 rowIndex 直接寫 Gateway)
+window._trialBkgUpdateStatus = async function(rowIndex, localIdx, newStatus) {
+  // 1) 本地 (若有)
+  var d = loadData();
+  if (d.bookings[localIdx]) {
+    d.bookings[localIdx].status = newStatus;
+    saveData(d);
+  }
+  showToast('✅ 狀態更新中…');
+  // 2) 遠端 (如果有 rowIndex 就寫)
+  if (rowIndex) {
+    try {
+      var params = new URLSearchParams();
+      params.append('_action', 'booking_update');
+      params.append('row_index', String(rowIndex));
+      params.append('fields_json', JSON.stringify({ status: newStatus }));
+      var resp = await fetch(GW_URL + '?' + params.toString());
+      var result = await resp.json();
+      if (result && result.success) showToast('✅ 已同步雲端: ' + newStatus);
+      else showToast('⚠️ 雲端寫入失敗: ' + (result && result.error));
+    } catch(e) {
+      showToast('⚠️ 雲端寫入錯誤: ' + e.message);
+    }
+  } else {
+    showToast('⚠️ 本筆未同步雲端 · 重載入會採雲端資料');
+  }
+  // 重繪
+  renderTrialBookings(document.getElementById('mainContent'));
+};
+
+window._trialBkgShowDetail = function(rowIndex, localIdx) {
+  var d = loadData();
+  if (d.bookings[localIdx]) {
+    showBookingDetail(localIdx);
+  } else {
+    // 遠端來源的 ‧ 先同步到本地
+    alert('這筆尚未同步到本地 · 請先按重新整理後再查看');
+  }
+};
+
+window._trialBkgChangeByRow = function(rowIndex, localIdx) {
+  var d = loadData();
+  if (d.bookings[localIdx]) {
+    _trialBkgChange(localIdx);
+  } else {
+    alert('這筆尚未同步到本地 · 請先按重新整理後再改班');
+  }
+};
+
+window._trialBkgDelete = async function(rowIndex, localIdx) {
+  var d = loadData();
+  var r = d.bookings[localIdx] || null;
+  var name = r ? (r.parent || r.child || '這筆') : '這筆';
+  if (!confirm('確定要刪除 ' + name + ' 的體驗預約？\n(建議改為 已取消 保留軌跡)')) return;
+  // 本地拉除
+  if (r) {
+    d.bookings.splice(localIdx, 1);
+    saveData(d);
+  }
+  showToast('✅ 已從本機列表拉除');
+  // 遠端删除 (如果有 rowIndex)
+  if (rowIndex) {
+    try {
+      var params = new URLSearchParams();
+      params.append('_action', 'booking_delete');
+      params.append('row_index', String(rowIndex));
+      var resp = await fetch(GW_URL + '?' + params.toString());
+      var result = await resp.json();
+      if (result && result.success) showToast('✅ 雲端也已拉除');
+    } catch(e){}
+  }
+  renderTrialBookings(document.getElementById('mainContent'));
+};
 
 // v2.18.63 · 體驗預約改班 ‧ 重新進入行事曆選日期 + 班次
 window._trialBkgChange = async function(bkIdx) {
