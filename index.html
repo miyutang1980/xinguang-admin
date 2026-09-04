@@ -2288,47 +2288,77 @@ function showBookingChangeModal(idx, action){
       const msg = document.getElementById('chgMsg');
       const btn = document.getElementById('chgSubmit');
       msg.textContent = '';
-      const payload = {
-        action: action,
-        source: 'admin',
-        phone: r.phone,
-        reason: (document.getElementById('chgReason').value||'').trim()
-      };
+      const reason = (document.getElementById('chgReason').value||'').trim();
+      var newDate = '', newSlot = '', newPeriod = '';
       if(!isCancel){
-        const nd = document.getElementById('chgNewDate').value;
-        if(!nd){ msg.textContent = '請選擇新日期'; return; }
-        let ns = '';
+        newDate = document.getElementById('chgNewDate').value;
+        if(!newDate){ msg.textContent = '請選擇新日期'; return; }
         if(isTrial){
-          // 體驗班: 驗證週一至週五 + 有選班別
-          const dow = new Date(nd + 'T00:00:00').getDay();
+          const dow = new Date(newDate + 'T00:00:00').getDay();
           if(dow === 0 || dow === 6){ msg.textContent = '體驗班只在週一至週五開課,請重選日期'; return; }
-          const period = (document.getElementById('chgPeriod')||{}).value || '';
-          if(!period){ msg.textContent = '請選擇時段'; return; }
-          ns = (document.getElementById('chgTrialClass')||{}).value || '';
-          if(!ns){ msg.textContent = '請選擇體驗班別'; return; }
-          payload.newPeriod = period;
+          newPeriod = (document.getElementById('chgPeriod')||{}).value || '';
+          if(!newPeriod){ msg.textContent = '請選擇時段'; return; }
+          newSlot = (document.getElementById('chgTrialClass')||{}).value || '';
+          if(!newSlot){ msg.textContent = '請選擇體驗班別'; return; }
         } else {
-          ns = (document.getElementById('chgNewSlot')||{}).value || '';
-          if(!ns){ msg.textContent = '請選擇新時段'; return; }
+          newSlot = (document.getElementById('chgNewSlot')||{}).value || '';
+          if(!newSlot){ msg.textContent = '請選擇新時段'; return; }
         }
-        payload.newDate = nd;
-        payload.newSlot = ns;
       }
       btn.disabled = true;
       btn.textContent = '⏳ 處理中…';
+      // v2.18.71 · 直接走 Gateway booking_update · 同步 Sheet 前台也看得到
+      // 需要 row_index · 從 r._rowIndex 或 r._row 取
+      var rowIndex = r._rowIndex || r._row || 0;
+      if (!rowIndex) {
+        // fallback: 重拉一次 bookingList 找對應 (用電話+舊日期舊時段匹配)
+        try {
+          var respBk = await fetch(GW_URL + '?action=bookingList');
+          var dataBk = await respBk.json();
+          if (dataBk && dataBk.ok) {
+            var match = (dataBk.bookings||[]).find(function(b){
+              return String(b.phone).replace(/^0/,'') === String(r.phone).replace(/^0/,'') && b.date === r.date && b.slot === r.slot;
+            });
+            if (match) rowIndex = match._row;
+          }
+        } catch(e){}
+      }
+      if (!rowIndex) {
+        msg.textContent = '❌ 找不到 Sheet 上對應的預約紀錄 · 可能是後台手建未寫入 Sheet';
+        btn.disabled = false;
+        btn.textContent = '確定' + (isCancel?'取消':'改期');
+        return;
+      }
+      // 包裝 fields 送 booking_update
+      var fields = {};
+      if (isCancel) {
+        fields.status = '已取消';
+        fields.note = ((r.note||'') + (reason ? ' | 取消原因: ' + reason : ' | 後台取消')).trim();
+      } else {
+        fields.date = newDate;
+        fields.slot = newSlot;
+        fields.status = '待確認'; // 新時段 → 待確認
+        fields.note = ((r.note||'') + (reason ? ' | 改期原因: ' + reason : ' | 後台協助改期')).trim();
+      }
       try {
-        const resp = await fetch('https://miyutang.app.n8n.cloud/webhook/booking-change', {
-          method: 'POST',
-          headers: {'Content-Type':'application/json'},
-          body: JSON.stringify(payload)
-        });
-        const result = await resp.json();
-        if(result.success){
-          if(typeof showToast === 'function') showToast('✅ ' + (isCancel?'已取消':'已改期') + (result.notifiedParent?'，家長已 LINE 通知':'，家長未加 LINE 好友請電話聯繫'));
+        var params = new URLSearchParams();
+        params.append('_action', 'booking_update');
+        params.append('row_index', String(rowIndex));
+        params.append('fields_json', JSON.stringify(fields));
+        var resp = await fetch(GW_URL + '?' + params.toString());
+        var result = await resp.json();
+        if (result && result.success) {
+          if(typeof showToast === 'function') showToast('✅ ' + (isCancel?'已取消':'已改期') + '‧前台會同步顯示');
+          // 同步本地
+          var d3 = loadData();
+          if (d3.bookings && d3.bookings[idx]) {
+            Object.assign(d3.bookings[idx], fields);
+            saveData(d3);
+          }
           closeModal();
-          if(typeof window.syncFromSheets === 'function') setTimeout(window.syncFromSheets, 1500);
+          if(typeof renderBooking === 'function') renderBooking(document.getElementById('mainContent'));
         } else {
-          msg.textContent = '❌ ' + (result.error||'處理失敗');
+          msg.textContent = '❌ ' + ((result && result.error)||'處理失敗');
           btn.disabled = false;
           btn.textContent = '確定' + (isCancel?'取消':'改期');
         }
