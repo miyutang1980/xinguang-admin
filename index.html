@@ -2998,7 +2998,8 @@ function _pickTrialBookerDate(date) {
     const slot = (c.time_start||'') + '-' + (c.time_end||'');
     const taken = _trialBookerState.bookings.some(b => b.date === date && b.slot === slot);
     const sel = _trialBookerState.selClassId === c.id;
-    return `<div onclick="${taken?'':"_pickTrialBookerClass('"+c.id+"')"}" style="
+    // v2.18.62 · 加 data-* attribute 方便局部重繪
+    return `<div data-class-id="${c.id}" data-is-reco="${isReco?'1':'0'}" data-taken="${taken?'1':'0'}" onclick="${taken?'':"_pickTrialBookerClass('"+c.id+"')"}" style="
       padding:12px 14px;border-radius:10px;cursor:${taken?'not-allowed':'pointer'};margin-bottom:8px;
       background:${sel?'#FFF7ED':taken?'#F3F4F6':'#FFF'};
       border:1.5px solid ${sel?'#E8863A':taken?'#E5E7EB':isReco?'#16A34A':'#E5E7EB'};
@@ -3013,7 +3014,7 @@ function _pickTrialBookerDate(date) {
           🕐 ${c.time_start}-${c.time_end} · 週${c.day} · ${c.room||''} · ${c.tw||''} / ${c.fr||''}
         </div>
       </div>
-      ${sel?'<span style="background:#E8863A;color:#FFF;padding:4px 12px;border-radius:14px;font-size:0.78rem;font-weight:700">✓ 已選</span>':''}
+      ${sel?'<span class="tb-sel-badge" style="background:#E8863A;color:#FFF;padding:4px 12px;border-radius:14px;font-size:0.78rem;font-weight:700">✓ 已選</span>':''}
     </div>`;
   }
 
@@ -3048,12 +3049,43 @@ function _pickTrialBookerDate(date) {
 }
 
 function _pickTrialBookerClass(classId) {
+  // v2.18.62 修正: 不能呼叫 _pickTrialBookerDate (它會將 selClassId 清空)
   _trialBookerState.selClassId = classId;
-  _pickTrialBookerDate(_trialBookerState.selDate); // 重繪
+  // 只重繪班次列表 · 保留日期選擇
+  _refreshTrialBookerClassCards();
   // 啟用確認按鈕
   const btn = document.getElementById('tbConfirmBtn');
   btn.disabled = false;
   btn.style.opacity = '1';
+}
+
+// v2.18.62 · 只重繪已經顯示的班次列表 (更新選中樣式)
+function _refreshTrialBookerClassCards() {
+  var container = document.getElementById('tbSlotsList');
+  if (!container) return;
+  var cards = container.querySelectorAll('[data-class-id]');
+  var selId = _trialBookerState.selClassId;
+  cards.forEach(function(card){
+    var id = card.getAttribute('data-class-id');
+    var sel = (id === selId);
+    var wasReco = card.getAttribute('data-is-reco') === '1';
+    var wasTaken = card.getAttribute('data-taken') === '1';
+    card.style.background = sel ? '#FFF7ED' : (wasTaken ? '#F3F4F6' : '#FFF');
+    card.style.borderColor = sel ? '#E8863A' : (wasTaken ? '#E5E7EB' : (wasReco ? '#16A34A' : '#E5E7EB'));
+    // 取標記/移除 ✓ 已選 彰簽
+    var badge = card.querySelector('.tb-sel-badge');
+    if (sel) {
+      if (!badge) {
+        var span = document.createElement('span');
+        span.className = 'tb-sel-badge';
+        span.style.cssText = 'background:#E8863A;color:#FFF;padding:4px 12px;border-radius:14px;font-size:0.78rem;font-weight:700';
+        span.textContent = '✓ 已選';
+        card.appendChild(span);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  });
 }
 
 async function confirmTrialBooking() {
