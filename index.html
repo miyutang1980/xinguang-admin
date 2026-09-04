@@ -1967,8 +1967,12 @@ function showBookingDetail(idx) {
     </div>
 
     <div class="detail-section" style="margin-top:24px">□ 下一步作業</div>
-    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">接觸完家長後 · 帶學生來校檢測 · 將口試筆試結果填入</div>
-    <button class="btn btn-green" style="padding:10px 18px;font-size:0.9rem;font-weight:700" onclick="funnelBookingToAssess(${idx})">→ 建立分級檢測</button>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">可從下方選兩條路徑：<b>先檢測後排體驗</b> 或 <b>直接排體驗</b>（需先有分班結果）</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-green" style="padding:10px 18px;font-size:0.9rem;font-weight:700" onclick="funnelBookingToAssess(${idx})">→ 建立分級檢測</button>
+      <button class="btn" style="padding:10px 18px;font-size:0.9rem;font-weight:700;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer" onclick="funnelBookingToTrialDirect(${idx})">📅 → 直接排體驗課</button>
+    </div>
+    <div style="margin-top:8px;font-size:0.72rem;color:#9CA3AF">直接排體驗：將先建一筆簡易分班紀錄 (可之後補完成績)‧並直接進入行事曆選班</div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -2005,6 +2009,41 @@ window.funnelInquiryToBooking = function(inqIdx) {
       // 自動標記問課狀態為「已安排檢測」
       if (typeof updateStatus === 'function') updateStatus('inquiries', inqIdx, '已安排檢測');
       if (typeof showToast === 'function') showToast('✅ 已帶入家長/學生資訊 · 請完成日期/時段來部新增預約');
+    }, 150);
+  }, 250);
+};
+
+// v2.18.64 · 招生漏斗 ‧ 預約 → 直接排體驗 (跳過檢測)
+// 先建一筆簡易檢測 (不填分數‧只填分班結果)‧後進入行事曆
+window.funnelBookingToTrialDirect = function(bkIdx) {
+  var d = loadData();
+  var r = d.bookings[bkIdx];
+  if (!r) { alert('找不到預約'); return; }
+  closeModal();
+  // 若家長已預約體驗課但還沒分班‧系統進 assess 頁 → openAddAssess‧已帶學生名
+  switchSection('assess');
+  setTimeout(function() {
+    if (typeof openAddAssess !== 'function') { alert('分級檢測新增功能未準備好'); return; }
+    openAddAssess();
+    setTimeout(function() {
+      // 帶入學生/家長
+      var na = document.getElementById('as_name');
+      if (na) na.value = r.child || r.student || '';
+      // 提示使用者 → 先選分班結果就好‧其他可以之後補
+      if (typeof showToast === 'function') {
+        showToast('✅ 已帶入學生資訊‧選一個分班結果後保存‧接著不離開又將自動彈行事曆');
+      }
+      // 將預約資訊存 sessionStorage → saveAssessment 完成後可自動接進行事曆
+      try {
+        sessionStorage.setItem('xg_direct_trial_flow', JSON.stringify({
+          booking_idx: bkIdx,
+          parent: r.parent || '',
+          phone: r.phone || '',
+          child: r.child || r.student || ''
+        }));
+      } catch(e){}
+      // 把預約狀態改為已完成
+      if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
     }, 150);
   }, 250);
 };
@@ -2644,6 +2683,23 @@ async function saveAssessment() {
     // 重拉雲端資料 · 保證其他人也看到
     if (typeof _assessRefresh === 'function') await _assessRefresh();
     renderAssess(document.getElementById('mainContent'));
+    // v2.18.64 · 如果是從預約直接排7體驗的路徑 · 自動彈行事曆
+    try {
+      var directFlow = sessionStorage.getItem('xg_direct_trial_flow');
+      if (directFlow && fields.finalClass) {
+        sessionStorage.removeItem('xg_direct_trial_flow');
+        // 找到剛建的 assessment index (最後一筆同名)
+        var assIdx = -1;
+        (data.assessments||[]).forEach(function(a, i){
+          if (a.studentName === fields.studentName) assIdx = i;
+        });
+        if (assIdx >= 0 && typeof openTrialBooker === 'function') {
+          setTimeout(function(){
+            openTrialBooker(assIdx);
+          }, 300);
+        }
+      }
+    } catch(e){}
   } catch (e) {
     alert('儲存失敗: ' + e.message);
   }
