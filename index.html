@@ -2837,55 +2837,107 @@ function _renderTrialBookerCal() {
   });
   const html = Object.keys(byMonth).sort().map(ym => {
     const [y,m] = ym.split('-');
+    // v2.18.61 · 以週分列 · 固定 5 欄 (週一~週五)
+    // 先將本月日期依週一~週五分組
+    const daysInMonth = byMonth[ym];
+    // 找出本月範圍
+    const firstDay = new Date(daysInMonth[0]+'T00:00:00');
+    const lastDay = new Date(daysInMonth[daysInMonth.length-1]+'T00:00:00');
+    // 以本月 1 號 → 月底遍歷並分組到週（以週一為首 · ISO week）
+    function _weekKey(dt) {
+      var d = new Date(dt.getTime());
+      var day = d.getDay();
+      var diff = day === 0 ? -6 : 1 - day; // 週日=0 → 退 6 天到上週一
+      d.setDate(d.getDate() + diff);
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    }
+    // 建日期 -> object 映射（包含本月所有班日）
+    const daysMap = {};
+    daysInMonth.forEach(function(dstr){ daysMap[dstr] = true; });
+    // 列出本月所有週（1號背到最後一天那週的週日）
+    const firstOfMonth = new Date(parseInt(y,10), parseInt(m,10)-1, 1);
+    const lastOfMonth = new Date(parseInt(y,10), parseInt(m,10), 0);
+    // 收集本月所有週 (weekKey 集合)
+    const weekKeysSet = new Set();
+    for (var day = new Date(firstOfMonth); day <= lastOfMonth; day.setDate(day.getDate()+1)) {
+      weekKeysSet.add(_weekKey(day));
+    }
+    const weekKeys = Array.from(weekKeysSet).sort();
+
+    // 對每週 · 重幼一~五日期
+    function _dateStr(dt) {
+      return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+    }
+    function _dayCell(dstr, isInMonth) {
+      // 同樣邏輯 ‧ 但日子不在本月 → 點白化
+      const dateObj = new Date(dstr+'T00:00:00');
+      const dd = dateObj.getDate();
+      const dayClassesAll = cls.filter(c => (c.dates||[]).some(dt => {
+        const m2 = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+        return m2 && (m2[1]+'-'+String(m2[2]).padStart(2,'0')+'-'+String(m2[3]).padStart(2,'0')) === dstr;
+      }));
+      const dayClasses = hasLadder
+        ? dayClassesAll.filter(function(c){
+            var lv = _extractLvCode(c.level);
+            if (acceptIdxCal.has(LEVEL_LADDER.indexOf(lv))) return true;
+            if (_geptRecoCal && (c.level||'').indexOf(_geptRecoCal) >= 0) return true;
+            return false;
+          })
+        : dayClassesAll;
+      const classTags = dayClasses.map(c => {
+        const lvl = (c.level||'').toString();
+        const tm = (c.time_start||c.time||'').toString().substring(0,5);
+        const bookedThis = _trialBookerState.bookings.filter(b => b.date === dstr && b.class_id === c.id).length;
+        const taken = bookedThis > 0;
+        return `<div style="padding:2px 5px;border-radius:4px;font-size:0.68rem;background:${taken?'#F3F4F6':'#F0FDF4'};color:${taken?'#9CA3AF':'#065F46'};border:1px solid ${taken?'#E5E7EB':'#A7F3D0'};line-height:1.3;text-decoration:${taken?'line-through':'none'}">${lvl} · ${tm}</div>`;
+      }).join('');
+      const bookedClasses = _trialBookerState.bookings.filter(b => b.date === dstr).length;
+      const avail = dayClasses.length - bookedClasses;
+      const isFull = avail <= 0;
+      const sel = _trialBookerState.selDate === dstr;
+      const hasClass = dayClasses.length > 0;
+      const notInMonth = !isInMonth;
+      const disabled = isFull || notInMonth || !hasClass;
+      return `<button onclick="${disabled ? '' : "_pickTrialBookerDate('"+dstr+"')"}" ${disabled?'disabled':''} style="
+        padding:8px 6px;border-radius:8px;cursor:${disabled?'default':'pointer'};
+        background:${sel?'#FFF7ED':notInMonth?'#FAFAFA':isFull?'#F9FAFB':'#FFF'};
+        color:${sel?'#9A3412':notInMonth?'#D1D5DB':isFull?'#9CA3AF':'#1F2937'};
+        border:${sel?'2px solid #E8863A':'1.5px solid ' + (notInMonth?'#F3F4F6':isFull?'#E5E7EB':hasClass?'#FED7AA':'#F3F4F6')};
+        font-weight:${sel?'700':'600'};opacity:${notInMonth?'0.5':'1'};
+        display:flex;flex-direction:column;gap:3px;font-size:0.78rem;text-align:left;min-height:76px
+      ">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:1rem;font-weight:800">${dd}</span>
+          ${hasClass && isInMonth ? '<span style="font-size:0.65rem;'+(sel?'color:#9A3412':isFull?'color:#9CA3AF':'color:#16A34A')+';font-weight:700">'+(isFull?'已滿':'剩 '+avail)+'</span>' : ''}
+        </div>
+        ${hasClass && isInMonth ? '<div style="display:flex;flex-direction:column;gap:2px">'+classTags+'</div>' : ''}
+      </button>`;
+    }
+
+    // 週日顯不顯? 嚴格只顯週一至五 (5 欄)
+    var weeksHtml = weekKeys.map(function(wk){
+      var wkDate = new Date(wk+'T00:00:00');
+      var cellsHtml = '';
+      for (var i = 0; i < 5; i++) { // 週一~週五
+        var dayDate = new Date(wkDate.getTime());
+        dayDate.setDate(dayDate.getDate() + i);
+        var dstr = _dateStr(dayDate);
+        var isInMonth = (dayDate.getMonth() === parseInt(m,10)-1);
+        cellsHtml += _dayCell(dstr, isInMonth);
+      }
+      return '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">' + cellsHtml + '</div>';
+    }).join('');
+
     return `<div style="margin-bottom:14px">
       <div style="font-weight:700;font-size:0.92rem;color:#1F2937;margin-bottom:8px">📅 ${y} 年 ${parseInt(m,10)} 月</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px">
-        ${byMonth[ym].map(d => {
-          const dateObj = new Date(d+'T00:00:00');
-          const dow = ['日','一','二','三','四','五','六'][dateObj.getDay()];
-          const dd = parseInt(d.split('-')[2], 10);
-          const dayClassesAll = cls.filter(c => (c.dates||[]).some(dt => {
-            const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-            return m && (m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0')) === d;
-          }));
-          const dayClasses = hasLadder
-            ? dayClassesAll.filter(function(c){
-                var lv = _extractLvCode(c.level);
-                if (acceptIdxCal.has(LEVEL_LADDER.indexOf(lv))) return true;
-                // v2.18.60 · 菁英 → 英檢推薦對應
-                if (_geptRecoCal && (c.level||'').indexOf(_geptRecoCal) >= 0) return true;
-                return false;
-              })
-            : dayClassesAll;
-          // v2.18.59 · 將班別標簽列入方格
-          const classTags = dayClasses.map(c => {
-            const lvl = (c.level||'').toString();
-            const tm = (c.time_start||c.time||'').toString().substring(0,5);
-            const bookedThis = _trialBookerState.bookings.filter(b => b.date === d && b.class_id === c.id).length;
-            const taken = bookedThis > 0;
-            return `<div style="padding:2px 5px;border-radius:4px;font-size:0.68rem;background:${taken?'#F3F4F6':'#F0FDF4'};color:${taken?'#9CA3AF':'#065F46'};border:1px solid ${taken?'#E5E7EB':'#A7F3D0'};line-height:1.3;text-decoration:${taken?'line-through':'none'}">${lvl} · ${tm}</div>`;
-          }).join('');
-          const bookedClasses = _trialBookerState.bookings.filter(b => b.date === d).length;
-          const avail = dayClasses.length - bookedClasses;
-          const isFull = avail <= 0;
-          const sel = _trialBookerState.selDate === d;
-          const hasClass = dayClasses.length > 0;
-          return `<button onclick="_pickTrialBookerDate('${d}')" ${isFull?'disabled':''} style="
-            padding:8px 6px;border-radius:8px;cursor:${isFull?'not-allowed':'pointer'};
-            background:${sel?'#FFF7ED':isFull?'#F9FAFB':'#FFF'};
-            color:${sel?'#9A3412':isFull?'#9CA3AF':'#1F2937'};
-            border:${sel?'2px solid #E8863A':'1.5px solid ' + (isFull?'#E5E7EB':'#FED7AA')};
-            font-weight:${sel?'700':'600'};
-            display:flex;flex-direction:column;gap:3px;font-size:0.78rem;text-align:left;min-height:76px
-          ">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <span><span style="font-size:0.72rem;opacity:0.7">週${dow}</span> <span style="font-size:1rem;font-weight:800">${dd}</span></span>
-              <span style="font-size:0.65rem;${sel?'color:#9A3412':isFull?'color:#9CA3AF':'color:#16A34A'};font-weight:700">${isFull?'已滿':'剩 '+avail}</span>
-            </div>
-            ${hasClass ? '<div style="display:flex;flex-direction:column;gap:2px">'+classTags+'</div>' : ''}
-          </button>`;
-        }).join('')}
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:6px">
+        <div style="text-align:center;font-size:0.72rem;color:#6B7280;font-weight:700;padding:4px 0">週一</div>
+        <div style="text-align:center;font-size:0.72rem;color:#6B7280;font-weight:700;padding:4px 0">週二</div>
+        <div style="text-align:center;font-size:0.72rem;color:#6B7280;font-weight:700;padding:4px 0">週三</div>
+        <div style="text-align:center;font-size:0.72rem;color:#6B7280;font-weight:700;padding:4px 0">週四</div>
+        <div style="text-align:center;font-size:0.72rem;color:#6B7280;font-weight:700;padding:4px 0">週五</div>
       </div>
+      ${weeksHtml}
     </div>`;
   }).join('');
   document.getElementById('tbCalWrap').innerHTML = html;
