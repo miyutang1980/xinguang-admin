@@ -3983,7 +3983,8 @@ function _trialShowBulkImportDialog(rows) {
     } else {
       alert('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複/空)' : '') + '‧記得按儲存到主網站');
     }
-    renderTrial(document.getElementById('mainContent'));
+    // v2.18.53 修正: 只重繪 UI · 不去 Gateway 重新拉資料 (避免覆寫新增的班)
+    _renderTrialUI(document.getElementById('mainContent'));
   };
 }
 
