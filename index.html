@@ -186,9 +186,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       <div class="sidebar-item" onclick="switchSection('trialBookings')" id="nav-trialBookings">
         📅 體驗預約 <span class="badge" id="badge-trialBookings">0</span>
       </div>
-    <div class="sidebar-item" onclick="switchSection('leads')" id="nav-leads">
-        💰 潛客名單 <span class="badge" id="badge-leads">0</span>
-      </div>
+    <!-- v2.18.67: 移除潛客名單入口 (Sheet 沒這 tab · Gateway 也沒 API · 現在改由問課/預約/檢測 三頁共同就是漏斗) -->
     <div class="sidebar-item" onclick="switchSection('documents')" id="nav-documents">
         📎 說明會簡報
       </div>
