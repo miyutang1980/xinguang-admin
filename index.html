@@ -3489,6 +3489,9 @@ function getTrialDatesAdmin(){
 
 async function renderTrial(el) {
   el.innerHTML = '<div style="padding:24px;text-align:center;color:#888">載入中…</div>';
+  // v2.18.54 · 每次進頁重置行事曆到今天月份
+  var _today = new Date();
+  _trialCalCursor = { y: _today.getFullYear(), m: _today.getMonth() };
   try {
     const res = await gwCall('trial_classes_get');
     const data = await res.json();
@@ -4010,11 +4013,10 @@ function _renderTrialUI(el) {
     return '<span style="background:#F3F4F6;border:1px solid #E5E7EB;padding:3px 10px;border-radius:14px;font-size:0.78rem;margin-right:6px">週'+d+': '+(byDay[d]||0)+'</span>';
   }).join('');
 
-  // 預設峰默顯示體驗期間的起始月
+  // v2.18.54 · 進頁面預設顯示今天所在月份 (不再用體驗期起始月)
   if (!_trialCalCursor) {
-    var startMs = Date.parse(_trialPeriodStart) || Date.now();
-    var d0 = new Date(startMs);
-    _trialCalCursor = { y: d0.getFullYear(), m: d0.getMonth() };
+    var today = new Date();
+    _trialCalCursor = { y: today.getFullYear(), m: today.getMonth() };
   }
 
   el.innerHTML = `
