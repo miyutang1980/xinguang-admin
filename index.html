@@ -2119,9 +2119,13 @@ function showBookingChangeModal(idx, action){
   const isTrial = String(r.bookingType||'').includes('課程體驗');
 
   if(!isCancel){
-    const dateHint = isTrial ? ' <span style="color:#888;font-weight:normal">(體驗班只週一至週五)</span>' : '';
+    // v2.18.69 · min=今天 · 不能改到過去
+    var _todayStr69 = new Date();
+    _todayStr69.setHours(0,0,0,0);
+    var _minDate = _todayStr69.getFullYear() + '-' + String(_todayStr69.getMonth()+1).padStart(2,'0') + '-' + String(_todayStr69.getDate()).padStart(2,'0');
+    const dateHint = isTrial ? ' <span style="color:#888;font-weight:normal">(體驗班只週一至週五)</span>' : ' <span style="color:#888;font-weight:normal">(不能選過去日期)</span>';
     bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新日期 *${dateHint}</label>`;
-    bodyHtml += `<input type="date" id="chgNewDate" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
+    bodyHtml += `<input type="date" id="chgNewDate" min="${_minDate}" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box"></div>`;
 
     if(isTrial){
       // 體驗班: 先選時段(早/下/晚) → 再選班別
@@ -2138,13 +2142,10 @@ function showBookingChangeModal(idx, action){
       bodyHtml += `</select>`;
       bodyHtml += `<div style="font-size:0.75rem;color:#888;margin-top:4px">班別已包含上課時間</div></div>`;
     } else {
-      // 參訪/檢測: 原有八個固定時段下拉
-      bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新時段 *</label>`;
-      bodyHtml += `<select id="chgNewSlot" style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box">`;
-      bodyHtml += `<option value="">請選擇</option>`;
-      bodyHtml += `<option>09:00-10:00</option><option>10:00-11:00</option><option>11:00-12:00</option>`;
-      bodyHtml += `<option>14:00-15:00</option><option>15:00-16:00</option><option>16:00-17:00</option>`;
-      bodyHtml += `<option>19:00-20:00</option><option>20:00-21:00</option>`;
+      // v2.18.69 · 參訪/檢測: 新時段列表依所選日期動態產生，排除已被其他家長預約
+      bodyHtml += `<div style="margin-bottom:14px"><label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:6px">新時段 * <span style="color:#888;font-weight:normal;font-size:0.75rem">(已被其他家長預約的不顯示)</span></label>`;
+      bodyHtml += `<select id="chgNewSlot" disabled style="width:100%;padding:11px 14px;border:1.5px solid #ddd;border-radius:8px;font-size:0.95rem;box-sizing:border-box;background:#F9FAFB">`;
+      bodyHtml += `<option value="">請先選日期</option>`;
       bodyHtml += `</select></div>`;
     }
   }
@@ -2159,6 +2160,49 @@ function showBookingChangeModal(idx, action){
   document.getElementById('modalBody').innerHTML = bodyHtml;
   setTimeout(function(){
     document.getElementById('chgCancel').onclick = function(){ showBookingDetail(idx); };
+
+    // v2.18.69 · 非體驗預約 (分級檢測/參訪) · 選日期後動態產生時段選單
+    if (!isCancel && !isTrial) {
+      var dateInput = document.getElementById('chgNewDate');
+      var slotSel = document.getElementById('chgNewSlot');
+      if (dateInput && slotSel) {
+        var ALL_SLOTS = ['09:00-10:00','10:00-11:00','11:00-12:00','14:00-15:00','15:00-16:00','16:00-17:00','19:00-20:00','20:00-21:00'];
+        dateInput.onchange = function() {
+          var picked = dateInput.value;
+          if (!picked) {
+            slotSel.disabled = true;
+            slotSel.style.background = '#F9FAFB';
+            slotSel.innerHTML = '<option value="">請先選日期</option>';
+            return;
+          }
+          // 搜集已被佔用的時段 (同日 + 非已取消的預約)
+          var d2 = loadData();
+          var taken = new Set();
+          (d2.bookings || []).forEach(function(bk, i) {
+            if (i === idx) return; // 排除自己
+            if (bk.status === '已取消' || bk.status === '已完成') return;
+            if (bk.date === picked && bk.slot) taken.add(bk.slot);
+          });
+          // 重建時段選單
+          var opts = '<option value="">請選擇</option>';
+          ALL_SLOTS.forEach(function(s){
+            if (!taken.has(s)) opts += '<option value="' + s + '">' + s + '</option>';
+          });
+          if (taken.size === ALL_SLOTS.length) {
+            opts = '<option value="">該日已全滿 · 請換其他日期</option>';
+          } else if (taken.size > 0) {
+            // 小提示已被占的時段
+            opts += '<option value="" disabled>── 已被占用 (不可選) ──</option>';
+            ALL_SLOTS.forEach(function(s){
+              if (taken.has(s)) opts += '<option value="" disabled style="color:#DC2626">' + s + ' (已預約)</option>';
+            });
+          }
+          slotSel.disabled = false;
+          slotSel.style.background = '#FFF';
+          slotSel.innerHTML = opts;
+        };
+      }
+    }
 
     // 體驗班: 時段 → 班別 聯動
     if(!isCancel && isTrial){
