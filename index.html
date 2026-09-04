@@ -1776,29 +1776,65 @@ async function _wc_save() {
 
 // ── 體驗預約一覽 ──────────────────────────────────────────
 // 顯示所有「體驗課」類型的預約、按日期+班分組、檢測重複
-function renderTrialBookings(el) {
+async function renderTrialBookings(el) {
   const d = loadData();
-  // 過濾體驗課預約
-  const trialBookings = d.bookings.filter(r => {
+  // v2.18.73 · 先拉遠端 trial_bookings (包含體驗課預約) 合併本機
+  var remoteTrials = [];
+  try {
+    var respTb = await fetch(GW_URL + '?action=trialBookings');
+    var dataTb = await respTb.json();
+    if (dataTb && dataTb.ok) remoteTrials = dataTb.bookings || [];
+  } catch(e) {}
+
+  // 本機體驗課預約
+  const localTrials = d.bookings.filter(r => {
     const t = (r.bookingType || r.type || r.bk_type || '').toString();
     return t.includes('體驗') || t === 'trial';
   });
+
+  // 合併 (電話 + 日期 + 時段 去重)
+  const seen = new Set();
+  const trialBookings = [];
+  // 先加遠端 (公認來源)
+  remoteTrials.forEach(function(r){
+    const key = (r.phone||'') + '|' + (r.date||'') + '|' + (r.slot||'');
+    if (!seen.has(key)) {
+      seen.add(key);
+      trialBookings.push({
+        _rowIndex: r._row, ts: r.ts, parent: r.parent, phone: r.phone, child: r.child,
+        bookingType: '體驗課', type: r.type||'體驗課',
+        date: r.date, slot: r.slot, status: r.status || '待確認',
+        trialClassCode: r.trialClassCode, trialClassLabel: r.trialClassLabel,
+        trialTeacherCn: r.trialTeacherCn, trialTeacherEn: r.trialTeacherEn, trialRoom: r.trialRoom
+      });
+    }
+  });
+  // 再加本機 (未同步到 sheet 的)
+  localTrials.forEach(function(r){
+    const key = (r.phone||'') + '|' + (r.date||'') + '|' + (r.slot||'');
+    if (!seen.has(key)) {
+      seen.add(key);
+      trialBookings.push(r);
+    }
+  });
   const statusOpts = ['待回電','待確認','已確認','已完成','已取消'];
 
-  // 按 日期+時段 分組偵測重複（同班同日 1 人原則）
+  // v2.18.73 · 按 日期+時段 分組偵測重複 (已取消不算衝突)
   const slotMap = {};
   trialBookings.forEach(r => {
+    if (r.status === '已取消') return; // 已取消釋出名額 ‧ 不入衝突偵測
     const key = (r.date || '') + '|' + (r.slot || r.time || '');
     if (!slotMap[key]) slotMap[key] = [];
     slotMap[key].push(r);
   });
   const conflicts = Object.keys(slotMap).filter(k => slotMap[k].length > 1).length;
 
-  // 統計
+  // v2.18.73 · 統計 (已取消單獨統計)
   const total = trialBookings.length;
   const pending = trialBookings.filter(r => (r.status||'')==='待確認' || (r.status||'')==='待回電').length;
   const confirmed = trialBookings.filter(r => (r.status||'')==='已確認').length;
   const done = trialBookings.filter(r => (r.status||'')==='已完成').length;
+  const cancelled = trialBookings.filter(r => (r.status||'')==='已取消').length;
 
   el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
@@ -1817,6 +1853,7 @@ function renderTrialBookings(el) {
       <div class="card" style="padding:14px;border-left:4px solid #F59E0B"><div style="font-size:0.75rem;color:var(--text-muted)">待回電/確認</div><div style="font-size:1.5rem;font-weight:800;color:#F59E0B;margin-top:2px">${pending}</div></div>
       <div class="card" style="padding:14px;border-left:4px solid #2563EB"><div style="font-size:0.75rem;color:var(--text-muted)">已確認</div><div style="font-size:1.5rem;font-weight:800;color:#2563EB;margin-top:2px">${confirmed}</div></div>
       <div class="card" style="padding:14px;border-left:4px solid #7C3AED"><div style="font-size:0.75rem;color:var(--text-muted)">已完成</div><div style="font-size:1.5rem;font-weight:800;color:#7C3AED;margin-top:2px">${done}</div></div>
+      <div class="card" style="padding:14px;border-left:4px solid #9CA3AF"><div style="font-size:0.75rem;color:var(--text-muted)">已取消</div><div style="font-size:1.5rem;font-weight:800;color:#6B7280;margin-top:2px">${cancelled}</div></div>
       <div class="card" style="padding:14px;border-left:4px solid ${conflicts>0?'#DC2626':'#10B981'}"><div style="font-size:0.75rem;color:var(--text-muted)">重複預約衝突</div><div style="font-size:1.5rem;font-weight:800;color:${conflicts>0?'#DC2626':'#10B981'};margin-top:2px">${conflicts}</div></div>
     </div>
 
@@ -1883,7 +1920,12 @@ function renderTrialBookings(el) {
     const tcEn = r.trialTeacherEn || '';
     const room = r.trialRoom || '';
     const isTrialBk = (r.bookingType === 'trial' || r.type === '體驗課');
-    return `<tr ${isConflict ? 'style="background:#FEF2F2"' : ''}>
+    // v2.18.73 · 已取消行淺化 · 保留軌跡
+    const isCancelled = status === '已取消';
+    var rowStyle = '';
+    if (isCancelled) rowStyle = 'style="background:#F9FAFB;opacity:0.55"';
+    else if (isConflict) rowStyle = 'style="background:#FEF2F2"';
+    return `<tr ${rowStyle}>
       <td>${i+1}</td>
       <td>${(r.ts||'').substring(0,16)}</td>
       <td><strong>${r.parent || r.pname || '—'}</strong></td>
