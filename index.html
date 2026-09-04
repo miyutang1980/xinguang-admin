@@ -1878,13 +1878,25 @@ function renderTrialBookings(el) {
     const isConflict = conflictRows.length > 1;
     const status = r.status || '待確認';
     const sb = status==='待確認'||status==='待回電'?'badge-pending':status==='已確認'?'badge-contacted':status==='已完成'?'badge-arranged':'badge-cancelled';
+    // v2.18.63 · 進一步顯示班代號 + 中外師 + 教室
+    const clsCode = r.trialClassCode || r.trialClassId || '';
+    const clsLabel = r.trialClassLabel || r.cls || '';
+    const tcCn = r.trialTeacherCn || '';
+    const tcEn = r.trialTeacherEn || '';
+    const room = r.trialRoom || '';
+    const isTrialBk = (r.bookingType === 'trial' || r.type === '體驗課');
     return `<tr ${isConflict ? 'style="background:#FEF2F2"' : ''}>
       <td>${i+1}</td>
       <td>${(r.ts||'').substring(0,16)}</td>
       <td><strong>${r.parent || r.pname || '—'}</strong></td>
       <td>${r.phone ? `<a href="tel:${r.phone}" style="color:inherit;text-decoration:none">${r.phone.startsWith('0')?r.phone:'0'+r.phone}</a>` : '—'}</td>
-      <td>${r.child || r.sname || '—'}</td>
-      <td><strong style="color:#2B7A4B">${r.date || '—'}</strong></td>
+      <td>${r.child || r.sname || r.student || '—'}</td>
+      <td>
+        <strong style="color:#2B7A4B">${r.date || '—'}</strong>
+        ${clsLabel?`<div style="font-size:0.72rem;color:#065F46;margin-top:2px">${clsLabel}</div>`:''}
+        ${clsCode?`<div style="font-size:0.68rem;color:#6B7280;font-family:monospace">${clsCode}${room?' · '+room:''}</div>`:''}
+        ${tcCn||tcEn?`<div style="font-size:0.68rem;color:#9CA3AF">${tcCn}${tcEn?' / '+tcEn:''}</div>`:''}
+      </td>
       <td><span style="background:#F0FDF4;padding:2px 8px;border-radius:50px;font-size:0.8rem;font-family:monospace;color:#166534">${slot}</span></td>
       <td>${isConflict ? `<span style="color:#DC2626;font-weight:700">⚠️ ${conflictRows.length} 人</span>` : '<span style="color:#10B981">✓</span>'}</td>
       <td><select class="status-select" onchange="updateStatus('bookings',${realIdx},this.value)">
@@ -1892,11 +1904,39 @@ function renderTrialBookings(el) {
       </select></td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showBookingDetail(${realIdx})">查看</button>
-        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #2563EB;color:#2563EB;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formRepush('bookings',${realIdx})" title="補推到招生群">📤</button><button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
+        ${isTrialBk?`<button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;margin-left:4px;font-weight:700" onclick="_trialBkgChange(${realIdx})" title="換班/改日期">🔄 改班</button>`:''}
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626;border-radius:6px;cursor:pointer;margin-left:4px" onclick="_formDelete('bookings',${realIdx})" title="刪除這筆預約">[X]</button>
       </td>
     </tr>`;
   }).join('');
 }
+
+// v2.18.63 · 體驗預約改班 ‧ 重新進入行事曆選日期 + 班次
+window._trialBkgChange = async function(bkIdx) {
+  var d = loadData();
+  var r = d.bookings[bkIdx];
+  if (!r) { alert('找不到預約'); return; }
+  var okConfirm = confirm('換班後·原班次 (' + (r.date||'') + ' ' + (r.slot||'') + ') 會釋出給其他家長選。\n\n確定要換吗？');
+  if (!okConfirm) return;
+  // 先把原預約標成已取消 (釋出同班同日名額)
+  try {
+    r.status = '已取消';
+    r._changed = true;
+    saveData(d);
+    if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已取消');
+    // 重新開行事曆 ‧ 帶入原學生/家長/分班
+    // 找對應的 assessment (同學生名)
+    var idx = -1;
+    (d.assessments||[]).forEach(function(a, i){ if (a.studentName === r.student || a.studentName === r.child) idx = i; });
+    if (idx >= 0 && typeof openTrialBooker === 'function') {
+      openTrialBooker(idx);
+    } else {
+      alert('已釋出原班次 · 請到分級檢測頁手動重新排體驗課');
+    }
+  } catch(e) {
+    alert('換班失敗: ' + e.message);
+  }
+};
 
 function showBookingDetail(idx) {
   const d = loadData();
@@ -2872,6 +2912,10 @@ function _renderTrialBookerCal() {
       // 同樣邏輯 ‧ 但日子不在本月 → 點白化
       const dateObj = new Date(dstr+'T00:00:00');
       const dd = dateObj.getDate();
+      // v2.18.63 · 不允許選過去日期
+      const today0 = new Date();
+      today0.setHours(0,0,0,0);
+      const isPast = dateObj < today0;
       const dayClassesAll = cls.filter(c => (c.dates||[]).some(dt => {
         const m2 = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
         return m2 && (m2[1]+'-'+String(m2[2]).padStart(2,'0')+'-'+String(m2[3]).padStart(2,'0')) === dstr;
@@ -2897,13 +2941,14 @@ function _renderTrialBookerCal() {
       const sel = _trialBookerState.selDate === dstr;
       const hasClass = dayClasses.length > 0;
       const notInMonth = !isInMonth;
-      const disabled = isFull || notInMonth || !hasClass;
+      // v2.18.63 · 過去日期也不能選
+      const disabled = isFull || notInMonth || !hasClass || isPast;
       return `<button onclick="${disabled ? '' : "_pickTrialBookerDate('"+dstr+"')"}" ${disabled?'disabled':''} style="
         padding:8px 6px;border-radius:8px;cursor:${disabled?'default':'pointer'};
-        background:${sel?'#FFF7ED':notInMonth?'#FAFAFA':isFull?'#F9FAFB':'#FFF'};
-        color:${sel?'#9A3412':notInMonth?'#D1D5DB':isFull?'#9CA3AF':'#1F2937'};
-        border:${sel?'2px solid #E8863A':'1.5px solid ' + (notInMonth?'#F3F4F6':isFull?'#E5E7EB':hasClass?'#FED7AA':'#F3F4F6')};
-        font-weight:${sel?'700':'600'};opacity:${notInMonth?'0.5':'1'};
+        background:${sel?'#FFF7ED':notInMonth?'#FAFAFA':isPast?'#F3F4F6':isFull?'#F9FAFB':'#FFF'};
+        color:${sel?'#9A3412':notInMonth?'#D1D5DB':isPast?'#D1D5DB':isFull?'#9CA3AF':'#1F2937'};
+        border:${sel?'2px solid #E8863A':'1.5px solid ' + (notInMonth?'#F3F4F6':isPast?'#E5E7EB':isFull?'#E5E7EB':hasClass?'#FED7AA':'#F3F4F6')};
+        font-weight:${sel?'700':'600'};opacity:${notInMonth||isPast?'0.4':'1'};
         display:flex;flex-direction:column;gap:3px;font-size:0.78rem;text-align:left;min-height:76px
       ">
         <div style="display:flex;justify-content:space-between;align-items:center">
@@ -3107,6 +3152,7 @@ async function confirmTrialBooking() {
   btn.style.opacity = '0.6';
 
   try {
+    // v2.18.63 · 完整記錄體驗資料 (學生名/班代號/中外師/教室/周幾)
     const payload = {
       _type: 'booking',
       pname: parent,
@@ -3121,6 +3167,12 @@ async function confirmTrialBooking() {
       cls: s.finalClass,
       trialClassId: cls.id,
       trialClassLabel: trialClassLabel,
+      trialClassCode: cls.id, // v2.18.63 班代號 (2609...)
+      trialLevel: cls.level,
+      trialCat: cls.cat_zh,
+      trialDay: cls.day, // 週幾
+      trialTeacherCn: cls.tw || '',
+      trialTeacherEn: cls.fr || '',
       trialTeacher: (cls.tw||'') + (cls.fr?' / '+cls.fr:''),
       trialRoom: cls.room || '',
       _adminBooked: true,
