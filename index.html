@@ -2919,7 +2919,11 @@ function _renderTrialBookerCal() {
     const m = String(dt).match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
     if (m) allDates.add(m[1]+'-'+String(m[2]).padStart(2,'0')+'-'+String(m[3]).padStart(2,'0'));
   }));
-  const dateList = Array.from(allDates).sort();
+  // v2.18.65 · 剥除今天以前的日期 · 只顯未來 (含今日)
+  var _today0 = new Date();
+  _today0.setHours(0,0,0,0);
+  var _todayStr = _today0.getFullYear() + '-' + String(_today0.getMonth()+1).padStart(2,'0') + '-' + String(_today0.getDate()).padStart(2,'0');
+  const dateList = Array.from(allDates).filter(function(d){ return d >= _todayStr; }).sort();
   if (!dateList.length) {
     document.getElementById('tbCalWrap').innerHTML = '<div style="color:#DC2626;text-align:center;padding:20px">班表沒有可體驗日期</div>';
     return;
@@ -2950,12 +2954,22 @@ function _renderTrialBookerCal() {
     // 建日期 -> object 映射（包含本月所有班日）
     const daysMap = {};
     daysInMonth.forEach(function(dstr){ daysMap[dstr] = true; });
-    // 列出本月所有週（1號背到最後一天那週的週日）
+    // v2.18.65 · 週背新邏輯：從 (今天所在週 vs 本月 1 號所在週) 取最晚那一週開始
+    // 這樣就不會顯示 8/27~9/03 這些本月之前的日期卡
     const firstOfMonth = new Date(parseInt(y,10), parseInt(m,10)-1, 1);
     const lastOfMonth = new Date(parseInt(y,10), parseInt(m,10), 0);
+    // 起始週: 今天所在週 ‧ 但不能比本月首週早
+    var _firstMonWk = new Date(_today0.getTime());
+    if (firstOfMonth > _today0) {
+      _firstMonWk = new Date(firstOfMonth.getTime());
+    }
+    // 取 _firstMonWk 所在週的週一
+    var _fwDay = _firstMonWk.getDay();
+    var _fwDiff = _fwDay === 0 ? -6 : 1 - _fwDay;
+    _firstMonWk.setDate(_firstMonWk.getDate() + _fwDiff);
     // 收集本月所有週 (weekKey 集合)
     const weekKeysSet = new Set();
-    for (var day = new Date(firstOfMonth); day <= lastOfMonth; day.setDate(day.getDate()+1)) {
+    for (var day = new Date(_firstMonWk); day <= lastOfMonth; day.setDate(day.getDate()+1)) {
       weekKeysSet.add(_weekKey(day));
     }
     const weekKeys = Array.from(weekKeysSet).sort();
