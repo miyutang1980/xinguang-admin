@@ -2161,12 +2161,51 @@ function showBookingChangeModal(idx, action){
   setTimeout(function(){
     document.getElementById('chgCancel').onclick = function(){ showBookingDetail(idx); };
 
-    // v2.18.69 · 非體驗預約 (分級檢測/參訪) · 選日期後動態產生時段選單
+    // v2.18.70 · 非體驗預約 (分級檢測/參訪) · 完全對齊前台日曆規則
     if (!isCancel && !isTrial) {
       var dateInput = document.getElementById('chgNewDate');
       var slotSel = document.getElementById('chgNewSlot');
       if (dateInput && slotSel) {
-        var ALL_SLOTS = ['09:00-10:00','10:00-11:00','11:00-12:00','14:00-15:00','15:00-16:00','16:00-17:00','19:00-20:00','20:00-21:00'];
+        // v2.18.70 · 先拉前台日曆規則
+        var CAL_SETTINGS = null;
+        (async function loadCal(){
+          try {
+            var resp = await fetch(GW_URL + '?action=calendarSettings', { method: 'GET' });
+            var d3 = await resp.json();
+            CAL_SETTINGS = (d3 && d3.ok && d3.settings) ? d3.settings : { blockedDates:[], blockedSlots:[], regularSlots:null, summerSlots:null, summerStart:'', summerEnd:'' };
+          } catch(e) {
+            CAL_SETTINGS = { blockedDates:[], blockedSlots:[] };
+          }
+        })();
+
+        // 學期中預設時段規則 (對齊前台)
+        var REGULAR_SLOTS = ['14:00-15:00', '19:00-20:00']; // 週一二三五兩個, 週四只 14:00-15:00
+        var SUMMER_SLOTS = ['17:00-18:00', '19:00-20:00']; // 曑期兩個
+
+        function _getAllowedSlots(dateStr) {
+          var s = CAL_SETTINGS || {};
+          var dt = new Date(dateStr + 'T00:00:00');
+          var dow = dt.getDay(); // 0=日 1=一 ... 6=六
+          // 不接周末
+          if (dow === 0 || dow === 6) return [];
+          // 不可預約日
+          if ((s.blockedDates||[]).indexOf(dateStr) >= 0) return [];
+          // 判斷入曑期?
+          var isSummer = false;
+          if (s.summerStart && s.summerEnd) {
+            isSummer = (dateStr >= s.summerStart && dateStr <= s.summerEnd);
+          }
+          var slots = isSummer ? SUMMER_SLOTS.slice() : REGULAR_SLOTS.slice();
+          // 學期中週四只下午
+          if (!isSummer && dow === 4) {
+            slots = slots.filter(function(sl){ return sl.indexOf('14:00') === 0; });
+          }
+          // 排除 blockedSlots (日+時 鎖定)
+          var blockedThisDay = (s.blockedSlots||[]).filter(function(bs){ return bs.date === dateStr; }).map(function(bs){ return bs.slot; });
+          slots = slots.filter(function(sl){ return blockedThisDay.indexOf(sl) < 0; });
+          return slots;
+        }
+
         dateInput.onchange = function() {
           var picked = dateInput.value;
           if (!picked) {
@@ -2175,25 +2214,41 @@ function showBookingChangeModal(idx, action){
             slotSel.innerHTML = '<option value="">請先選日期</option>';
             return;
           }
-          // 搜集已被佔用的時段 (同日 + 非已取消的預約)
+          if (!CAL_SETTINGS) {
+            slotSel.disabled = true;
+            slotSel.innerHTML = '<option value="">拉載日曆規則中…</option>';
+            setTimeout(function(){ dateInput.onchange(); }, 800);
+            return;
+          }
+          var allowed = _getAllowedSlots(picked);
+          if (!allowed.length) {
+            var dtObj = new Date(picked + 'T00:00:00');
+            var reason = '該日不接受預約';
+            if (dtObj.getDay() === 0 || dtObj.getDay() === 6) reason = '週末不接受預約';
+            else if ((CAL_SETTINGS.blockedDates||[]).indexOf(picked) >= 0) reason = '該日為不可預約日';
+            slotSel.disabled = true;
+            slotSel.style.background = '#FEF2F2';
+            slotSel.innerHTML = '<option value="">' + reason + ' · 請換其他日期</option>';
+            return;
+          }
+          // 搜集同日已被佔用的時段 (排除自己)
           var d2 = loadData();
           var taken = new Set();
           (d2.bookings || []).forEach(function(bk, i) {
-            if (i === idx) return; // 排除自己
+            if (i === idx) return;
             if (bk.status === '已取消' || bk.status === '已完成') return;
             if (bk.date === picked && bk.slot) taken.add(bk.slot);
           });
-          // 重建時段選單
+          // 重建時段選單 · 只顯前台允許的時段
           var opts = '<option value="">請選擇</option>';
-          ALL_SLOTS.forEach(function(s){
+          allowed.forEach(function(s){
             if (!taken.has(s)) opts += '<option value="' + s + '">' + s + '</option>';
           });
-          if (taken.size === ALL_SLOTS.length) {
-            opts = '<option value="">該日已全滿 · 請換其他日期</option>';
+          if (taken.size === allowed.length) {
+            opts = '<option value="">該日所有時段已滿 · 請換其他日期</option>';
           } else if (taken.size > 0) {
-            // 小提示已被占的時段
             opts += '<option value="" disabled>── 已被占用 (不可選) ──</option>';
-            ALL_SLOTS.forEach(function(s){
+            allowed.forEach(function(s){
               if (taken.has(s)) opts += '<option value="" disabled style="color:#DC2626">' + s + ' (已預約)</option>';
             });
           }
