@@ -8968,21 +8968,150 @@ function openInquiryForm(idx) {
 }
 
 // 預約 新增 / 編輯
-function openBookingForm(idx) {
+// v2.18.72 · 手動新增預約 ‧ 完全對齊前台日曆規則
+async function openBookingForm(idx) {
   var d = loadData();
   var initial = (idx != null && d.bookings[idx]) ? d.bookings[idx] : {};
-  var fields = [
-    { key:'parent', label:'家長姓名', type:'text', required:true },
-    { key:'phone',  label:'電話',     type:'text', required:true },
-    { key:'child',  label:'孩子姓名', type:'text' },
-    { key:'bookingType', label:'預約類型', type:'select', options:['參訪校區','英文程度檢測','課程體驗','參訪校區 + 英文程度檢測'] },
-    { key:'date',   label:'日期 (YYYY-MM-DD)', type:'text', required:true },
-    { key:'slot',   label:'時段',     type:'text', required:true },
-    { key:'cls',    label:'感興趣班型', type:'text' },
-    { key:'note',   label:'備註',     type:'textarea' },
-    { key:'status', label:'狀態',     type:'select', options:['待確認','已確認','已完成','已取消'] }
-  ];
-  openFormModal((idx!=null?'編輯':'新增')+'預約紀錄', fields, initial, async function(out){
+
+  // 先拉前台日曆規則
+  var CAL_SETTINGS = null;
+  try {
+    var resp = await fetch(GW_URL + '?action=calendarSettings', { method: 'GET' });
+    var dat = await resp.json();
+    CAL_SETTINGS = (dat && dat.ok && dat.settings) ? dat.settings : { blockedDates:[], blockedSlots:[], summerStart:'', summerEnd:'' };
+  } catch(e) {
+    CAL_SETTINGS = { blockedDates:[], blockedSlots:[] };
+  }
+
+  var REGULAR_SLOTS = ['14:00-15:00', '19:00-20:00'];
+  var SUMMER_SLOTS  = ['17:00-18:00', '19:00-20:00'];
+
+  function _getAllowedSlots(dateStr) {
+    var s = CAL_SETTINGS || {};
+    var dt = new Date(dateStr + 'T00:00:00');
+    var dow = dt.getDay();
+    if (dow === 0 || dow === 6) return [];
+    if ((s.blockedDates||[]).indexOf(dateStr) >= 0) return [];
+    var isSummer = false;
+    if (s.summerStart && s.summerEnd) isSummer = (dateStr >= s.summerStart && dateStr <= s.summerEnd);
+    var slots = isSummer ? SUMMER_SLOTS.slice() : REGULAR_SLOTS.slice();
+    if (!isSummer && dow === 4) slots = slots.filter(function(sl){ return sl.indexOf('14:00') === 0; });
+    var blockedThisDay = (s.blockedSlots||[]).filter(function(bs){ return bs.date === dateStr; }).map(function(bs){ return bs.slot; });
+    slots = slots.filter(function(sl){ return blockedThisDay.indexOf(sl) < 0; });
+    return slots;
+  }
+
+  // min = 今天
+  var _today = new Date(); _today.setHours(0,0,0,0);
+  var _minStr = _today.getFullYear() + '-' + String(_today.getMonth()+1).padStart(2,'0') + '-' + String(_today.getDate()).padStart(2,'0');
+
+  document.getElementById('modalTitle').textContent = (idx!=null?'✏️ 編輯':'➕ 手動新增') + '預約紀錄';
+  var esc = function(v){ return String(v||'').replace(/"/g,'&quot;'); };
+  var html = ''
+    + '<div class="detail-section">家長資料</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+    +   '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">家長姓名 *</label><input type="text" id="bk_parent" value="'+esc(initial.parent||initial.pname)+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>'
+    +   '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">電話 *</label><input type="text" id="bk_phone" value="'+esc(initial.phone)+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>'
+    + '</div>'
+    + '<div style="margin-bottom:14px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">孩子姓名</label><input type="text" id="bk_child" value="'+esc(initial.child||initial.student)+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>'
+    + '<div class="detail-section" style="margin-top:14px">預約項目</div>'
+    + '<div style="margin-bottom:14px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">預約類型 *</label>'
+    +   '<select id="bk_type" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">'
+    +     ['參訪校區','英文程度檢測','參訪校區 + 英文程度檢測'].map(function(o){
+            return '<option value="'+o+'"' + (String(initial.bookingType||initial.type)===o?' selected':'') + '>'+o+'</option>';
+          }).join('')
+    +   '</select>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'
+    +   '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">日期 * <span style="color:#888;font-weight:normal;font-size:0.72rem">(遵守前台規則)</span></label>'
+    +     '<input type="date" id="bk_date" min="'+_minStr+'" value="'+esc(initial.date)+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem">'
+    +   '</div>'
+    +   '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">時段 * <span style="color:#888;font-weight:normal;font-size:0.72rem">(自動排除已占)</span></label>'
+    +     '<select id="bk_slot" disabled style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#F9FAFB"><option>請先選日期</option></select>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="margin-bottom:14px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">感興趣班型</label><input type="text" id="bk_cls" value="'+esc(initial.cls)+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>'
+    + '<div style="margin-bottom:14px"><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">備註</label><input type="text" id="bk_note" value="'+esc(initial.note)+'" placeholder="例：從課問轉入" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>'
+    + '<div id="bkFormMsg" style="font-size:0.82rem;color:#DC2626;margin-bottom:12px;min-height:18px"></div>'
+    + '<div style="display:flex;gap:10px">'
+    +   '<button class="btn btn-outline" style="flex:1" onclick="closeModal()">取消</button>'
+    +   '<button class="btn btn-green" style="flex:2" id="bkSaveBtn">💾 儲存預約</button>'
+    + '</div>';
+
+  document.getElementById('modalBody').innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('open');
+
+  // 日期變效 → 重建時段選單
+  var bkDate = document.getElementById('bk_date');
+  var bkSlot = document.getElementById('bk_slot');
+
+  function _refreshSlots() {
+    var picked = bkDate.value;
+    if (!picked) {
+      bkSlot.disabled = true;
+      bkSlot.style.background = '#F9FAFB';
+      bkSlot.innerHTML = '<option value="">請先選日期</option>';
+      return;
+    }
+    var allowed = _getAllowedSlots(picked);
+    if (!allowed.length) {
+      var dtObj = new Date(picked + 'T00:00:00');
+      var reason = '該日不接受預約';
+      if (dtObj.getDay() === 0 || dtObj.getDay() === 6) reason = '週末不接受預約';
+      else if ((CAL_SETTINGS.blockedDates||[]).indexOf(picked) >= 0) reason = '該日為不可預約日';
+      bkSlot.disabled = true;
+      bkSlot.style.background = '#FEF2F2';
+      bkSlot.innerHTML = '<option value="">' + reason + '</option>';
+      return;
+    }
+    // 搜集同日已被佔用時段 (非取消非完成)
+    var d2 = loadData();
+    var taken = new Set();
+    (d2.bookings || []).forEach(function(bk, i) {
+      if (idx != null && i === idx) return;
+      if (bk.status === '已取消' || bk.status === '已完成') return;
+      if (bk.date === picked && bk.slot) taken.add(bk.slot);
+    });
+    var opts = '<option value="">請選擇</option>';
+    allowed.forEach(function(s){
+      if (!taken.has(s)) opts += '<option value="'+s+'"' + (String(initial.slot)===s?' selected':'') + '>'+s+'</option>';
+    });
+    if (taken.size === allowed.length) {
+      opts = '<option value="">該日全滿 · 請換其他日期</option>';
+    } else if (taken.size > 0) {
+      opts += '<option value="" disabled>── 已被占用 ──</option>';
+      allowed.forEach(function(s){
+        if (taken.has(s)) opts += '<option value="" disabled style="color:#DC2626">'+s+' (已預約)</option>';
+      });
+    }
+    bkSlot.disabled = false;
+    bkSlot.style.background = '#FFF';
+    bkSlot.innerHTML = opts;
+  }
+
+  bkDate.onchange = _refreshSlots;
+  if (initial.date) _refreshSlots();
+
+  document.getElementById('bkSaveBtn').onclick = async function() {
+    var msg = document.getElementById('bkFormMsg');
+    msg.textContent = '';
+    var parent = document.getElementById('bk_parent').value.trim();
+    var phone  = document.getElementById('bk_phone').value.trim();
+    var child  = document.getElementById('bk_child').value.trim();
+    var type   = document.getElementById('bk_type').value;
+    var date   = document.getElementById('bk_date').value;
+    var slot   = document.getElementById('bk_slot').value;
+    var cls    = document.getElementById('bk_cls').value.trim();
+    var note   = document.getElementById('bk_note').value.trim();
+    if (!parent || !phone) { msg.textContent = '家長姓名/電話必填'; return; }
+    if (!date) { msg.textContent = '請選日期'; return; }
+    if (!slot) { msg.textContent = '請選時段'; return; }
+
+    var btn = document.getElementById('bkSaveBtn');
+    btn.disabled = true; btn.textContent = '⏳ 儲存中…';
+    var out = { parent:parent, phone:phone, child:child, bookingType:type, type:type, date:date, slot:slot, cls:cls, note:note, status: (idx!=null && initial.status) ? initial.status : '待確認' };
+
+    // 寫本地
     var d2 = loadData();
     if (idx != null) {
       Object.assign(d2.bookings[idx], out);
@@ -8991,13 +9120,22 @@ function openBookingForm(idx) {
       d2.bookings.push(out);
     }
     saveData(d2);
-    closeModal();
-    showToast('已儲存（本地）');
+
+    // 寫雲端 (Sheet)
     var rowIdx = (idx!=null && d2.bookings[idx]._rowIndex) ? d2.bookings[idx]._rowIndex : null;
-    var r = await _formsDataWrite(idx!=null?'update':'create', 'bookings', out, rowIdx);
-    if (!r.ok) showToast('已存本地，雲端寫入未啟用'); else showToast('已同步雲端');
+    try {
+      var r = await _formsDataWrite(idx!=null?'update':'create', 'bookings', out, rowIdx);
+      if (r && r.ok) {
+        showToast('✅ 已儲存 · 前台可見');
+      } else {
+        showToast('⚠️ 已存本地 · 雲端寫入失敗');
+      }
+    } catch(e) {
+      showToast('⚠️ 已存本地 · ' + e.message);
+    }
+    closeModal();
     renderBooking(document.getElementById('mainContent'));
-  });
+  };
 }
 
 // 夏令營 新增 / 編輯
