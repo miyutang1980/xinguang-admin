@@ -3487,33 +3487,74 @@ function getTrialDatesAdmin(){
   return dates;
 }
 
-async function renderTrial(el) {
-  el.innerHTML = '<div style="padding:24px;text-align:center;color:#888">載入中…</div>';
+async function renderTrial(el, forceReload) {
+  // v2.18.55 · 支援快取 (sessionStorage) · 避免每次進頁都 Gateway 冷啓動 10 秒
+  var CACHE_KEY = 'xg_trial_classes_v1';
+  var CACHE_PERIOD_KEY = 'xg_trial_period_v1';
+
   // v2.18.54 · 每次進頁重置行事曆到今天月份
   var _today = new Date();
   _trialCalCursor = { y: _today.getFullYear(), m: _today.getMonth() };
+
+  // 快取命中直接繪 UI、背景重新拉
+  var cachedRaw = !forceReload && sessionStorage.getItem(CACHE_KEY);
+  if (cachedRaw) {
+    try {
+      var cached = JSON.parse(cachedRaw);
+      if (Array.isArray(cached) && cached.length > 0) {
+        _trialClasses = cached;
+        var savedPeriod = sessionStorage.getItem(CACHE_PERIOD_KEY);
+        if (savedPeriod) {
+          var pp = JSON.parse(savedPeriod);
+          _trialPeriodStart = pp.start || _trialPeriodStart;
+          _trialPeriodEnd = pp.end || _trialPeriodEnd;
+        }
+        _renderTrialUI(el);
+        // 背景重新拉新資料 (不阻塞 UI)
+        _trialFetchAndUpdate(el, false);
+        return;
+      }
+    } catch(e){ console.warn('[trial] 快取解析失敗', e); }
+  }
+
+  // 沒快取 → 進入 fetch 模式顯示專用載入畫面 (帶提示時間)
+  el.innerHTML = '<div style="padding:60px 24px;text-align:center;color:#666">' +
+    '<div style="font-size:2rem;margin-bottom:14px">⏳</div>' +
+    '<div style="font-weight:700;font-size:1.05rem;margin-bottom:8px">以從主網站拉班表中…</div>' +
+    '<div style="font-size:0.85rem;color:#9CA3AF;line-height:1.7">Google Apps Script 首次呼叫需 5-15 秒 (冷啓動)<br>' +
+    '後續將快取到 · 下次進頁即時顯示</div>' +
+    '</div>';
+  await _trialFetchAndUpdate(el, true);
+}
+
+// v2.18.55 · 拉資料 + 快取寫入 sessionStorage
+async function _trialFetchAndUpdate(el, showFinal) {
   try {
     const res = await gwCall('trial_classes_get');
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || '讀取失敗');
     _trialClasses = data.classes || [];
-    // 從第一班讀取體驗期間預設值
     if(_trialClasses.length > 0){
       var first = _trialClasses[0];
-      // 讀回來的可能是 trial_period 字串、也可能是 period_start/end 欄位、需要連繫看
       var ps = first.period_start || (first.trial_period && first.trial_period.split('–')[0].trim()) || '';
       var pe = first.period_end || (first.trial_period && first.trial_period.split('–')[1] && first.trial_period.split('–')[1].trim()) || '';
-      // trial_period 可能是 "5/8 · 6/18" 這種未帶年份、補上 2026/
       if(ps && !/\d{4}/.test(ps)) ps = '2026/' + ps;
       if(pe && !/\d{4}/.test(pe)) pe = '2026/' + pe;
       _trialPeriodStart = _toDateInput(ps) || '2026-05-08';
       _trialPeriodEnd = _toDateInput(pe) || '2026-06-18';
     }
+    // 寫快取
+    try {
+      sessionStorage.setItem('xg_trial_classes_v1', JSON.stringify(_trialClasses));
+      sessionStorage.setItem('xg_trial_period_v1', JSON.stringify({ start: _trialPeriodStart, end: _trialPeriodEnd }));
+    } catch(e){}
+    if (showFinal) _renderTrialUI(el);
   } catch(e) {
-    el.innerHTML = '<div style="padding:24px;color:#c00">載入失敗：' + e.message + '</div>';
-    return;
+    if (showFinal) {
+      el.innerHTML = '<div style="padding:24px;color:#c00">載入失敗：' + e.message + '。<br><br>' +
+        '<button class="btn btn-outline" onclick="renderTrial(document.getElementById(\'mainContent\'), true)">🔄 重試</button></div>';
+    }
   }
-  _renderTrialUI(el);
 }
 
 const GW_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
@@ -3987,6 +4028,11 @@ function _trialShowBulkImportDialog(rows) {
       alert('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複/空)' : '') + '‧記得按儲存到主網站');
     }
     // v2.18.53 修正: 只重繪 UI · 不去 Gateway 重新拉資料 (避免覆寫新增的班)
+    // v2.18.55: 同步快取 · 震確保下次進頁看到新建的班 (而非舊快取)
+    try {
+      sessionStorage.setItem('xg_trial_classes_v1', JSON.stringify(_trialClasses));
+      sessionStorage.setItem('xg_trial_period_v1', JSON.stringify({ start: _trialPeriodStart, end: _trialPeriodEnd }));
+    } catch(e){}
     _renderTrialUI(document.getElementById('mainContent'));
   };
 }
@@ -4029,7 +4075,7 @@ function _renderTrialUI(el) {
         <div style="margin-top:8px">${dayList}<span style="color:#9CA3AF;font-size:0.78rem;margin-left:6px">共 ${_trialClasses.length} 班</span></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-outline" onclick="renderTrial(document.getElementById('mainContent'))">🔄 重新載入</button>
+        <button class="btn btn-outline" onclick="renderTrial(document.getElementById('mainContent'), true)">🔄 重新載入</button>
         <button class="btn btn-green" id="trialAddBtn">➕ 新增一班</button>
         <button class="btn" id="trialBulkImportBtn" style="background:#7C3AED;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-weight:700;cursor:pointer">⚡ 一鍵套用學期班表</button>
         <button class="btn" id="trialSaveBtn" style="background:#2B7A4B;color:#fff;border:none;padding:9px 20px;border-radius:6px;font-weight:700;cursor:pointer">💾 儲存到主網站</button>
