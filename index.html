@@ -3657,8 +3657,69 @@ function _trialApplyPeriod(){
 }
 
 // ==========================================================================
-// v2.18.50 · 一鍵套用學期班表 (從班級設定導入 → 建立體驗班列表)
+// v2.18.51 · 一鍵套用學期班表 (使用官方班代號 + 中外師 + 可編輯)
 // ==========================================================================
+
+// 2026 秋季班別資料 (115-1 學期)
+// 來源: 用戶提供 Program-Information-Yi-Guo-Ban-Ji-Zi-Xun-_20260904.xlsx
+var _BULK_SEMESTER_CLASSES = [
+  { id: '2609T2B1', cat: 'Intensive',     cat_zh: '菁英', level: '2B',       time: '16:30-19:00', days: '一/二/四',                        tw: 'James Li',    fr: 'Yannick Ashley Derryh Bacchus', room: 'R206', remark: '' },
+  { id: '2609T3A1', cat: 'Intensive',     cat_zh: '菁英', level: '3A',       time: '19:00-20:30', days: '一/二/三 1400-1530/四/五',       tw: 'James Li',    fr: 'Yannick Ashley Derryh Bacchus', room: 'R206', remark: '週三改 14:00-15:30' },
+  { id: '2609T3C1', cat: 'Intensive',     cat_zh: '菁英', level: '3C',       time: '16:30-19:00', days: '一(Leighton)/三(Yannick)/五(Yannick)', tw: 'James Li',    fr: 'Yannick Ashley Derryh Bacchus', room: 'R206', remark: '不同周幾不同外師' },
+  { id: '2609A1F1', cat: 'Immersion',     cat_zh: '浸潤', level: 'G1-1',     time: '13:30-16:15', days: '一/三/四/五',                    tw: 'Vivian Kuo',  fr: 'Tsenolo Theresa Molapo',        room: 'R103', remark: '浸潤班' },
+  { id: '2609N2F1', cat: 'Immersion',     cat_zh: '浸潤', level: 'G2-1',     time: '16:30-18:45', days: '一/二/三/四/五',                tw: 'James Li',    fr: 'Tsenolo Theresa Molapo',        room: 'R103', remark: '浸潤班' },
+  { id: '2609ZP11', cat: 'GEPT',          cat_zh: '英檢', level: '初級-初試', time: '19:00-21:00', days: '二/五',                            tw: 'James Li',    fr: 'Mphumuzi Siyabonga Zwane',      room: 'R102', remark: '' },
+  { id: '2609ZP31', cat: 'GEPT',          cat_zh: '英檢', level: '中級-初試', time: '19:00-21:00', days: '一/四',                            tw: 'James Li',    fr: 'Mphumuzi Siyabonga Zwane',      room: 'R102', remark: '' },
+  { id: '2609T4A1', cat: 'Intensive',     cat_zh: '菁英', level: '4A',       time: '16:30-19:00', days: '二/四/五',                        tw: 'Vivian Kuo',  fr: 'Mphumuzi Siyabonga Zwane',      room: 'R102', remark: '' },
+  { id: '2609T1A2', cat: 'Intensive',     cat_zh: '菁英', level: '1A',       time: '16:30-19:00', days: '二/三/四',                        tw: 'James Li',    fr: 'Leighton Milton Fredericks',    room: 'R104', remark: '' },
+  { id: '2609A1A1', cat: 'Intensive',     cat_zh: '菁英', level: '1A',       time: '14:00-16:00', days: '一/三/四/五',                    tw: 'Vivian Kuo',  fr: 'Leighton Milton Fredericks',    room: 'R104', remark: '' },
+  { id: '2609SSA1', cat: 'Early Starter', cat_zh: '幼美', level: 'SSA',      time: '19:00-20:30', days: '一/二/五',                        tw: 'Vivian Kuo',  fr: 'Dlamini Jessicah Nosimiso',     room: 'R204', remark: '' },
+  { id: '2609ASA1', cat: 'Intensive',     cat_zh: '菁英', level: 'SA',       time: '14:00-16:00', days: '一/三/四/五',                    tw: 'Vivian Kuo',  fr: 'Dlamini Jessicah Nosimiso',     room: 'R204', remark: '' },
+  { id: '2609T1C1', cat: 'Intensive',     cat_zh: '菁英', level: '1C',       time: '16:30-19:00', days: '一/二/四',                        tw: 'James Li',    fr: 'Dlamini Jessicah Nosimiso',     room: 'R204', remark: '' }
+];
+
+// 項取班並展開到週一 ~ 週五 → 一班一天一行
+// 支援「一/三/四/五」「一(Leighton)/三(Yannick)」「一/二/三 1400-1530/四/五」
+function _bulkExpandSemester() {
+  var rows = [];
+  var idxByBase = {};  // 同班内不同天共用 base id + 順序
+  _BULK_SEMESTER_CLASSES.forEach(function(cls){
+    // 切週幾 (去除括號內或后進不相關備註)
+    var dayStr = String(cls.days || '').split('/').map(function(d){ return d.trim(); }).filter(Boolean);
+    dayStr.forEach(function(dPart, i){
+      // 取首字 (一/二/三/四/五)
+      var m = dPart.match(/^([一二三四五六日])/);
+      if (!m) return;
+      var day = m[1];
+      // 備註: 包含括號內容 (中括/外括/時間變更) → 搬到 remark
+      var extraNote = '';
+      var inParen = dPart.match(/\((.*?)\)/);
+      if (inParen) extraNote = inParen[1];
+      var timeInDay = dPart.match(/(\d{3,4})-(\d{3,4})/);
+      if (timeInDay) extraNote = (extraNote ? extraNote + ' ' : '') + '改 ' + timeInDay[1] + '-' + timeInDay[2];
+      // 導出一行
+      // time: '16:30-19:00' → start / end
+      var tm = String(cls.time||'').match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+      var time_start = tm ? (tm[1].padStart(2,'0') + ':' + tm[2]) : '14:00';
+      var time_end   = tm ? (tm[3].padStart(2,'0') + ':' + tm[4]) : '15:00';
+      rows.push({
+        _selected: true,
+        id: cls.id,
+        cat: cls.cat,
+        cat_zh: cls.cat_zh,
+        level: cls.level,
+        day: day,
+        time_start: time_start,
+        time_end: time_end,
+        tw: cls.tw || '',
+        fr: cls.fr || '',
+        room: cls.room || '',
+        remark: extraNote || cls.remark || ''
+      });
+    });
+  });
+  return rows;
+}
 
 // 週幾字 → 週幾陣列 (支援「週一、三、四、五」「週一至週五」「週一、二、四」)
 function _bulkParseDays(dayStr) {
@@ -3701,7 +3762,7 @@ function _bulkCategorize(className) {
   return { cat: 'Intensive', cat_zh: '菁英' };
 }
 
-// 需排除的班名 (115-1 未開)
+// 需排除的班名 (115-1 未開) (v2.18.51 官方名單已不含這些但保留投防)
 var _BULK_EXCLUDE_CLASSES = ['中級複試', '初級複試'];
 
 // 從班級設定讀取 + 展開成體驗班列表
@@ -3739,61 +3800,52 @@ function _bulkParseClassesConfig(cfg) {
   return rows;
 }
 
-// 主入口 · 開彈窗
-async function _trialBulkImport() {
-  var btn = document.getElementById('trialBulkImportBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ 載入班級設定...'; }
-
-  // 1. 從 Gateway 拉班級設定 JSON
-  var cfg = null;
-  try {
-    var resp = await fetch(GW_URL + '?action=classes_get', { method: 'GET' });
-    var data = await resp.json();
-    if (data && data.ok !== false) {
-      cfg = data.classes || data.data || data;
-      if (typeof cfg === 'string') cfg = JSON.parse(cfg);
-    }
-  } catch (e) {
-    console.error('[BulkImport] classes_get 失敗', e);
-  }
-  if (!cfg || !cfg.slot1) {
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ 一鍵套用學期班表'; }
-    alert('❌ 無法讀取「班級設定」。請先到「開班資訊」確認資料存在。');
-    return;
-  }
-
-  // 2. 解析所有班 → 體驗班行
-  var expandedRows = _bulkParseClassesConfig(cfg);
-  if (btn) { btn.disabled = false; btn.textContent = '⚡ 一鍵套用學期班表'; }
-
-  // 3. 顯示對話框讓使用者確認與編輯
+// 主入口 · 開彈窗 (v2.18.51 直接使用內建官方名單)
+function _trialBulkImport() {
+  var expandedRows = _bulkExpandSemester();
   _trialShowBulkImportDialog(expandedRows);
 }
 
-// 彈窗 UI · 顯示將要新增的班、可編輯/取消勾選
+// 彈窗 UI · v2.18.51 可編輯版 (班代號/時間/中師/外師/教室 都可編輯)
 function _trialShowBulkImportDialog(rows) {
-  var prefix = '2609';
   var periodStart = '2026-08-31';
   var periodEnd = '2027-01-20';
-
-  // 預設全部勾選
-  rows.forEach(function(r, i){ r._selected = true; r._id_suffix = String(i+1); });
 
   function _rerender() {
     var container = document.getElementById('bulkImportRows');
     if (!container) return;
     var html = '';
     rows.forEach(function(r, i){
-      var idSuffix = r._id_suffix || String(i+1);
-      var idFull = prefix + (r.cat === 'Early Starter' ? 'Z' : '') + r.className.replace(/[\s\+\/]/g, '') + idSuffix;
       html += '<tr style="' + (r._selected ? '' : 'opacity:0.4;background:#F9FAFB') + '">';
-      html += '<td style="padding:6px 8px"><input type="checkbox" ' + (r._selected ? 'checked' : '') + ' onchange="_bulkToggleRow(' + i + ')" style="width:18px;height:18px;cursor:pointer"></td>';
-      html += '<td style="padding:6px 8px;font-family:monospace;font-size:0.78rem;color:#7C3AED">' + idFull + '</td>';
-      html += '<td style="padding:6px 8px;font-weight:700">' + r.className + '</td>';
-      html += '<td style="padding:6px 8px;font-size:0.85rem">' + r.cat_zh + '</td>';
-      html += '<td style="padding:6px 8px;text-align:center">週' + r.day + '</td>';
-      html += '<td style="padding:6px 8px;font-family:monospace;font-size:0.85rem">' + r.time_start + '–' + r.time_end + '</td>';
-      html += '<td style="padding:6px 8px;font-size:0.75rem;color:#6B7280">' + (r.remark || '—') + '</td>';
+      html += '<td style="padding:6px 8px;text-align:center"><input type="checkbox" ' + (r._selected ? 'checked' : '') + ' onchange="_bulkToggleRow(' + i + ')" style="width:18px;height:18px;cursor:pointer"></td>';
+      // 班代號 (可編輯)
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.id) + '" onchange="_bulkEditField(' + i + ',\'id\',this.value)" style="width:110px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-family:monospace;font-size:0.78rem;color:#7C3AED;font-weight:700"></td>';
+      // 班名 (可編輯)
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.level) + '" onchange="_bulkEditField(' + i + ',\'level\',this.value)" style="width:100px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-weight:700;font-size:0.85rem"></td>';
+      // 類別 (下拉)
+      html += '<td style="padding:4px 6px"><select onchange="_bulkEditCat(' + i + ',this.value)" style="padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.82rem">';
+      ['菁英','浸潤','英檢','幼美'].forEach(function(c){
+        html += '<option value="' + c + '" ' + (r.cat_zh === c ? 'selected' : '') + '>' + c + '</option>';
+      });
+      html += '</select></td>';
+      // 週幾 (下拉)
+      html += '<td style="padding:4px 6px"><select onchange="_bulkEditField(' + i + ',\'day\',this.value)" style="padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.82rem">';
+      ['一','二','三','四','五','六','日'].forEach(function(d){
+        html += '<option value="' + d + '" ' + (r.day === d ? 'selected' : '') + '>週' + d + '</option>';
+      });
+      html += '</select></td>';
+      // 開始時間
+      html += '<td style="padding:4px 6px"><input type="time" value="' + _htmlEsc(r.time_start) + '" onchange="_bulkEditField(' + i + ',\'time_start\',this.value)" style="padding:5px 6px;border:1.5px solid #E5E7EB;border-radius:5px;width:88px;font-size:0.82rem"></td>';
+      // 結束時間
+      html += '<td style="padding:4px 6px"><input type="time" value="' + _htmlEsc(r.time_end) + '" onchange="_bulkEditField(' + i + ',\'time_end\',this.value)" style="padding:5px 6px;border:1.5px solid #E5E7EB;border-radius:5px;width:88px;font-size:0.82rem"></td>';
+      // 中師
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.tw) + '" onchange="_bulkEditField(' + i + ',\'tw\',this.value)" placeholder="中師" style="width:110px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.8rem"></td>';
+      // 外師
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.fr) + '" onchange="_bulkEditField(' + i + ',\'fr\',this.value)" placeholder="外師" style="width:180px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.8rem"></td>';
+      // 教室
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.room) + '" onchange="_bulkEditField(' + i + ',\'room\',this.value)" placeholder="R101" style="width:66px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.8rem"></td>';
+      // 備註
+      html += '<td style="padding:4px 6px"><input type="text" value="' + _htmlEsc(r.remark || '') + '" onchange="_bulkEditField(' + i + ',\'remark\',this.value)" placeholder="備註" style="width:130px;padding:5px 8px;border:1.5px solid #E5E7EB;border-radius:5px;font-size:0.8rem;color:#6B7280"></td>';
       html += '</tr>';
     });
     container.innerHTML = html;
@@ -3803,51 +3855,53 @@ function _trialShowBulkImportDialog(rows) {
   }
 
   // 彈窗 HTML
-  var html = '<div style="max-width:960px">';
+  var html = '<div style="max-width:1400px">';
   html += '<div style="background:#F5F3FF;border-left:4px solid #7C3AED;padding:12px 16px;border-radius:6px;margin-bottom:14px">';
-  html += '<div style="font-weight:700;color:#5B21B6;margin-bottom:4px">⚡ 一鍵套用學期班表</div>';
-  html += '<div style="font-size:0.85rem;color:#6D28D9;line-height:1.7">以下班來自「開班資訊」‧已自動排除 <strong>中級複試 / 初級複試 (115-1 未開)</strong>。<br>';
-  html += '確認后點「新增到班表」‧重複班代號會自動跳過‧<strong>新增後記得按「💾 儲存到主網站」</strong>。</div>';
+  html += '<div style="font-weight:700;color:#5B21B6;margin-bottom:4px">⚡ 2026 秋季班表 (115-1 學期)</div>';
+  html += '<div style="font-size:0.85rem;color:#6D28D9;line-height:1.7">以下班名單來自官方提供 ‧可先在這裡直接修改班代號/時間/中師/外師/教室/備註，<br>';
+  html += '確認後點「✅ 新增到班表」‧重複班代號會自動跳過‧<strong>新增後記得按「💾 儲存到主網站」</strong>。</div>';
   html += '</div>';
 
-  html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">';
-  html += '<div><label style="font-size:0.82rem;color:#6B7280;font-weight:600">班代號前綴</label><br>';
-  html += '<input type="text" id="bulkImportPrefix" value="' + prefix + '" style="padding:8px 12px;border:1.5px solid #E5E7EB;border-radius:6px;font-family:monospace;width:120px;font-weight:700;color:#7C3AED" onchange="_bulkChangePrefix(this.value)"></div>';
+  html += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:flex-end">';
   html += '<div><label style="font-size:0.82rem;color:#6B7280;font-weight:600">體驗期開始</label><br>';
   html += '<input type="date" id="bulkImportStart" value="' + periodStart + '" style="padding:8px 12px;border:1.5px solid #E5E7EB;border-radius:6px;font-family:monospace"></div>';
   html += '<div><label style="font-size:0.82rem;color:#6B7280;font-weight:600">體驗期結束</label><br>';
   html += '<input type="date" id="bulkImportEnd" value="' + periodEnd + '" style="padding:8px 12px;border:1.5px solid #E5E7EB;border-radius:6px;font-family:monospace"></div>';
+  html += '<div style="font-size:0.78rem;color:#6B7280">預設: 2026/8/31 – 2027/1/20 (115-1)</div>';
   html += '</div>';
 
   html += '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
-  html += '<div style="font-size:0.9rem;font-weight:700;color:#374151">📋 將新增 <span id="bulkImportCount">' + rows.length + '</span> 筆 (共 ' + rows.length + ' 筆候選)</div>';
+  html += '<div style="font-size:0.9rem;font-weight:700;color:#374151">📋 將新增 <span id="bulkImportCount">' + rows.length + '</span> 筆 (共 ' + rows.length + ' 筆)</div>';
   html += '<div><button onclick="_bulkToggleAll(true)" style="padding:5px 10px;border:1px solid #10B981;background:#F0FDF4;color:#166534;border-radius:5px;font-size:0.78rem;cursor:pointer;margin-right:4px">全選</button>';
   html += '<button onclick="_bulkToggleAll(false)" style="padding:5px 10px;border:1px solid #DC2626;background:#FEF2F2;color:#991B1B;border-radius:5px;font-size:0.78rem;cursor:pointer">全不選</button></div>';
   html += '</div>';
 
-  html += '<div style="max-height:50vh;overflow-y:auto;border:1px solid #E5E7EB;border-radius:8px">';
-  html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem">';
+  html += '<div style="max-height:55vh;overflow:auto;border:1px solid #E5E7EB;border-radius:8px">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;min-width:1300px">';
   html += '<thead style="position:sticky;top:0;background:#F9FAFB;z-index:1"><tr>';
-  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;width:40px"></th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;width:36px"></th>';
   html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">班代號</th>';
   html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">班名</th>';
   html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">類別</th>';
   html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:center">週幾</th>';
-  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">時間</th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">開始</th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">結束</th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">中師</th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">外師</th>';
+  html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">教室</th>';
   html += '<th style="padding:8px;border-bottom:1px solid #E5E7EB;text-align:left">備註</th>';
   html += '</tr></thead>';
   html += '<tbody id="bulkImportRows"></tbody>';
   html += '</table></div>';
 
-  html += '<div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">';
+  html += '<div style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;gap:8px">';
+  html += '<div style="font-size:0.75rem;color:#6B7280">💡 提示: 班代號可直接按官方命名 (2609T2B1 等) · 同班不同天可自行編碼</div>';
+  html += '<div style="display:flex;gap:8px">';
   html += '<button class="btn btn-outline" onclick="closeModal()">取消</button>';
   html += '<button class="btn" style="background:#7C3AED;color:#fff;border:none;padding:10px 20px;border-radius:6px;font-weight:700;cursor:pointer" onclick="_bulkImportConfirm()">✅ 新增到班表</button>';
   html += '</div>';
   html += '</div>';
-
-  // 存到全域讓 button handlers 能存取
-  window._bulkImportRowsCache = rows;
-  window._bulkImportPrefixCache = prefix;
+  html += '</div>';
 
   document.getElementById('modalTitle').textContent = '⚡ 一鍵套用學期班表';
   document.getElementById('modalBody').innerHTML = html;
@@ -3863,13 +3917,17 @@ function _trialShowBulkImportDialog(rows) {
     rows.forEach(function(r){ r._selected = !!state; });
     _rerender();
   };
-  window._bulkChangePrefix = function(newPrefix) {
-    prefix = String(newPrefix||'').trim() || '2609';
-    window._bulkImportPrefixCache = prefix;
-    _rerender();
+  window._bulkEditField = function(i, field, value) {
+    if (rows[i]) rows[i][field] = value;
+  };
+  window._bulkEditCat = function(i, catZh) {
+    var m = { '菁英':'Intensive', '浸潤':'Immersion', '英檢':'GEPT', '幼美':'Early Starter' };
+    if (rows[i]) {
+      rows[i].cat_zh = catZh;
+      rows[i].cat = m[catZh] || 'Intensive';
+    }
   };
   window._bulkImportConfirm = function() {
-    var pfx = window._bulkImportPrefixCache || '2609';
     var pStart = _fromDateInput(document.getElementById('bulkImportStart').value) || '2026/8/31';
     var pEnd = _fromDateInput(document.getElementById('bulkImportEnd').value) || '2027/1/20';
     var selected = rows.filter(function(r){ return r._selected; });
@@ -3877,23 +3935,26 @@ function _trialShowBulkImportDialog(rows) {
       alert('請至少選一筆新增');
       return;
     }
-    // 取現行已存在的 id 避免重複
     var existingIds = {};
     (_trialClasses||[]).forEach(function(c){ if (c.id) existingIds[c.id] = true; });
 
     var added = 0, skipped = 0;
-    selected.forEach(function(r, i) {
-      var idFull = pfx + (r.cat === 'Early Starter' ? 'Z' : '') + r.className.replace(/[\s\+\/]/g, '') + (r._id_suffix || String(i+1));
+    selected.forEach(function(r) {
+      var idFull = String(r.id || '').trim();
+      if (!idFull) { skipped++; return; }
       if (existingIds[idFull]) { skipped++; return; }
       _trialClasses.push({
         id: idFull,
         cat: r.cat,
         cat_zh: r.cat_zh,
-        level: r.className,
+        level: r.level,
         day: r.day,
         time_start: r.time_start,
         time_end: r.time_end,
-        tw: '', fr: '', room: '', remark: r.remark || '',
+        tw: r.tw || '',
+        fr: r.fr || '',
+        room: r.room || '',
+        remark: r.remark || '',
         active: 'TRUE',
         period_start: pStart,
         period_end: pEnd
@@ -3903,16 +3964,24 @@ function _trialShowBulkImportDialog(rows) {
     });
 
     closeModal();
-    // 套用新體驗期到頁面上方
     _trialPeriodStart = _toDateInput(pStart);
     _trialPeriodEnd = _toDateInput(pEnd);
     if (typeof showToast === 'function') {
-      showToast('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複)' : '') + '‧記得按「💾 儲存到主網站」');
+      showToast('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複/空)' : '') + '‧記得按「💾 儲存到主網站」');
     } else {
-      alert('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複)' : '') + '‧記得按儲存到主網站');
+      alert('✅ 已新增 ' + added + ' 筆' + (skipped > 0 ? ' (跳過 ' + skipped + ' 筆重複/空)' : '') + '‧記得按儲存到主網站');
     }
     renderTrial(document.getElementById('mainContent'));
   };
+}
+
+// HTML escape helper (for input values)
+function _htmlEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 // 行事曆狀態
