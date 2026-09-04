@@ -3352,6 +3352,9 @@ function closeModal() {
   var m = document.getElementById('modalOverlay');
   m.classList.remove('open');
   m.style.display = '';
+  // v2.18.52 · 還原 modal 寬度 (防 一鍵套用學期班表 拉寬後影響下一個彈窗)
+  var modalInner = m.querySelector('.modal');
+  if (modalInner) { modalInner.style.maxWidth = ''; modalInner.style.width = ''; }
 }
 
 function showToast(msg) {
@@ -3905,6 +3908,12 @@ function _trialShowBulkImportDialog(rows) {
 
   document.getElementById('modalTitle').textContent = '⚡ 一鍵套用學期班表';
   document.getElementById('modalBody').innerHTML = html;
+  // v2.18.52 · 擐實彈窗 ‧ 拉到 95vw 展示完整從班代號到備註的1 1 欄位
+  var modalEl = document.querySelector('#modalOverlay .modal');
+  if (modalEl) {
+    modalEl.style.maxWidth = '95vw';
+    modalEl.style.width = '95vw';
+  }
   document.getElementById('modalOverlay').classList.add('open');
   _rerender();
 
@@ -3935,6 +3944,9 @@ function _trialShowBulkImportDialog(rows) {
       alert('請至少選一筆新增');
       return;
     }
+    // v2.18.52 · 還原彈窗寬度
+    var modalEl2 = document.querySelector('#modalOverlay .modal');
+    if (modalEl2) { modalEl2.style.maxWidth = ''; modalEl2.style.width = ''; }
     var existingIds = {};
     (_trialClasses||[]).forEach(function(c){ if (c.id) existingIds[c.id] = true; });
 
