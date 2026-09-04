@@ -1553,7 +1553,11 @@ function showInquiryDetail(idx) {
     <select class="status-select" onchange="updateStatus('inquiries',${idx},this.value);document.getElementById('modalBody').querySelector('.status-select').value=this.value">
       ${['待回電','已回電','已安排檢測','已報名','不感興趣'].map(s=>`<option${s===(r.status||'待回電')?' selected':''}>${s}</option>`).join('')}
     </select>
-    <button class="btn btn-green" style="margin-left:10px" onclick="goToAssess('${r.parent||''}','${(children[0]&&children[0].name)||''}','${(children[0]&&children[0].grade)||''}')">→ 建立檢測紀錄</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="width:100%;font-size:0.78rem;color:var(--text-muted);margin-bottom:4px">□ 招生漏斗下一步</div>
+      <button class="btn" style="padding:8px 14px;font-size:0.82rem;background:#EFF6FF;border:1.5px solid #3B82F6;color:#1E3A8A;border-radius:6px;cursor:pointer;font-weight:700" onclick="funnelInquiryToBooking(${idx})">→ 轉預約</button>
+      <button class="btn btn-green" style="padding:8px 14px;font-size:0.82rem" onclick="goToAssess('${r.parent||''}','${(children[0]&&children[0].name)||''}','${(children[0]&&children[0].grade)||''}')">→ 建立檢測紀錄</button>
+    </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -1921,9 +1925,59 @@ function showBookingDetail(idx) {
       <button class="btn btn-blue" style="flex:1;padding:10px;font-size:0.85rem" onclick="showBookingChangeModal(${idx},'reschedule')">📅 協助改期</button>
       <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626" onclick="showBookingChangeModal(${idx},'cancel')">❌ 協助取消</button>
     </div>
+
+    <div class="detail-section" style="margin-top:24px">□ 招生漏斗下一步</div>
+    <button class="btn" style="padding:8px 14px;font-size:0.82rem;background:#F0FDF4;border:1.5px solid #10B981;color:#065F46;border-radius:6px;cursor:pointer;font-weight:700" onclick="funnelBookingToAssess(${idx})">→ 轉分級檢測</button>
   `;
   document.getElementById('modalOverlay').classList.add('open');
 }
+
+// v2.18.56 · 招生漏斗 ‧ 問課 → 預約
+window.funnelInquiryToBooking = function(inqIdx) {
+  var d = loadData();
+  var r = d.inquiries[inqIdx];
+  if (!r) { alert('找不到問課紀錄'); return; }
+  var child = (r.children||[])[0] || {};
+  closeModal();
+  switchSection('booking');
+  setTimeout(function(){
+    if (typeof openBookingForm !== 'function') { alert('預約新增功能未準備好'); return; }
+    openBookingForm();
+    // 以問課資料預填
+    setTimeout(function(){
+      var fields = {
+        'bk_parent': r.parent || '',
+        'bk_phone': r.phone || '',
+        'bk_child': child.name || '',
+        'bk_note': '← 以問課轉入（問課 #' + (inqIdx+1) + '）' + (r.question ? ' · ' + r.question : '')
+      };
+      Object.keys(fields).forEach(function(id){
+        var el = document.getElementById(id);
+        if (el && fields[id]) el.value = fields[id];
+      });
+      // 預選預約類型：如果問課孩子有 goal=env(浸潤) → 預選體驗課；否則預選分級檢測
+      var typeSel = document.getElementById('bk_type');
+      if (typeSel) {
+        var goal = child.goal || '';
+        typeSel.value = (goal === 'env' || goal === 'fast') ? '體驗課' : '分級檢測';
+      }
+      // 自動標記問課狀態為「已安排檢測」
+      if (typeof updateStatus === 'function') updateStatus('inquiries', inqIdx, '已安排檢測');
+      if (typeof showToast === 'function') showToast('✅ 已帶入家長/學生資訊 · 請完成日期/時段來部新增預約');
+    }, 150);
+  }, 250);
+};
+
+// v2.18.56 · 招生漏斗 ‧ 預約 → 分級檢測
+window.funnelBookingToAssess = function(bkIdx) {
+  var d = loadData();
+  var r = d.bookings[bkIdx];
+  if (!r) { alert('找不到預約紀錄'); return; }
+  closeModal();
+  // 背景把預約狀態改為已完成
+  if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
+  goToAssess(r.parent || '', r.child || '', '');
+};
 
 // 協助家長預約異動 modal
 function showBookingChangeModal(idx, action){
