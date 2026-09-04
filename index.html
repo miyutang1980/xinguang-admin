@@ -1554,9 +1554,9 @@ function showInquiryDetail(idx) {
       ${['待回電','已回電','已安排檢測','已報名','不感興趣'].map(s=>`<option${s===(r.status||'待回電')?' selected':''}>${s}</option>`).join('')}
     </select>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:14px;border-top:1px solid var(--border)">
-      <div style="width:100%;font-size:0.78rem;color:var(--text-muted);margin-bottom:4px">□ 招生漏斗下一步</div>
+      <div style="width:100%;font-size:0.78rem;color:var(--text-muted);margin-bottom:4px">□ 下一步作業</div>
       <button class="btn" style="padding:8px 14px;font-size:0.82rem;background:#EFF6FF;border:1.5px solid #3B82F6;color:#1E3A8A;border-radius:6px;cursor:pointer;font-weight:700" onclick="funnelInquiryToBooking(${idx})">→ 轉預約</button>
-      <button class="btn btn-green" style="padding:8px 14px;font-size:0.82rem" onclick="goToAssess('${r.parent||''}','${(children[0]&&children[0].name)||''}','${(children[0]&&children[0].grade)||''}')">→ 建立檢測紀錄</button>
+      <span style="font-size:0.72rem;color:var(--text-muted);align-self:center">（檢測需先有預約 · 不直接建）</span>
     </div>
   `;
   document.getElementById('modalOverlay').classList.add('open');
@@ -1926,8 +1926,9 @@ function showBookingDetail(idx) {
       <button class="btn" style="flex:1;padding:10px;font-size:0.85rem;background:#fff;border:1.5px solid #DC2626;color:#DC2626" onclick="showBookingChangeModal(${idx},'cancel')">❌ 協助取消</button>
     </div>
 
-    <div class="detail-section" style="margin-top:24px">□ 招生漏斗下一步</div>
-    <button class="btn" style="padding:8px 14px;font-size:0.82rem;background:#F0FDF4;border:1.5px solid #10B981;color:#065F46;border-radius:6px;cursor:pointer;font-weight:700" onclick="funnelBookingToAssess(${idx})">→ 轉分級檢測</button>
+    <div class="detail-section" style="margin-top:24px">□ 下一步作業</div>
+    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:12px;line-height:1.5">接觸完家長後 · 帶學生來校檢測 · 將口試筆試結果填入</div>
+    <button class="btn btn-green" style="padding:10px 18px;font-size:0.9rem;font-weight:700" onclick="funnelBookingToAssess(${idx})">→ 建立分級檢測</button>
   `;
   document.getElementById('modalOverlay').classList.add('open');
 }
@@ -1969,6 +1970,7 @@ window.funnelInquiryToBooking = function(inqIdx) {
 };
 
 // v2.18.56 · 招生漏斗 ‧ 預約 → 分級檢測
+// v2.18.57 修正: 檢測必須從預約轉入 · 並將預約 ID/進入路徑寫入檢測醒位
 window.funnelBookingToAssess = function(bkIdx) {
   var d = loadData();
   var r = d.bookings[bkIdx];
@@ -1976,6 +1978,17 @@ window.funnelBookingToAssess = function(bkIdx) {
   closeModal();
   // 背景把預約狀態改為已完成
   if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
+  // 醒位：以預約來源註記到 sessionStorage · goToAssess 後 openAddAssess 可讀
+  try {
+    sessionStorage.setItem('xg_assess_from_booking', JSON.stringify({
+      booking_idx: bkIdx,
+      parent: r.parent || '',
+      phone: r.phone || '',
+      child: r.child || '',
+      booking_date: r.date || '',
+      booking_slot: r.slot || ''
+    }));
+  } catch(e){}
   goToAssess(r.parent || '', r.child || '', '');
 };
 
@@ -2427,9 +2440,10 @@ function renderAssess(el) {
     });
   }
   el.innerHTML = `
-    <div style="margin-bottom:16px;display:flex;gap:10px">
+    <div style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-green" onclick="openAddAssess()">＋ 新增檢測紀錄</button>
       <button class="btn" style="background:#fff;border:1.5px solid #d4d1ca" onclick="_assessManualRefresh()">🔄 重新載入</button>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-left:auto;line-height:1.5">💡 建議從 <strong>預約紀錄</strong> → <strong>→ 建立分級檢測</strong> 進入 · 保持資料串聯</div>
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
