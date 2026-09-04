@@ -2478,7 +2478,8 @@ function renderAssess(el) {
       <td>${r.finalClass?`<span class="badge-status badge-enrolled">${r.finalClass}</span>`:'<span class="badge-status badge-pending">待分班</span>'}</td>
       <td>
         <button class="btn btn-outline" style="padding:5px 10px;font-size:0.75rem" onclick="showAssessDetail(${realIdx})">查看</button>
-        ${!r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FEF3C7;border:1.5px solid #F59E0B;color:#92400E;border-radius:6px;cursor:pointer;font-weight:700" onclick="openQuickAssign(${realIdx})" title="補分班結果">✏️ 補分班</button>` : ''}
+        <button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#EFF6FF;border:1.5px solid #3B82F6;color:#1E3A8A;border-radius:6px;cursor:pointer;font-weight:700" onclick="openEditAssess(${realIdx})" title="完整編輯這筆檢測紀錄">✏️ 編輯</button>
+        ${!r.finalClass ? `<button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FEF3C7;border:1.5px solid #F59E0B;color:#92400E;border-radius:6px;cursor:pointer;font-weight:700" onclick="openQuickAssign(${realIdx})" title="補分班結果">📐 補分班</button>` : ''}
         <button class="btn" style="padding:5px 10px;font-size:0.75rem;margin-left:4px;background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;border-radius:6px;cursor:pointer;font-weight:700" onclick="openTrialBooker(${realIdx})" title="幫這位學生排體驗課">→ 排體驗</button>
         <button class="btn btn-green" style="padding:5px 10px;font-size:0.75rem;margin-left:4px" onclick="goToRegister(${realIdx})">→ 報名</button>
       </td>
@@ -2647,6 +2648,7 @@ function showAssessDetail(idx) {
     <div class="detail-row"><div class="detail-label">時間</div><div class="detail-val">${r.ts||'—'}</div></div>
     <div class="detail-section">下一步</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" style="background:#EFF6FF;border:1.5px solid #3B82F6;color:#1E3A8A;font-weight:700" onclick="closeModal();openEditAssess(${idx})">✏️ 編輯檢測資料</button>
       <button class="btn" style="background:#FFF7ED;border:1.5px solid #E8863A;color:#9A3412;font-weight:700" onclick="closeModal();openTrialBooker(${idx})">📅 預約體驗課</button>
       <button class="btn btn-green" onclick="goToRegister(${idx})">→ 直接正式報名</button>
     </div>
@@ -3120,6 +3122,90 @@ function openQuickAssign(idx) {
     <button class="btn btn-green" style="width:100%" onclick="saveQuickAssign(${idx})">儲存分班結果</button>
   `;
   document.getElementById('modalOverlay').classList.add('open');
+}
+
+// v2.18.58 · 完整編輯分級檢測紀錄
+function openEditAssess(idx) {
+  var d = loadData();
+  var r = d.assessments[idx];
+  if (!r) { alert('找不到這筆檢測紀錄'); return; }
+  if (!r.row_index) {
+    alert('這筆可能是舊本機資料 · 請先「重新載入」再編輯');
+    return;
+  }
+  var grades = ['幼幼班','小班','中班','大班','國小1年級','國小2年級','國小3年級','國小4年級','國小5年級','國小6年級','國中1年級','國中2年級','國中3年級'];
+  var oralLevels = ['GK','G1','G2','G3','G4'];
+  var readingStops = ['SA','SB','1A','1B','1C','2A','2B','2C','3A','3B','3C','4A','4B','4C'];
+  var papers = ['Starter','G1','G2','G3','G4','G5'];
+  var finalClasses = ['SA','SB','SC','1A','1B','1C','1D','2A','2B','2C','2D','3A','3B','3C','3D','4A','4B','4C','4D'];
+  function _sel(id, options, current) {
+    return '<select id="'+id+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem;background:#fff">' +
+      '<option value="">請選擇</option>' +
+      options.map(function(o){
+        return '<option value="'+o+'"' + (String(current)===String(o)?' selected':'') + '>'+o+'</option>';
+      }).join('') +
+    '</select>';
+  }
+  document.getElementById('modalTitle').textContent = '✏️ 編輯檢測 · ' + (r.studentName || '');
+  document.getElementById('modalBody').innerHTML =
+    '<div class="detail-section">學生資料</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">學生姓名 *</label><input type="text" id="ea_name" value="'+(r.studentName||'').replace(/"/g,'&quot;')+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">年級 *</label>' + _sel('ea_grade', grades, r.grade||'') + '</div>' +
+    '</div>' +
+    '<div class="detail-section">口說測驗</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">口說級數</label>' + _sel('ea_oral_level', oralLevels, r.oralLevel||'') + '</div>' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">口說分數（0-5）</label><input type="number" id="ea_oral_score" min="0" max="5" step="0.5" value="'+(r.oralScore||'')+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>' +
+    '</div>' +
+    '<div class="detail-section">閱讀 & 筆試</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">閱讀停止級</label>' + _sel('ea_reading_stop', readingStops, r.readingStop||'') + '</div>' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">筆試卷別</label>' + _sel('ea_written_paper', papers, r.writtenPaper||'') + '</div>' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">筆試總分</label><input type="number" id="ea_written_score" min="0" value="'+(r.writtenScore||'')+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>' +
+    '</div>' +
+    '<div class="detail-section">分班結果</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">分班結果 *</label>' + _sel('ea_final_class', finalClasses, r.finalClass||'') + '</div>' +
+      '<div><label style="font-size:0.8rem;font-weight:700;display:block;margin-bottom:4px">老師備註</label><input type="text" id="ea_note" value="'+(r.teacherNote||'').replace(/"/g,'&quot;')+'" style="width:100%;padding:8px;border:1.5px solid var(--border);border-radius:7px;font-size:0.85rem"></div>' +
+    '</div>' +
+    '<div style="display:flex;gap:10px">' +
+      '<button class="btn btn-outline" style="flex:1" onclick="closeModal()">取消</button>' +
+      '<button class="btn btn-green" style="flex:2" onclick="saveEditAssess('+idx+')">💾 儲存變更</button>' +
+    '</div>';
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+async function saveEditAssess(idx) {
+  var d = loadData();
+  var r = d.assessments[idx];
+  if (!r || !r.row_index) { alert('無法儲存 · 尚未建立 row_index'); return; }
+  var name  = (document.getElementById('ea_name')||{}).value||'';
+  var grade = (document.getElementById('ea_grade')||{}).value||'';
+  if (!name || !grade) { alert('學生姓名/年級必填'); return; }
+  var fields = {
+    studentName: name,
+    grade: grade,
+    oralLevel:  (document.getElementById('ea_oral_level')||{}).value||'',
+    oralScore:  (document.getElementById('ea_oral_score')||{}).value||'',
+    readingStop:(document.getElementById('ea_reading_stop')||{}).value||'',
+    writtenPaper:(document.getElementById('ea_written_paper')||{}).value||'',
+    writtenScore:(document.getElementById('ea_written_score')||{}).value||'',
+    finalClass: (document.getElementById('ea_final_class')||{}).value||'',
+    teacherNote:(document.getElementById('ea_note')||{}).value||''
+  };
+  try {
+    var res = await _assessCallGw('assess_update', { row_index: r.row_index, fields: fields });
+    if (!res || !res.success) { alert('儲存失敗: ' + (res && res.error)); return; }
+    Object.assign(r, fields);
+    saveData(d);
+    closeModal();
+    showToast('✅ 已更新檢測紀錄 (row ' + r.row_index + ')');
+    if (typeof _assessRefresh === 'function') await _assessRefresh();
+    renderAssess(document.getElementById('mainContent'));
+  } catch(e) {
+    alert('儲存失敗: ' + e.message);
+  }
 }
 
 async function saveQuickAssign(idx) {
