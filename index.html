@@ -2127,16 +2127,18 @@ window.funnelInquiryToBooking = function(inqIdx) {
   }, 250);
 };
 
-// v2.18.66 · 招生漏斗 ‧ 預約 → 排體驗 (直接進行事曆)
-// v2.18.64: 先建一筆簡易檢測 → 行事曆 (舊)
-// v2.18.66: 如已有分級檢測 直接彈行事曆 ‧ 沒有才導至新增檢測
-window.funnelBookingToTrialDirect = function(bkIdx) {
+// v2.18.75 · 預約 → 直接預約體驗課 (不依賴分級檢測)
+// 新邏輯: 彈行事曆並直接讓使用者選分班 + 日期 + 班次
+window.funnelBookingToTrialDirect = async function(bkIdx) {
   var d = loadData();
   var r = d.bookings[bkIdx];
   if (!r) { alert('找不到預約'); return; }
 
-  // v2.18.66 · 先找對應的 assessment (同學生名 + 已完成分班)
   var childName = r.child || r.student || '';
+  var parent = r.parent || r.pname || '';
+  var phone = r.phone || '';
+
+  // v2.18.75 · 先找 assessment (如果有、使用 finalClass)
   var matchedIdx = -1;
   (d.assessments||[]).forEach(function(a, i){
     if ((a.studentName === childName || a.studentName === r.parent) && a.finalClass) {
@@ -2144,39 +2146,59 @@ window.funnelBookingToTrialDirect = function(bkIdx) {
     }
   });
 
+  // 如已有 assessment → 直接用它並彈行事曆
   if (matchedIdx >= 0) {
-    // 已有分班 → 直接彈行事曆
     closeModal();
     if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
-    if (typeof openTrialBooker === 'function') {
-      setTimeout(function(){ openTrialBooker(matchedIdx); }, 200);
-    }
+    setTimeout(function(){ openTrialBooker(matchedIdx); }, 200);
     return;
   }
 
-  // 未建檢測 → 導至新增檢測‧提示選分班後自動進行事曆
+  // v2.18.75 · 沒有 assessment: 建一個臨時的 → 彈分班選擇小對話
   closeModal();
-  switchSection('assess');
-  setTimeout(function() {
-    if (typeof openAddAssess !== 'function') { alert('分級檢測新增功能未準備好'); return; }
-    openAddAssess();
-    setTimeout(function() {
-      var na = document.getElementById('as_name');
-      if (na) na.value = childName;
-      if (typeof showToast === 'function') {
-        showToast('ℹ️ 未找到已完成的分級檢測 ‧ 請先選分班結果後保存 · 將自動彈行事曆');
-      }
-      try {
-        sessionStorage.setItem('xg_direct_trial_flow', JSON.stringify({
-          booking_idx: bkIdx,
-          parent: r.parent || '',
-          phone: r.phone || '',
-          child: childName
-        }));
-      } catch(e){}
-      if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
-    }, 150);
-  }, 250);
+  document.getElementById('modalTitle').textContent = '📅 直接預約體驗 · ' + childName;
+  var levels = ['SA','SB','SC','1A','1B','1C','1D','2A','2B','2C','2D','3A','3B','3C','3D','4A','4B','4C','4D'];
+  document.getElementById('modalBody').innerHTML =
+    '<div style="background:#FEF3C7;border:1px solid #FCD34D;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem;color:#92400E">' +
+    '💡 這位學生尚未建分級檢測 · 請先選一個預估分班 → 才能進行事曆選體驗班' +
+    '</div>' +
+    '<div style="margin-bottom:14px;font-size:0.85rem">' +
+    '<strong>學生:</strong> ' + childName + ' · <strong>家長:</strong> ' + parent + ' · <strong>電話:</strong> ' + phone +
+    '</div>' +
+    '<div style="margin-bottom:20px"><label style="font-size:0.9rem;font-weight:700;display:block;margin-bottom:6px">預估分班 *</label>' +
+    '<select id="quickLevel" style="width:100%;padding:10px;border:1.5px solid var(--border);border-radius:8px;font-size:0.95rem">' +
+    '<option value="">請選擇</option>' +
+    levels.map(function(l){ return '<option value="'+l+'">'+l+'</option>'; }).join('') +
+    '</select>' +
+    '<div style="font-size:0.75rem;color:#888;margin-top:6px">不確定可先選中間階 (例: 2A) · 行事曆會推薦前/本/後階班</div>' +
+    '</div>' +
+    '<div style="display:flex;gap:10px">' +
+    '<button class="btn btn-outline" style="flex:1" onclick="closeModal()">取消</button>' +
+    '<button class="btn btn-green" style="flex:2" id="quickBookBtn">📅 進行事曆選班</button>' +
+    '</div>';
+  document.getElementById('modalOverlay').classList.add('open');
+
+  document.getElementById('quickBookBtn').onclick = function() {
+    var lv = document.getElementById('quickLevel').value;
+    if (!lv) { alert('請選預估分班'); return; }
+    // 建一個臨時 assessment (不寫雲端·只非同步進行事曆)
+    var tempAssess = {
+      studentName: childName,
+      grade: '',
+      finalClass: lv,
+      parent: parent,
+      phone: phone,
+      _temp: true
+    };
+    var d2 = loadData();
+    d2.assessments = d2.assessments || [];
+    d2.assessments.push(tempAssess);
+    saveData(d2);
+    var newIdx = d2.assessments.length - 1;
+    closeModal();
+    if (typeof updateStatus === 'function') updateStatus('bookings', bkIdx, '已完成');
+    setTimeout(function(){ openTrialBooker(newIdx); }, 200);
+  };
 };
 
 // v2.18.56 · 招生漏斗 ‧ 預約 → 分級檢測
