@@ -7363,6 +7363,194 @@ Code 節點（組合訊息，判斷是「取消」還是「改期」）
           <li><strong>觸發關鍵字</strong>：<code>1</code></li>
           <li><strong>功能</strong>：家長輸入「1」後，觸發「開通回覆」模組（回覆特定說明或連結）</li>
         </ul>
+
+        <!-- v2.19 新增 · LIFF 完整規範 -->
+        <h3 style="margin-top:28px;border-top:2px solid #E5E7EB;padding-top:20px">6.5 LIFF 頁面完整清單</h3>
+        <p>LIFF (LINE Front-end Framework) 是在 LINE APP 內邊開的網頁‧可取得家長 <code>userId</code> 綁定到學生‧後續 LINE Push 通知才能送達。</p>
+        <table>
+          <tr><th>頁面</th><th>LIFF ID</th><th>URL</th><th>用途</th></tr>
+          <tr>
+            <td><strong>🎉 歡迎頁</strong> (welcome)</td>
+            <td><code>2009757754-ZtkX6Igq</code></td>
+            <td><code>/welcome/</code></td>
+            <td>家長加了 LINE 好友第一步‧填家長/學生資料 → 綁定 userId</td>
+          </tr>
+          <tr>
+            <td><strong>🏠 請假頁</strong> (leave)</td>
+            <td><code>2009757754-paHJ5QJO</code></td>
+            <td><code>/leave/</code></td>
+            <td>家長在 LINE 內直接提交請假‧學生/日期/原因</td>
+          </tr>
+          <tr>
+            <td><strong>🔄 預約修改</strong> (booking-edit)</td>
+            <td colspan="2"><code>/booking-edit?id=XXX</code></td>
+            <td>家長自行修改預約日期時段</td>
+          </tr>
+          <tr>
+            <td><strong>❌ 預約取消</strong> (booking-cancel)</td>
+            <td colspan="2"><code>/booking-cancel?id=XXX</code></td>
+            <td>家長自行取消預約</td>
+          </tr>
+          <tr>
+            <td><strong>📅 預約詳情</strong> (booking-detail)</td>
+            <td colspan="2"><code>/booking-detail?id=XXX</code></td>
+            <td>家長查看預約確認資訊</td>
+          </tr>
+          <tr>
+            <td><strong>🚨 不接接送</strong> (return-pickup)</td>
+            <td colspan="2"><code>/return-pickup?id=XXX</code></td>
+            <td>家長邀請接學生回家</td>
+          </tr>
+          <tr>
+            <td><strong>🚗 轉接送</strong> (transfer-pickup)</td>
+            <td colspan="2"><code>/transfer-pickup?id=XXX</code></td>
+            <td>家長變更接送方式 (接送、自行、變更人員)</td>
+          </tr>
+          <tr>
+            <td><strong>❓ 未到場回報</strong> (missing-pickup)</td>
+            <td colspan="2"><code>/missing-pickup?id=XXX</code></td>
+            <td>家長回報學生未到場原因</td>
+          </tr>
+        </table>
+
+        <h3 style="margin-top:24px">6.6 招生漏斗 ‧ 端到端流程 (前台 + LINE + 後台)</h3>
+        <p>以下是從家長接觸 → 正式入學的完整路徑‧流程每一段都有對應的前台/後台動作。</p>
+        <pre style="font-size:0.82rem;line-height:1.7">
+【階段 1】發現管道
+家長→ FB/IG/Google 廣告、英台傳單、轉介紹
+     ↓
+進入 taipingxinguang.org (主網站)
+
+【階段 2】問課 (非 LIFF)
+家長→ 點「問課論詢」→ 填表單 (inquiry.html)
+     ↓
+後台→ 寫入 Google Sheet 問課論詢 tab
+     → n8n WF01 推播問課卡 (🟢 綠色) 到招生名單群
+     → 後台 admin 問課論詢頁顯示
+
+【階段 3】預約參訪/檢測 (非 LIFF)
+家長→ 點「預約參訪」→ 填表單 (booking.html)
+     → 依前台日曆規則選日期時段
+     ↓
+後台→ 寫入 Google Sheet 預約紀錄 tab
+     → n8n WF01 推播預約卡 (🟠 橘色)
+     → 回傳家長 <strong>LIFF 預約詳情連結</strong> (booking-detail)
+
+【階段 4】家長進場 (現場 → LINE)
+家長到校→ 提醒「加入 LINE @143qbory」
+     ↓
+好友加完將收到 LIFF 歡迎頁連結 (🎉 welcome)
+     ↓
+家長填學生/家長資料 → 綁定 userId → 寫入 LINE 好友 tab
+     → n8n WF04 接收‧確保後續通知能 Push 到這位家長
+
+【階段 5】分級檢測 (後台)
+老師→ 對學生採取口試/筆試
+     ↓
+後台 admin → 從預約頁點「→ 建立分級檢測」
+     → 就填學生資料、口試級數、筆試分數
+     → 自動計算或手選 finalClass
+     → 寫入 Google Sheet 分級檢測 tab
+
+【階段 6】預約體驗課 (後台 → LINE Push)
+後台 admin → 從分級檢測列表點「→ 預約體驗課」
+     → 彈行事曆選日期‧選班次‧確認排班
+     ↓
+寫入 Google Sheet 預約紀錄 tab (bookingType=體驗課)
+     → LINE Push 到家長 (已綁定 userId 才輪得到)
+     → 包含預約詳情連結 (booking-detail)
+     → 招生名單群同步看到已排體驗
+
+【階段 7】體驗後→ 正式報名 (後台)
+家長→ 體驗不錯 → 決定入學
+     ↓
+後台 admin → 從分級檢測點「→ 報名」
+     → 就填學師/家長/班別/學費/附加服務
+     → 寫入 Google Sheet 正式註冊 tab
+     → n8n WF01 推播正式註冊開單卡 (🔴 紅色) 到招生名單群
+     → LINE Push 到家長 (歡迎入學訊息)
+
+【階段 8】入學後的 LINE 互動
+→ 上課前日 (不能入班): 家長點 LIFF /leave/ 提交請假
+→ 下課無人接: 點 LIFF /return-pickup/ 請他人接
+→ 中途變更接送: 點 LIFF /transfer-pickup/ 變更人員
+→ 未到場: 點 LIFF /missing-pickup/ 回報原因
+→ 修改預約 (若離校很久又回來): 點 LIFF /booking-edit/ 改日期
+→ 取消預約 (離校): 點 LIFF /booking-cancel/ 确認
+        </pre>
+
+        <h3 style="margin-top:24px">6.7 資料串聯架構圖</h3>
+        <p>展示前台、LIFF、Gateway、Sheet、LINE OA 五个位置的資料流向。</p>
+        <pre style="font-size:0.75rem;line-height:1.6">
+┌────────────────────────────────────────────────────────────────────┐
+│   家長側 (同一位)                                                            │
+│  ─────────────────────────────────────────────────────────────────│
+│  一般瀏覽器  →  主網站 (inquiry/booking/register)                            │
+│                    ↓  POST                                                    │
+│              n8n webhook OR Gateway                                            │
+│                    ↓                                                          │
+│              Google Sheet (對應 tab)                                          │
+│                                                                                │
+│  LINE APP 內  →  LIFF /welcome/ (取 userId)                                    │
+│                    ↓  寫入 LINE 好友 tab                                       │
+│              綁定家長電話 → userId                                              │
+│                                                                                │
+│  LINE APP 內  →  LIFF /leave/                     (寫入請假紀錄 tab)          │
+│              →  LIFF /booking-edit/            (update 預約紀錄 tab)          │
+│              →  LIFF /booking-cancel/          (update 預約紀錄 tab)          │
+│              →  LIFF /booking-detail/          (read 預約紀錄 tab)            │
+│              →  LIFF /return-pickup/           (寫入 接送學員 tab)               │
+│              →  LIFF /transfer-pickup/         (update 接送學員 tab)             │
+│              →  LIFF /missing-pickup/          (寫入 接送學員 tab)               │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Google Sheet (中心資料庫)                                                     │
+│  ─────────────────────────────────────────────────────────────────│
+│  問課論詢 / 預約紀錄 / 分級檢測 / 體驗課班表 / 正式註冊 /              │
+│  LINE 好友 / 請假紀錄 / 接送學員 / 公告 / 主網站設定                        │
+│                                                                                │
+│  ↑↓ Gateway (Apps Script) API                                                  │
+│  ↑↓ gws CLI (管理人員直接拉取)                                                │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  後台 admin (後台人員)                                                         │
+│  ─────────────────────────────────────────────────────────────────│
+│  admin.taipingxinguang.org                                                     │
+│  → 拉 Sheet (雲端同步)                                                        │
+│  → 排體驗/建檢測/協助改期 → 寫回 Sheet                                     │
+│  → 觸發 LINE Push (如果家長已綁定 userId)                                   │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────┘
+        </pre>
+
+        <h3 style="margin-top:24px">6.8 LIFF SOP 操作規範</h3>
+        <div class="man-note" style="background:#F0FDF4;border-left:4px solid #10B981">
+          <strong>✅ 實作規定</strong>
+        </div>
+        <ol>
+          <li><strong>LIFF ID 不得隨意替換</strong> · 一旦發佈並提供給家長‧修改後舊連結失效。如需重建 LIFF‧不能刪舊的‧只能另建新的‧後台直接以新 URL 發送。</li>
+          <li><strong>家長未進 /welcome/ 綁定</strong> · 後台 admin 發出 LINE Push 會失敗‧需手動電話通知。推播家長首次接觸就點那鍵「加入 LINE 好友」。</li>
+          <li><strong>LIFF 需在 LINE APP 內才能進入</strong> · 外部瀏覽器直進 LIFF URL 會要求登入。你在手機上試時‧先把 LIFF URL 貼到自己的 LINE 聊天室再點進去。</li>
+          <li><strong>將 LIFF 上下文隨備包を URL</strong> · 家長從 Push 連結進來‧包含 <code>?id=</code> 參數 (預約 ID 或學員 ID)‧LIFF 頁場自動取。</li>
+          <li><strong>雲端失敗保本地</strong> · LIFF 寫入失敗後需退回前頁面‧提示家長電話通知後台。</li>
+        </ol>
+
+        <div class="man-note" style="background:#FEF3C7;border-left:4px solid #F59E0B">
+          ⚠️ <strong>軌跡保留：</strong>不管家長从 LIFF 或家中電話取消‧修改‧後台都必須將原紀錄設為「已取消」而非直接刪除‧保留學員排班軌跡。
+        </div>
+
+        <h3 style="margin-top:24px">6.9 LIFF 問題排除</h3>
+        <table>
+          <tr><th>問題現象</th><th>可能原因</th><th>解決方法</th></tr>
+          <tr><td>LIFF 進入失敗</td><td>LIFF ID 錯</td><td>回 LINE 從台公建的 LIFF Apps 列表重新確認</td></tr>
+          <tr><td>取不到 userId</td><td>家長未登入或未從 LINE 進來</td><td>提示家長將 URL 貼到 LINE 內的任何聊天室進入</td></tr>
+          <tr><td>Push 通知沒送達</td><td>家長未加好友或未進 /welcome/ 綁定</td><td>先確認 LINE 好友 tab 有沒有這筆家長的 userId</td></tr>
+          <tr><td>LIFF 頁面顯白</td><td>Cloudflare 部署未完成</td><td>確認 GitHub 推後等 1-2 分鐘雲端自動拉</td></tr>
+          <tr><td>?id= 參數取不到</td><td>Push 標題機制錯</td><td>確認 n8n 推播的 Flex Message URL 包含 <code>?id=</code></td></tr>
+        </table>
+
       </div>
     </div>
 
