@@ -600,14 +600,28 @@ async function doLogin() {
     errEl.style.display = 'block';
   }
 }
+function effectivePermissions(user) {
+  if (!user) return [];
+  var role = String(user.role || '').toLowerCase();
+  var perms = user.permissions;
+  if (!Array.isArray(perms) || perms.length === 0) {
+    perms = ROLE_PERMS[role] || [];
+  }
+  perms = perms.slice();
+  // v2.20.3: Class assignment was split out of student management.
+  // Existing student managers retain this workflow after login/reload. Derive
+  // access in memory only; do not rewrite stored/custom account permissions.
+  // Assignment-only teachers do NOT gain master/contact access, and other
+  // restricted modules remain restricted.
+  if (['admin','staff','teacher'].indexOf(role) >= 0 &&
+      perms.indexOf('students') >= 0 && perms.indexOf('classAssign') < 0) {
+    perms.push('classAssign');
+  }
+  return perms;
+}
 function applyPermissions() {
   if (!_currentUser) return;
-  // v2.18.17: 空 permissions 則套角色預設 (向下相容舊帳號)
-  var perms = _currentUser.permissions;
-  if (!Array.isArray(perms) || perms.length === 0) {
-    perms = ROLE_PERMS[_currentUser.role] || [];
-    _currentUser.permissions = perms;
-  }
+  var perms = effectivePermissions(_currentUser);
   // v2.18.17: 全部 23 個功能頁都能控 (與 ALL_PERMS 對齊)
   ALL_PERMS.forEach(function(key) {
     var el = document.getElementById('nav-' + key);
@@ -733,8 +747,9 @@ function updateBadges(data) {
 
 function switchSection(sec) {
   // v2.18.17: 權限防衛 — 避免繞過 sidebar 隱藏
-  if (_currentUser && Array.isArray(_currentUser.permissions) && _currentUser.permissions.length > 0) {
-    if (typeof ALL_PERMS !== 'undefined' && ALL_PERMS.indexOf(sec) >= 0 && _currentUser.permissions.indexOf(sec) < 0) {
+  if (_currentUser) {
+    var sectionPerms = effectivePermissions(_currentUser);
+    if (typeof ALL_PERMS !== 'undefined' && ALL_PERMS.indexOf(sec) >= 0 && sectionPerms.indexOf(sec) < 0) {
       if (typeof showToast === 'function') showToast('⛔ 你沒有權限進入這個頁面');
       else alert('你沒有權限進入這個頁面');
       return;
