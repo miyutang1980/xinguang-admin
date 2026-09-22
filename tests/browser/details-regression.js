@@ -2,6 +2,9 @@
 var detailsAssert = (await import('node:assert/strict')).default;
 var detailsMode = '404', detailsWrites = 0, detailsPending = [];
 ssQAAssignments.forEach(s => { s['學校'] = '新光國小'; });
+ssQAMasters[0]['英文名'] = 'Alice <QA>';
+ssQAMasters[1]['英文名'] = 'Bob';
+ssQAMasters.reverse(); // Joining by row order or Chinese name would pick the wrong name.
 await ssQAContext.route('**/*', async route => {
   const action = new URL(route.request().url()).searchParams.get('_action');
   if (action === 'routes_get_details') {
@@ -15,6 +18,9 @@ await ssQAContext.route('**/*', async route => {
   }
   if (action === 'routes_save_details') {
     detailsWrites++;
+    const payload = JSON.parse(new URL(route.request().url()).searchParams.get('details_json'));
+    detailsAssert.equal(payload[0].student_names[0],'測試用匿名記錄1','bilingual labels do not alter saved Chinese names');
+    detailsAssert.deepEqual(payload[0].student_ids,['QA1'],'student IDs remain stable');
     return detailsMode === 'save-fail'
       ? route.fulfill({status:503,body:'uncertain'})
       : route.fulfill({json:{success:true,total_count:1}});
@@ -44,6 +50,11 @@ detailsMode='404'; await openDetails();
 detailsMode='ok'; await ssQAPage.locator('#rd-retry').click();
 await ssQAPage.waitForFunction(()=>!document.querySelector('#rd-save').disabled);
 detailsAssert.equal(await ssQAPage.locator('.rd-stu').count(),1,'inactive student excluded');
+detailsAssert.equal(await ssQAPage.locator('.rd-stu').locator('..').textContent().then(s=>s.trim()),'測試用匿名記錄1（Alice <QA>）','English name joins by student ID and is safely escaped');
+detailsAssert.equal(await ssQAPage.locator('#rd-body qa').count(),0,'name is text, not markup');
+var masterCallsBefore = ssQACalls.filter(c=>c.action==='student_master_list').length;
+await ssQAPage.evaluate(()=>_getSchoolStudents('新高國小',{}));
+detailsAssert.equal(ssQACalls.filter(c=>c.action==='student_master_list').length,masterCallsBefore,'one master fetch serves all schools');
 await ssQAPage.locator('.rd-stu').check();
 await ssQAPage.locator('#rd-save').click();
 await ssQAPage.waitForFunction(()=>window.detailsSavedCount===1);
@@ -53,6 +64,12 @@ detailsMode='legacy'; await openDetails();
 detailsAssert.equal(await ssQAPage.locator('#rd-save').isDisabled(),true);
 detailsAssert.match(await ssQAPage.locator('#rd-body').textContent(),/舊明細匿名學生/);
 await ssQAPage.locator('#rd-close').click();
+// Missing English name is not guessed from another student or assignment.
+ssQAMasters.find(m=>m['學生編號']==='QA1')['英文名']='';
+detailsMode='ok'; await openDetails();
+detailsAssert.equal(await ssQAPage.locator('.rd-stu').locator('..').textContent().then(s=>s.trim()),'測試用匿名記錄1');
+await ssQAPage.locator('#rd-close').click();
+ssQAMasters.find(m=>m['學生編號']==='QA1')['英文名']='Alice <QA>';
 detailsMode='missing-id'; await openDetails();
 detailsAssert.equal(await ssQAPage.locator('#rd-save').isDisabled(),true);
 detailsAssert.match(await ssQAPage.locator('#rd-body').textContent(),/不在目前學期/);

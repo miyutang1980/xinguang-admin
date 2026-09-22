@@ -10298,24 +10298,44 @@ async function _loadAllStudentsOnce(authPayload) {
     // v2.20.2: 接送名單以目前學期指派為準，不再讀舊「在校學生」API。
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
     var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
-    const r = await gwCallJson('semester_assignments_list', {
+    const auth = {
       adminUser: u.username || 'admin',
-      adminPass: pwd,
-      semester: '115-1'
-    }, true);
+      adminPass: pwd
+    };
+    // Identity names live in the master; semester rows determine eligibility only.
+    // Fetch both once per roster refresh, never once per student or school.
+    const [r, masterResult] = await Promise.all([
+      gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true),
+      gwCallJson('student_master_list', auth, true)
+    ]);
     if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
     if (r.active === false) throw new Error('學期班級指派新制尚未啟用，不能將候選名冊視為空白');
     const rows = r.list || r.rows;
     if (!Array.isArray(rows)) throw new Error('115-1 學期指派回應缺少名冊，不能視為零人');
-    const list = rows.map(s => ({
-      student_id: s['學生編號'] || s.studentNo || s.student_id || '',
+    if (!masterResult || masterResult.success !== true) {
+      throw new Error((masterResult && masterResult.error) || '學生主檔姓名讀取失敗');
+    }
+    const masters = masterResult.list || masterResult.rows;
+    if (!Array.isArray(masters)) throw new Error('學生主檔回應缺少姓名資料');
+    const masterById = new Map();
+    masters.forEach(m => {
+      const id = String(m['學生編號'] || m.studentNo || m.student_id || '').trim();
+      if (!id) return;
+      if (masterById.has(id)) throw new Error('學生主檔編號重複，無法安全對照中英文姓名');
+      masterById.set(id, m);
+    });
+    const list = rows.map(s => {
+      const id = String(s['學生編號'] || s.studentNo || s.student_id || '').trim();
+      const master = masterById.get(id) || {};
+      return {
+      student_id: id,
       chinese_name: s['學生姓名'] || s.name || s.chinese_name || '',
-      english_name: s['英文名'] || s.englishName || s.english_name || '',
+      english_name: master['英文名'] || master.englishName || master.english_name || '',
       class_code: s['小學班級'] || s.gradeClass || s.class_code || '',
       school_name: s['學校'] || s.school_name || '',
       pickup_method: s['交通車'] || s.pickupMethod || s.pickup_method || '',
       status: (s['學期狀態'] === '在學' || s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
-    }));
+    }; });
     if (owner !== _pickupRosterOwner) throw new Error('登入狀態已變更，請重新開啟明細');
     _allStudentsCache = {list, at: Date.now()};
     return list;
@@ -10403,7 +10423,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   const sourceNote = document.createElement('div');
   sourceNote.style.cssText = 'padding:10px 20px;background:#f5f6f6;font-size:12px;color:#555;line-height:1.6';
   sourceNote.textContent = '已排學生：接送學員（排程列 ' + rowData.row_index + ' / ' + session +
-    '）；候選學生：115-1 學期班級指派，依學校及「在學」篩選。候選名冊不等於已加入本班次。';
+    '）；候選學生：115-1 學期班級指派，依學校及「在學」篩選；英文名依學生編號對照學生主檔，未填者僅顯示中文。候選名冊不等於已加入本班次。';
   el('rd-body').before(sourceNote);
   function showLoadError(err, uncertainWrite = false) {
     if (!isCurrent()) return;
@@ -10529,8 +10549,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
             ${students.length === 0 ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:6px;padding:10px 14px;font-size:0.85rem;color:#92400E"><strong>該校未找到目前學期學生</strong><br>先到「學生管理 · 主檔」確認已建檔，再到 <a href="javascript:closeAllPickupModals();switchSection(&quot;classAssign&quot;)" style="color:#01696F;font-weight:600;text-decoration:underline">學期班級指派</a> 建立 115-1 指派，核對學校、學期狀態與交通車。新模型尚未啟用時請管理員先完成部署，不要重複建檔。</div>' :
               students.map(s => `
                 <label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:0.85rem">
-                  <input type="checkbox" class="rd-stu" data-school="${name}" data-sid="${s.student_id}" data-sname="${s.chinese_name}" ${val.selected_ids.has(s.student_id)?'checked':''}>
-                  <span>${s.chinese_name}${s.english_name?' ('+s.english_name+')':''}</span>
+                  <input type="checkbox" class="rd-stu" data-school="${_esc(name)}" data-sid="${_esc(s.student_id)}" data-sname="${_esc(s.chinese_name)}" ${val.selected_ids.has(s.student_id)?'checked':''}>
+                  <span style="min-width:0;overflow-wrap:anywhere">${_esc(s.chinese_name)}${s.english_name?'（'+_esc(s.english_name)+'）':''}</span>
                 </label>
               `).join('')
             }
