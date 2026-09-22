@@ -28,6 +28,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .login-field input:focus{border-color:var(--green)}
 .login-btn{width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:12px;font-size:0.95rem;font-weight:700;cursor:pointer;margin-top:8px;transition:background 0.15s}
 .login-btn:hover{background:var(--green-dark)}
+.login-btn:disabled{opacity:.55;cursor:not-allowed}
 .login-err{color:var(--red);font-size:0.82rem;margin-top:8px;display:none}
 
 /* ── App Layout ── */
@@ -432,6 +433,20 @@ var _loggedIn = false;
 // AUTH_API_URL: n8n Cloud webhook (Google Sheets 雲端帳號驗證)
 var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
 var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
+var AUTH_GATEWAY_TIMEOUT_MS = window.__XG_AUTH_GATEWAY_TIMEOUT_MS || 5000;
+var AUTH_FALLBACK_TIMEOUT_MS = window.__XG_AUTH_FALLBACK_TIMEOUT_MS || 10000;
+
+async function _authFetch(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, Object.assign({}, options, {signal:controller.signal}));
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // v2.20.4: A remembered login, Enter and button clicks share one attempt.
 var _loginFlight = null;
@@ -440,11 +455,23 @@ var _sessionCheckDone = false;
 async function doLogin() {
   if (_loggedIn) return;
   if (_loginFlight) return _loginFlight.promise;
-  var attempt = { epoch: _authEpoch, promise: null };
+  var attempt = { epoch: _authEpoch, promise: null, stage: '主要驗證' };
   _loginFlight = attempt;
+  var loginButton = document.querySelector('.login-btn');
+  var errEl = document.getElementById('loginErr');
+  var started = performance.now();
+  if (loginButton) loginButton.disabled = true;
+  var timer = setInterval(function(){
+    if (_loginFlight !== attempt || !errEl || !errEl.isConnected) return;
+    errEl.textContent = attempt.stage + '中 ' + Math.floor((performance.now()-started)/1000) + ' 秒…';
+  }, 1000);
   attempt.promise = _performLogin(attempt);
   try { return await attempt.promise; }
-  finally { if (_loginFlight === attempt) _loginFlight = null; }
+  finally {
+    clearInterval(timer);
+    if (loginButton) loginButton.disabled = false;
+    if (_loginFlight === attempt) _loginFlight = null;
+  }
 }
 async function _performLogin(attempt) {
   const u = document.getElementById('loginUser').value.trim();
@@ -463,12 +490,11 @@ async function _performLogin(attempt) {
     errEl.textContent = '驗證中...';
     errEl.style.display = 'block';
     errEl.style.color = '#6b7280';
-    const gwResp = await fetch(AUTH_GATEWAY_URL, {
+    let gwResult = await _authFetch(AUTH_GATEWAY_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ _action: 'auth_login', username: u, password: p })
-    });
-    let gwResult = await gwResp.json();
+    }, AUTH_GATEWAY_TIMEOUT_MS);
     if (attempt.epoch !== _authEpoch) return;
     if (Array.isArray(gwResult)) gwResult = gwResult[0] || {};
     if (gwResult.success) {
@@ -524,23 +550,24 @@ async function _performLogin(attempt) {
     }
   } catch (err) {
     if (attempt.epoch !== _authEpoch) return;
-    console.warn('Gateway 驗證失敗 · 轉 n8n fallback:', err);
+    console.warn('Gateway 驗證未完成 · 轉 n8n fallback:', err);
+    errEl.textContent = err && err.name === 'AbortError' ?
+      '主要驗證超過 5 秒，切換備援驗證…' : '主要驗證未完成，切換備援驗證…';
   }
   
   // 先試 Google Sheets 雲端 API（主要驗證方式）
   if (AUTH_API_URL && !AUTH_API_URL.includes('__PLACEHOLDER__')) {
     try {
-      errEl.textContent = '驗證中...';
+      attempt.stage = '備援驗證';
+      errEl.textContent = '備援驗證中…';
       errEl.style.display = 'block';
       errEl.style.color = '#6b7280';
       
-      const response = await fetch(AUTH_API_URL, {
+      let result = await _authFetch(AUTH_API_URL, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ username: u, password: p })
-      });
-      
-      let result = await response.json();
+      }, AUTH_FALLBACK_TIMEOUT_MS);
       if (attempt.epoch !== _authEpoch) return;
       // n8n 回傳可能是陣列，取第一個
       if (Array.isArray(result)) result = result[0] || {};
