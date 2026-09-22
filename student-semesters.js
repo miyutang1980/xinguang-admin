@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   const CURRENT = '115-1';
+  const DISPLAY_NAME = '學生中英文姓名'; // Derived W column, never an editable/persisted field.
   const MASTER = ['學生編號','學生帳號','學生姓名','英文名','性別','生日','身分證字號','Email',
     '住家地址','備註/飲食禁忌','媽媽姓名','媽媽手機','媽媽公司電話','媽媽工作單位','媽媽Email',
     '爸爸姓名','爸爸手機','爸爸公司電話','爸爸工作單位','爸爸Email','媽媽LINE userId','爸爸LINE userId','建立時間','更新時間','弋果分校'];
@@ -80,7 +81,12 @@
       if (error instanceof SyntaxError) throw new Error('後端回傳的不是有效資料，請管理員確認 Gateway 部署版本。');
       if (error instanceof TypeError) throw new Error('無法連線；若剛才正在儲存，請重新整理核對結果，勿重複送出。');
       throw error;
-    } finally { clearTimeout(timer); recordTiming(action, started, ok); }
+    } finally {
+      clearTimeout(timer); recordTiming(action, started, ok);
+      if (!action.endsWith('_list') && typeof window.invalidatePickupRoster === 'function') {
+        window.invalidatePickupRoster();
+      }
+    }
   }
 
   function validateList(result, kind, semester) {
@@ -148,7 +154,7 @@
           unique(state.assignments.map(r => r['學期狀態'])).map(s => option(s, state.status)).join('')}</select></label>
         <label>班代號（弋果班級）<select id="ssClass">${option('', state.classCode, '全部班代號')}${
           unique(state.assignments.map(r => r['弋果班級'])).map(s => option(s, state.classCode)).join('')}</select></label>
-        <label>搜尋指派<input id="ssSearch" type="search" placeholder="姓名／學號／老師／TXClass" value="${esc(state.keyword)}"></label>` +
+        <label>搜尋指派<input id="ssSearch" type="search" placeholder="中文／英文名／學號／老師／TXClass" value="${esc(state.keyword)}"></label>` +
         (historical ? '' : button('新增學期指派', 'ssAdd', true) + button('整班升級／調整', 'ssBulk')) +
         button('重新整理', 'ssRefresh');
       tools.querySelector('#ssSemester').onchange = event => {
@@ -177,14 +183,14 @@
     const keyword = (master ? state.masterKeyword : state.keyword).trim().toLocaleLowerCase();
     const filtered = all.filter(row => (master || ((!state.status || row['學期狀態'] === state.status) &&
       (!state.classCode || row['弋果班級'] === state.classCode))) &&
-      (!keyword || (master ? MASTER : ASSIGN).map(h => val(row, h)).join(' ').toLocaleLowerCase().includes(keyword)));
+      (!keyword || (master ? MASTER : ASSIGN.concat(DISPLAY_NAME)).map(h => val(row, h)).join(' ').toLocaleLowerCase().includes(keyword)));
     const headers = master ? ['學生編號','學生姓名','英文名','學生帳號','媽媽姓名','媽媽手機','爸爸姓名','爸爸手機','操作'] :
-      ['學生編號','學生姓名','弋果班級','TXClass','弋果課程','學期狀態','學校','年級','小學班級','中籍教師','外籍教師','交通車','操作'];
+      ['學生編號',DISPLAY_NAME,'弋果班級','TXClass','弋果課程','學期狀態','學校','年級','小學班級','中籍教師','外籍教師','交通車','操作'];
     el.querySelector('#ssNotice').textContent = `顯示 ${filtered.length} / ${all.length} 筆` +
       (!all.length ? (master ? ' · 主檔尚未建檔；如與預期不符，請先確認移轉結果。' :
         ` · ${state.semester} 尚無指派；不會自動複製歷史資料。`) : '');
     el.querySelector('#ssList').innerHTML = table(headers, filtered.map(row => `<tr>${
-      headers.slice(0,-1).map(h => `<td title="${esc(row[h])}">${esc(row[h] || '—')}</td>`).join('')}
+      headers.slice(0,-1).map(h => { const text = h === DISPLAY_NAME ? row[h] || row['學生姓名'] : row[h]; return `<td title="${esc(text)}">${esc(text || '—')}</td>`; }).join('')}
       <td><button type="button" class="btn btn-outline ss-row-edit" data-row="${Number(row._row)}">${
         !state.active ? '查看（尚未啟用）' : master || state.semester === CURRENT ? '查看／編輯' : '查看歷史'}</button></td></tr>`).join(''));
     el.querySelectorAll('.ss-row-edit').forEach(btn => btn.onclick = () =>
@@ -330,11 +336,12 @@
     const row = original ? {...original} : master ? {} : { '學期': CURRENT, '學期狀態': '在學' };
     const headers = master ? MASTER : ASSIGN;
     const body = `<form id="ssEditor">
+      ${!master && original && row[DISPLAY_NAME] ? `<p class="ss-help">學生中英文姓名（Google W 欄自動合併，唯讀）：${esc(row[DISPLAY_NAME])}</p>` : ''}
       <p class="ss-help">${!state.active ? '新資料模型尚未啟用，此處僅供核對，所有欄位唯讀。' : master ? '原 24 個主檔欄位及弋果分校完整呈現；學生編號與兩個系統時間為唯讀，其餘 22 欄可編輯。' :
         historical ? '歷史快照唯讀；此處不會修改 115-1 或學生主檔。' : '17 個黃色學期欄位；學期固定 115-1。學生身分由主檔帶入。個別轉班改「弋果班級」，整班升級請用列表的「整班升級／調整」。'}</p>
       ${!master && !original ? `<label class="ss-field">選擇已建檔學生 *
-        <input id="ssStudentSearch" type="search" placeholder="先輸入姓名或學號篩選">
-        <select id="ssStudentChoice" required>${option('', '', '請選擇學生')}${choices.map(r => option(r['學生編號'], '', r['學生編號'] + ' · ' + r['學生姓名'] + (r['學生帳號'] ? ' · ' + r['學生帳號'] : ''))).join('')}</select></label>` : ''}
+        <input id="ssStudentSearch" type="search" placeholder="先輸入中文、英文名或學號篩選">
+        <select id="ssStudentChoice" required>${option('', '', '請選擇學生')}${choices.map(r => option(r['學生編號'], '', r['學生編號'] + ' · ' + r['學生姓名'] + (r['英文名'] ? '（' + r['英文名'] + '）' : '') + (r['學生帳號'] ? ' · ' + r['學生帳號'] : ''))).join('')}</select></label>` : ''}
       <div class="ss-fields">${headers.map((key,index) => field(key, row[key] || '', index,
         readonly || (master ? ['學生編號','建立時間','更新時間'].includes(key) : !YELLOW.includes(key) || key === '學期'),
         !master && YELLOW.includes(key), master && key === '學生姓名')).join('')}</div>
@@ -365,8 +372,8 @@
         const query = event.target.value.trim().toLocaleLowerCase();
         const selected = select.value;
         select.innerHTML = option('', '', '請選擇學生') + choices.filter(r =>
-          r['學生編號'] === selected || [r['學生編號'],r['學生姓名'],r['學生帳號']].join(' ').toLocaleLowerCase().includes(query))
-          .map(r => option(r['學生編號'], selected, r['學生編號'] + ' · ' + r['學生姓名'])).join('');
+          r['學生編號'] === selected || [r['學生編號'],r['學生姓名'],r['英文名'],r['學生帳號']].join(' ').toLocaleLowerCase().includes(query))
+          .map(r => option(r['學生編號'], selected, r['學生編號'] + ' · ' + r['學生姓名'] + (r['英文名'] ? '（' + r['英文名'] + '）' : ''))).join('');
       };
       select.onchange = () => {
         const student = choices.find(r => r['學生編號'] === select.value);

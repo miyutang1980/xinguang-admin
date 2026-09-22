@@ -10248,21 +10248,14 @@ async function _pickupCallGateway(originalUrl, payload) {
 // ========================================================================
 // ─── W16 接送明細 webhook ───
 const PICKUP_DETAILS_API = 'https://miyutang.app.n8n.cloud/webhook/admin/pickup-details';
-const _BUILTIN_SCHOOLS = [
-  {code:'SCH-001', name:'新光國小'}, {code:'SCH-002', name:'新高國小'},
-  {code:'SCH-003', name:'廍子國小'}, {code:'SCH-004', name:'軍功國小'},
-  {code:'SCH-005', name:'新興國小'}, {code:'SCH-006', name:'成功國小'},
-  {code:'SCH-007', name:'東光國小'}, {code:'SCH-008', name:'進德國小'},
-  {code:'SCH-009', name:'力行國小'}, {code:'SCH-010', name:'北屯國小'},
-  {code:'SCH-011', name:'新平國小'}
-];
-// SCHOOLS_LIST = 內建 + 自訂 (localStorage)· 讀取時即時合併
+// Schools come only from the current semester's active roster. Never combine
+// an old hardcoded/custom list with it: that produced duplicates and stale schools.
 Object.defineProperty(window, 'SCHOOLS_LIST', {
   get: function(){
-    var custom = [];
-    try { custom = JSON.parse(localStorage.getItem('xg_custom_schools') || '[]'); } catch(e){}
-    var customObjs = custom.map(function(name, i){ return {code:'SCH-CUSTOM-' + (i+1).toString().padStart(3,'0'), name:name}; });
-    return _BUILTIN_SCHOOLS.concat(customObjs);
+    const rows = _allStudentsCache ? _allStudentsCache.list : [];
+    return [...new Set(rows.filter(s => s.status === 'active' && /國小|小學/.test(s.school_name))
+      .map(s => s.school_name.trim()).filter(Boolean))]
+      .sort((a,b) => a.localeCompare(b,'zh-Hant')).map(name => ({code:'115-1:' + name,name}));
   },
   configurable: true
 });
@@ -10286,7 +10279,14 @@ function _routeNameForDate(name, date) {
 const _schoolStudentsCache = {};
 let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 過濾
 let _pickupRosterOwner = '';
+let _pickupRosterVersion = 0;
+window.invalidatePickupRoster = function() {
+  _pickupRosterVersion++;
+  _allStudentsCache = null;
+  window._routeNamesCache = {};
+};
 async function _loadAllStudentsOnce(authPayload) {
+  const rosterVersion = _pickupRosterVersion;
   const owner = String(_authEpoch) + ':' + String((_currentUser || {}).username || '');
   if (_pickupRosterOwner !== owner) {
     _pickupRosterOwner = owner;
@@ -10302,16 +10302,16 @@ async function _loadAllStudentsOnce(authPayload) {
       adminUser: u.username || 'admin',
       adminPass: pwd
     };
-    // Identity names live in the master; semester rows determine eligibility only.
-    // Fetch both once per roster refresh, never once per student or school.
-    const [r, masterResult] = await Promise.all([
-      gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true),
-      gwCallJson('student_master_list', auth, true)
-    ]);
+    const r = await gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true);
     if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
     if (r.active === false) throw new Error('學期班級指派新制尚未啟用，不能將候選名冊視為空白');
     const rows = r.list || r.rows;
     if (!Array.isArray(rows)) throw new Error('115-1 學期指派回應缺少名冊，不能視為零人');
+    const hasDisplayColumn = r.displayNameSource === '學期班級指派!W';
+    // Compatibility only until the existing Apps Script deployment exposes W.
+    // Once upgraded, candidate names and school filters use one semester response.
+    const masterResult = hasDisplayColumn ? {success:true,list:[]} :
+      await gwCallJson('student_master_list', auth, true);
     if (!masterResult || masterResult.success !== true) {
       throw new Error((masterResult && masterResult.error) || '學生主檔姓名讀取失敗');
     }
@@ -10327,17 +10327,25 @@ async function _loadAllStudentsOnce(authPayload) {
     const list = rows.map(s => {
       const id = String(s['學生編號'] || s.studentNo || s.student_id || '').trim();
       const master = masterById.get(id) || {};
+      const chineseName = s['學生姓名'] || s.name || s.chinese_name || '';
+      const englishName = master['英文名'] || master.englishName || master.english_name || '';
+      const displayName = hasDisplayColumn ? String(s['學生中英文姓名'] || '').trim() :
+        chineseName + (englishName ? '（' + englishName + '）' : '');
+      if (hasDisplayColumn && (!displayName || displayName.startsWith('#'))) {
+        throw new Error('學期姓名合併欄位不完整，請核對 Google W 欄公式');
+      }
       return {
       student_id: id,
-      chinese_name: s['學生姓名'] || s.name || s.chinese_name || '',
-      english_name: master['英文名'] || master.englishName || master.english_name || '',
+      chinese_name: chineseName,
+      english_name: englishName,
+      display_name: displayName,
       class_code: s['小學班級'] || s.gradeClass || s.class_code || '',
-      school_name: s['學校'] || s.school_name || '',
+      school_name: String(s['學校'] || s.school_name || '').trim(),
       pickup_method: s['交通車'] || s.pickupMethod || s.pickup_method || '',
       status: (s['學期狀態'] === '在學' || s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
     }; });
-    if (owner !== _pickupRosterOwner) throw new Error('登入狀態已變更，請重新開啟明細');
-    _allStudentsCache = {list, at: Date.now()};
+    if (owner !== _pickupRosterOwner || rosterVersion !== _pickupRosterVersion) throw new Error('名冊或登入狀態已變更，請重新開啟明細');
+    _allStudentsCache = {list, at: Date.now(), displayNameSource:hasDisplayColumn ? r.displayNameSource : '主檔相容模式'};
     return list;
   } catch (e) {
     _allStudentsCache = null;
@@ -10355,6 +10363,7 @@ async function _getSchoolStudents(schoolName, authPayload) {
       student_id: s.student_id,
       chinese_name: s.chinese_name,
       english_name: s.english_name,
+      display_name: s.display_name,
       class_code: s.class_code,
       school_name: s.school_name,
       pickup_method: s.pickup_method
@@ -10401,6 +10410,10 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
         </div>
         <button id="rd-close" style="background:transparent;color:#fff;border:none;font-size:1.4rem;cursor:pointer">×</button>
       </div>
+      <label style="padding:10px 20px;font-size:13px">篩選學生
+        <input id="rd-student-search" type="search" placeholder="中文姓名／英文名／學生編號" style="margin-left:8px;max-width:100%;width:270px;box-sizing:border-box;padding:6px;border:1px solid #d4d1ca;border-radius:4px">
+        <span id="rd-search-status" role="status"></span>
+      </label>
       <div id="rd-body" style="flex:1;overflow:auto;padding:16px 20px">
         <div style="text-align:center;color:#888;padding:40px">載入中…</div>
       </div>
@@ -10425,6 +10438,18 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   sourceNote.textContent = '已排學生：接送學員（排程列 ' + rowData.row_index + ' / ' + session +
     '）；候選學生：115-1 學期班級指派，依學校及「在學」篩選；英文名依學生編號對照學生主檔，未填者僅顯示中文。候選名冊不等於已加入本班次。';
   el('rd-body').before(sourceNote);
+  function filterStudents() {
+    const query = el('rd-student-search').value.trim().toLocaleLowerCase();
+    let visible = 0, total = 0;
+    overlay.querySelectorAll('.rd-stu').forEach(input => {
+      const label = input.closest('label');
+      const match = !query || (label.textContent + ' ' + input.dataset.sid).toLocaleLowerCase().includes(query);
+      label.style.display = match ? 'flex' : 'none';
+      total++; if (match) visible++;
+    });
+    el('rd-search-status').textContent = query ? ` 顯示 ${visible} / ${total} 人（搜尋不改變勾選）` : '';
+  }
+  el('rd-student-search').oninput = filterStudents;
   function showLoadError(err, uncertainWrite = false) {
     if (!isCurrent()) return;
     el('rd-save').disabled = true;
@@ -10449,6 +10474,12 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   // 讀現有明細 (加 try/catch 避免卡「載入中…」)
   let existing;
   try {
+    await _loadAllStudentsOnce(authPayload);
+    if (!isCurrent()) return;
+    sourceNote.textContent = '已排學生：接送學員；候選學生與國小：115-1 學期班級指派的在學名冊。姓名來源：' +
+      (_allStudentsCache.displayNameSource === '學期班級指派!W' ? 'W 欄「學生中英文姓名」。' :
+        '主檔相容模式（Gateway 尚待部署 W 欄讀取）。') +
+      ' 排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。';
     existing = await _getRouteDetails(rowData.row_index, session, authPayload);
     if (!isCurrent()) return;
     if (existing.details.some(d => !d || !d.school_name ||
@@ -10550,7 +10581,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
               students.map(s => `
                 <label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:0.85rem">
                   <input type="checkbox" class="rd-stu" data-school="${_esc(name)}" data-sid="${_esc(s.student_id)}" data-sname="${_esc(s.chinese_name)}" ${val.selected_ids.has(s.student_id)?'checked':''}>
-                  <span style="min-width:0;overflow-wrap:anywhere">${_esc(s.chinese_name)}${s.english_name?'（'+_esc(s.english_name)+'）':''}</span>
+                  <span style="min-width:0;overflow-wrap:anywhere">${_esc(s.display_name || s.chinese_name)}</span>
                 </label>
               `).join('')
             }
@@ -10561,6 +10592,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     html += `<div style="margin-top:10px;text-align:center"><button id="rd-add-school" style="padding:6px 14px;background:#fff;color:#01696F;border:1px solid #01696F;border-radius:4px;cursor:pointer">+ 新增學校</button></div>`;
     body.innerHTML = html;
     bindBodyEvents();
+    filterStudents();
     calcTotal();
     el('rd-save').disabled = false;
     } catch (err) {
@@ -10630,7 +10662,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     const used = new Set([...schoolMap.keys()]);
     const available = SCHOOLS_LIST.filter(s => !used.has(s.name));
     if (available.length === 0) {
-      alert('10 所學校都已加入');
+      alert('115-1 當學期在學名冊中的國小已全部加入，或目前沒有符合的國小。');
       return;
     }
     const pick = document.createElement('div');
@@ -10929,10 +10961,12 @@ async function renderPickupSchedule(el) {
     statusEl.textContent = '載入中…';
     // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
     window._routeNamesCache = {};
+    _allStudentsCache = null;
     try {
       const [staffR, listR] = await Promise.all([
         api({action: 'get_staff'}),
-        api({action: 'list'})
+        api({action: 'list'}),
+        _loadAllStudentsOnce(auth_payload)
       ]);
       if (!isCurrent()) return false;
       if (!staffR || !staffR.success || !Array.isArray(staffR.staff)) throw new Error((staffR && staffR.error) || '員工清單回應不完整');
@@ -11046,6 +11080,15 @@ async function renderPickupSchedule(el) {
       const escVal = _esc2(val).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       return optsHtml.replace(new RegExp('value="' + escVal + '"'), 'value="' + _esc2(val) + '" selected');
     }
+    function schoolOptions(value) {
+      // Preserve an already-saved historical/non-current value visibly without
+      // making it a selectable option for new assignments or erasing it.
+      const saved = String(value || '').trim();
+      if (saved && !SCHOOLS_LIST.some(s => s.name === saved)) {
+        return schoolOpts + `<option value="${_esc2(saved)}" selected disabled>${_esc2(saved)}（既有值，非當期國小）</option>`;
+      }
+      return _sel(schoolOpts, saved);
+    }
 
     // === row HTML ===
     let prevDate = null;
@@ -11070,13 +11113,13 @@ async function renderPickupSchedule(el) {
 <td style="padding:6px"><select data-field="noon_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.noon_vehicle)}</select></td>
 <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver)}</select></td>
 <td style="padding:6px"><select data-field="noon_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver2)}</select></td>
-<td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(schoolOpts, r.noon_school)}</select></td>
+<td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${schoolOptions(r.noon_school)}</select></td>
 <td data-noon-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="noon" title="選學校 + 學生" style="padding:3px 8px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'noon')}</td>
 <td style="padding:6px"><input data-field="noon_time" type="time" lang="en-GB" step="60" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
 <td style="padding:6px"><select data-field="pm_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.pm_vehicle)}</select></td>
 <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver)}</select></td>
 <td style="padding:6px"><select data-field="pm_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver2)}</select></td>
-<td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(schoolOpts, r.pm_school)}</select></td>
+<td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${schoolOptions(r.pm_school)}</select></td>
 <td data-pm-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="pm" title="選學校 + 學生" style="padding:3px 8px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'pm')}</td>
 <td style="padding:6px"><input data-field="pm_time" type="time" lang="en-GB" step="60" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
 <td style="padding:6px;text-align:center"><button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button></td>
