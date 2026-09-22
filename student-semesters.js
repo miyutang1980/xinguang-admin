@@ -26,6 +26,7 @@
   let focusBeforeDialog = null;
   let saving = false;
   let pendingRender = null;
+  let nameSource = '';
   const timings = [];
 
   // Memory-only diagnostics: never retain URLs, credentials, rows or payloads.
@@ -66,7 +67,7 @@
     Object.keys(params).forEach(key => query.set(typeof params[key] === 'object' ? key + '_json' : key,
       typeof params[key] === 'object' ? JSON.stringify(params[key]) : String(params[key])));
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(), action.endsWith('_list') ? 20000 : 45000);
     try {
       const response = await fetch(GW_URL + '?' + query, { cache: 'no-store', signal: controller.signal });
       if (!response.ok) throw new Error('服務連線失敗（HTTP ' + response.status + '）。');
@@ -116,6 +117,9 @@
     const result = await api(kind === 'master' ? 'student_master_list' : 'semester_assignments_list',
       kind === 'master' ? {} : { semester });
     validateList(result, kind, semester);
+    if (kind === 'assignment' && semester === CURRENT && typeof window.primePickupSemester === 'function') {
+      window.primePickupSemester(result);
+    }
     return result;
   }
   function requireActive(result) {
@@ -188,7 +192,8 @@
       ['學生編號',DISPLAY_NAME,'弋果班級','TXClass','弋果課程','學期狀態','學校','年級','小學班級','中籍教師','外籍教師','交通車','操作'];
     el.querySelector('#ssNotice').textContent = `顯示 ${filtered.length} / ${all.length} 筆` +
       (!all.length ? (master ? ' · 主檔尚未建檔；如與預期不符，請先確認移轉結果。' :
-        ` · ${state.semester} 尚無指派；不會自動複製歷史資料。`) : '');
+        ` · ${state.semester} 尚無指派；不會自動複製歷史資料。`) : '') +
+      (!master && state.semester === CURRENT ? ' · 姓名來源：' + nameSource : '');
     el.querySelector('#ssList').innerHTML = table(headers, filtered.map(row => `<tr>${
       headers.slice(0,-1).map(h => { const text = h === DISPLAY_NAME ? row[h] || row['學生姓名'] : row[h]; return `<td title="${esc(text)}">${esc(text || '—')}</td>`; }).join('')}
       <td><button type="button" class="btn btn-outline ss-row-edit" data-row="${Number(row._row)}">${
@@ -230,11 +235,29 @@
       else {
         state.assignments = result.list;
         state.semesters = unique([CURRENT, '114-2', ...result.semesters]).sort().reverse();
+        nameSource = result.displayNameSource === '學期班級指派!W' ?
+          'Google W 欄「學生中英文姓名」' : 'Gateway 未回傳 W 欄，暫時僅顯示中文';
       }
       state.active = result.active === true;
       state.ready = true;
       shell(el, kind);
       if (!verified) el.querySelector('#ssNotice').textContent += ` · 讀取 ${status.elapsed()} 秒`;
+      // Do not block the table while enriching an older deployment. The source
+      // remains explicit: compatibility labels are NOT presented as Google W.
+      if (kind !== 'master' && semester === CURRENT && result.displayNameSource !== '學期班級指派!W' &&
+          typeof window._loadAllStudentsOnce === 'function') {
+        void window._loadAllStudentsOnce({}).then(roster => {
+          if (request !== state.request || owner !== session() || !visible()) return;
+          const byId = new Map(roster.map(r=>[r.student_id,r.display_name]));
+          state.assignments = state.assignments.map(r=>({...r,[DISPLAY_NAME]:byId.get(r['學生編號'])||r['學生姓名']}));
+          nameSource = '主檔中英文相容模式（正式 Gateway 未回傳 W 欄，尚待核對部署）';
+          drawRows(el);
+        }).catch(() => {
+          if (request !== state.request || owner !== session() || !visible()) return;
+          nameSource = '合併姓名讀取未完成，暫時僅顯示中文；請重新整理';
+          drawRows(el);
+        });
+      }
       if (window.matchMedia('(max-width:768px)').matches) {
         requestAnimationFrame(() => {
           if (!visible()) return;

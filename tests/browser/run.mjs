@@ -12,7 +12,8 @@ for (const files of [
   ['login-regression.js'],
   ['pickup-setup.js', 'pickup-regression.js'],
   ['details-regression.js'],
-  ['pickup-setup.js','linkage-regression.js']
+  ['pickup-setup.js','linkage-regression.js'],
+  ['pickup-latency.js']
 ]) {
   const fixture = await fs.readFile(path.join(here, 'bootstrap.js'), 'utf8');
   const checks = (await Promise.all(files.map(f => fs.readFile(path.join(here, f), 'utf8')))).join('\n');

@@ -4323,12 +4323,21 @@ async function gwCallJson(action, params, fresh = false) {
   // Route writes use GET transport too: never cache/replay them as safe GETs.
   // Fresh reads are required to verify an append and to make refresh meaningful.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 45000);
+  const readLabels = {routes_list:'接送排程',routes_get_staff:'接送人員',routes_get_details:'本班次已排學生',
+    routes_get_details_batch:'接送姓名摘要',semester_assignments_list:'115-1 學期名冊',student_master_list:'學生主檔姓名'};
+  const started = performance.now();
+  const timer = setTimeout(() => controller.abort(), readLabels[action] ? 20000 : 45000);
   try {
     const response = await gwCall(action, params, { cache:'no-store', signal:controller.signal });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     return await response.json();
-  } finally { clearTimeout(timer); }
+  } catch (error) {
+    if (error.name === 'AbortError' && readLabels[action]) throw new Error(readLabels[action] + '讀取超過 20 秒，已停止等待；請重新讀取，未更動資料');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    window._pickupReadTimings = (window._pickupReadTimings || []).concat({action,milliseconds:Math.round(performance.now()-started)}).slice(-20);
+  }
 }
 
 // v2.18.47: 全域 fetch 拦截 · fetch(GW_URL, {method:'POST', body:JSON.stringify({_action:xxx, ...})}) 自動轉 GET
@@ -10280,12 +10289,33 @@ const _schoolStudentsCache = {};
 let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 過濾
 let _pickupRosterOwner = '';
 let _pickupRosterVersion = 0;
+let _pickupRosterPending = null;
+let _pickupSemesterSnapshot = null;
+window.primePickupSemester = function(result) {
+  if (result && result.success === true && result.semester === '115-1' && Array.isArray(result.list)) {
+    _pickupSemesterSnapshot = {result,owner:_currentUser,epoch:_authEpoch,version:_pickupRosterVersion,at:Date.now()};
+    _allStudentsCache = null;
+  }
+};
 window.invalidatePickupRoster = function() {
   _pickupRosterVersion++;
   _allStudentsCache = null;
+  _pickupRosterPending = null;
+  _pickupSemesterSnapshot = null;
   window._routeNamesCache = {};
+  window._routeNamesErrors = {};
 };
 async function _loadAllStudentsOnce(authPayload) {
+  const key = String(_authEpoch) + ':' + String((_currentUser || {}).username || '') + ':' + _pickupRosterVersion;
+  if (_pickupRosterPending && _pickupRosterPending.key === key) return _pickupRosterPending.promise;
+  const pending = {key};
+  pending.promise = _fetchPickupRoster(authPayload).finally(() => {
+    if (_pickupRosterPending === pending) _pickupRosterPending = null;
+  });
+  _pickupRosterPending = pending;
+  return pending.promise;
+}
+async function _fetchPickupRoster(authPayload) {
   const rosterVersion = _pickupRosterVersion;
   const owner = String(_authEpoch) + ':' + String((_currentUser || {}).username || '');
   if (_pickupRosterOwner !== owner) {
@@ -10302,7 +10332,10 @@ async function _loadAllStudentsOnce(authPayload) {
       adminUser: u.username || 'admin',
       adminPass: pwd
     };
-    const r = await gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true);
+    const snapshot = _pickupSemesterSnapshot;
+    const r = snapshot && snapshot.owner === _currentUser && snapshot.epoch === _authEpoch &&
+      snapshot.version === rosterVersion && Date.now()-snapshot.at < 60000 ? snapshot.result :
+      await gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true);
     if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
     if (r.active === false) throw new Error('學期班級指派新制尚未啟用，不能將候選名冊視為空白');
     const rows = r.list || r.rows;
@@ -10348,7 +10381,7 @@ async function _loadAllStudentsOnce(authPayload) {
     _allStudentsCache = {list, at: Date.now(), displayNameSource:hasDisplayColumn ? r.displayNameSource : '主檔相容模式'};
     return list;
   } catch (e) {
-    _allStudentsCache = null;
+    if (owner === _pickupRosterOwner && rosterVersion === _pickupRosterVersion) _allStudentsCache = null;
     throw e;
   }
 }
@@ -10473,14 +10506,25 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
 
   // 讀現有明細 (加 try/catch 避免卡「載入中…」)
   let existing;
+  const readStarted = performance.now();
+  let rosterDone = false, detailsDone = false, readActive = true;
+  const paintRead = () => {
+    if (!isCurrent() || !readActive) return;
+    el('rd-body').textContent = `讀取中 ${Math.floor((performance.now()-readStarted)/1000)} 秒：學期名冊${rosterDone?'已完成':'等待中'}／已排學生${detailsDone?'已完成':'等待中'}。可隨時取消。`;
+  };
+  paintRead();
+  const readTimer = setInterval(paintRead, 1000);
   try {
-    await _loadAllStudentsOnce(authPayload);
+    const results = await Promise.all([
+      _loadAllStudentsOnce(authPayload).then(value => {rosterDone=true;paintRead();return value;}),
+      _getRouteDetails(rowData.row_index, session, authPayload).then(value => {detailsDone=true;paintRead();return value;})
+    ]);
     if (!isCurrent()) return;
     sourceNote.textContent = '已排學生：接送學員；候選學生與國小：115-1 學期班級指派的在學名冊。姓名來源：' +
       (_allStudentsCache.displayNameSource === '學期班級指派!W' ? 'W 欄「學生中英文姓名」。' :
-        '主檔相容模式（Gateway 尚待部署 W 欄讀取）。') +
+        '主檔相容模式（Gateway 未回傳 W 欄，需核對部署）。') +
       ' 排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。';
-    existing = await _getRouteDetails(rowData.row_index, session, authPayload);
+    existing = results[1];
     if (!isCurrent()) return;
     if (existing.details.some(d => !d || !d.school_name ||
       (!Array.isArray(d.student_ids) && !Array.isArray(d.student_names)) ||
@@ -10502,7 +10546,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   } catch (err) {
     showLoadError(err);
     return;
-  }
+  } finally { readActive = false; clearInterval(readTimer); }
   // schoolMap: school_name -> { school_code, selected_ids:Set, students:[] }
   const schoolMap = new Map();
   (existing.details || []).forEach(d => {
@@ -10695,6 +10739,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   }
 
   function close() {
+    readActive = false;
+    clearInterval(readTimer);
     overlay.remove();
     document.getElementById('rd-school-picker')?.remove();
   }
@@ -10769,7 +10815,8 @@ function _renderSessionNames(r, session) {
       + _esc(displayNames.join('、')) + more + '</div>';
   }
   if (names === undefined) {
-    return '<div data-stu-names="' + session + '" style="' + baseStyle.replace(bgLight,'#FAFAFA').replace(color,'#D1D5DB').replace('#1F2937','#9CA3AF') + ';font-style:italic">載入姓名…</div>';
+    const note = window._routeNamesErrors?.[rid + ':' + session] ? '姓名未取得，請重新載入；不是零人' : '載入姓名…';
+    return '<div data-stu-names="' + session + '" style="' + baseStyle.replace(bgLight,'#FAFAFA').replace(color,'#D1D5DB').replace('#1F2937','#9CA3AF') + '">' + note + '</div>';
   }
   return '';
 }
@@ -10787,26 +10834,13 @@ function _renderRouteStudentNames(r){
 }
 
 // 背景 lazy-load：v2.18.9 改一次 batch call
-// 1. localStorage 存取 cache (下次開頁面立刻顯示)
-// 2. 1 次 Apps Script call 拿所有 rows (以前 26 次 → 1 次)
-// 3. 一次 requestAnimationFrame 全重繪
+// 1. 僅使用目前登入階段的記憶體快取
+// 2. 1 次 Apps Script batch call；失敗不展開逐列補查
+// 3. 失敗明確標示，不快取為零人
 async function _hydrateRouteNames(rowsToHydrate, authPayload) {
-  // 0. 先讀 localStorage
-  if (!window._routeNamesLocalLoaded) {
-    try {
-      const lc = JSON.parse(localStorage.getItem('xg_route_names_cache') || '{}');
-      const ts = parseInt(localStorage.getItem('xg_route_names_cache_ts') || '0', 10);
-      // localStorage cache 30 分鐘有效 (避免老資料)
-      if (ts && (Date.now() - ts) < 30 * 60 * 1000) {
-        Object.keys(lc).forEach(rid => {
-          if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = lc[rid];
-        });
-        // 立刻重繪一次,讓使用者看到快取名單
-        _rehydrateRouteCells(rowsToHydrate);
-      }
-    } catch(e) {}
-    window._routeNamesLocalLoaded = true;
-  }
+  const epoch = _authEpoch, version = _pickupRosterVersion;
+  window._routeNamesPending = window._routeNamesPending || new Set();
+  window._routeNamesErrors = window._routeNamesErrors || {};
 
   // 1. 看哪些 row 還沒名單
   const ridsToFetch = [];
@@ -10821,6 +10855,9 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
     if (needNoon || needPm) ridsToFetch.push(rid);
   }
   if (ridsToFetch.length === 0) return;
+  const key = epoch + ':' + version + ':' + ridsToFetch.slice().sort().join(',');
+  if (window._routeNamesPending.has(key)) return;
+  window._routeNamesPending.add(key);
 
   // 2. 一次 batch call
   try {
@@ -10831,7 +10868,11 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
       adminPass: pwd,
       schedule_rows: ridsToFetch
     });
-    const details = (r && r.details) || {};
+    if (epoch !== _authEpoch || version !== _pickupRosterVersion) return;
+    if (!r || r.success !== true || !r.details || typeof r.details !== 'object' || Array.isArray(r.details)) {
+      throw new Error('批次姓名摘要未成功取得');
+    }
+    const details = r.details;
     // details = { "<rid>:noon": [{school_name, student_names:[]}], "<rid>:pm": [...] }
     ridsToFetch.forEach(rid => {
       ['noon', 'pm'].forEach(session => {
@@ -10844,42 +10885,16 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
         if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = {};
         // 沒資料也寫 [],不要重複 fetch
         window._routeNamesCache[rid][session] = names;
+        delete window._routeNamesErrors[rid + ':' + session];
       });
     });
-    // 3. 寫 localStorage
-    try {
-      localStorage.setItem('xg_route_names_cache', JSON.stringify(window._routeNamesCache));
-      localStorage.setItem('xg_route_names_cache_ts', String(Date.now()));
-    } catch(e) {}
   } catch(e) {
-    console.warn('[接送名單batch] 失敗, fallback 到舊版並行:', e.message);
-    // Fallback: 舊版並行批次 (Gateway 還沒部署 v2.18.9 時)
-    const CONCURRENCY = 4;
-    const tasks = [];
-    ridsToFetch.forEach(rid => {
-      const r = rowsToHydrate.find(x => x.row_index === rid);
-      if (!r) return;
-      if ((parseInt(r.noon_count,10) || 0) > 0 && !Array.isArray(window._routeNamesCache[rid].noon)) {
-        tasks.push({r, rid, session: 'noon'});
-      }
-      if ((parseInt(r.pm_count,10) || 0) > 0 && !Array.isArray(window._routeNamesCache[rid].pm)) {
-        tasks.push({r, rid, session: 'pm'});
-      }
-    });
-    for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-      const batch = tasks.slice(i, i + CONCURRENCY);
-      await Promise.all(batch.map(async (t) => {
-        try {
-          const detail = await _getRouteDetails(t.rid, t.session, authPayload);
-          const names = [];
-          (detail.details || []).forEach(d => (d.student_names || []).forEach(n => names.push(n)));
-          window._routeNamesCache[t.rid][t.session] = names;
-        } catch (e2) {
-          window._routeNamesCache[t.rid][t.session] = [];
-        }
-      }));
-    }
-  }
+    if (epoch !== _authEpoch || version !== _pickupRosterVersion) return;
+    // No per-row fanout after an outage. A failed read must never be cached as [].
+    ridsToFetch.forEach(rid => ['noon','pm'].forEach(session => {
+      window._routeNamesErrors[rid + ':' + session] = true;
+    }));
+  } finally { window._routeNamesPending.delete(key); }
 
   // 4. 一次重繪所有 cells
   requestAnimationFrame(() => _rehydrateRouteCells(rowsToHydrate));
@@ -10939,11 +10954,11 @@ async function renderPickupSchedule(el) {
 
   let staffList = [];
   let allRows = [];
-  let loaded = false, appending = false, loading = false;
+  let loaded = false, appending = false, loading = false, rosterReady = false, loadVersion = 0;
   function setCreateEnabled(enabled) {
-    ['ps-add-day','ps-add-route'].forEach(id => {
+    ['ps-add-day','ps-add-route','ps-copy-week','ps-mark-rest','ps-copy-next','ps-copy-4w','ps-fill-names'].forEach(id => {
       const button = el.querySelector('#' + id);
-      if (button) button.disabled = !enabled;
+      if (button) button.disabled = !enabled || !rosterReady;
     });
   }
 
@@ -10955,18 +10970,38 @@ async function renderPickupSchedule(el) {
   async function loadAll() {
     if (!isCurrent() || loading) return false;
     loading = true;
+    const version = ++loadVersion;
     loaded = false;
+    rosterReady = false;
     setCreateEnabled(false);
     const statusEl = document.getElementById('ps-status');
-    statusEl.textContent = '載入中…';
+    const start = performance.now();
+    const stages = {人員:false,排程:false,名冊:false};
+    const paint = () => {
+      if (isCurrent() && version === loadVersion && !loaded) statusEl.textContent =
+        `讀取中 ${Math.floor((performance.now()-start)/1000)} 秒 · ` +
+        Object.entries(stages).map(([name,done])=>name+(done?'完成':'等待中')).join('／');
+    };
+    paint();
+    const timer = setInterval(paint,1000);
     // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
     window._routeNamesCache = {};
-    _allStudentsCache = null;
+    const rosterTask = _loadAllStudentsOnce(auth_payload).then(() => {
+      if (!isCurrent() || version !== loadVersion) return;
+      rosterReady = true; stages.名冊 = true;
+      if (loaded) {
+        renderTable(); setCreateEnabled(!appending);
+        statusEl.textContent = `共 ${allRows.length} 列 · 員工 ${staffList.length} 位 · 名冊已完成 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+      }
+    }).catch(error => {
+      if (!isCurrent() || version !== loadVersion) return;
+      stages.名冊 = error.message;
+      if (loaded) statusEl.textContent = '排程已取得，名冊未完成：'+error.message+'；編輯停用，請按重新載入。';
+    });
     try {
       const [staffR, listR] = await Promise.all([
-        api({action: 'get_staff'}),
-        api({action: 'list'}),
-        _loadAllStudentsOnce(auth_payload)
+        api({action: 'get_staff'}).then(r=>{stages.人員=true;paint();return r;}),
+        api({action: 'list'}).then(r=>{stages.排程=true;paint();return r;})
       ]);
       if (!isCurrent()) return false;
       if (!staffR || !staffR.success || !Array.isArray(staffR.staff)) throw new Error((staffR && staffR.error) || '員工清單回應不完整');
@@ -10978,6 +11013,9 @@ async function renderPickupSchedule(el) {
       statusEl.innerHTML =
         `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
       loaded = true;
+      if (!rosterReady) statusEl.textContent = typeof stages.名冊 === 'string' ?
+        '排程已取得，名冊未完成：'+stages.名冊+'；編輯停用，請按重新載入。' :
+        '排程已取得，正在讀取學期名冊；名冊完成前暫停編輯。';
       return true;
     } catch(e) {
       if (!isCurrent()) return false;
@@ -10992,6 +11030,7 @@ async function renderPickupSchedule(el) {
         '</div>';
       return false;
     } finally {
+      clearInterval(timer);
       loading = false;
       if (isCurrent()) setCreateEnabled(loaded && !appending);
     }
@@ -11085,7 +11124,7 @@ async function renderPickupSchedule(el) {
       // making it a selectable option for new assignments or erasing it.
       const saved = String(value || '').trim();
       if (saved && !SCHOOLS_LIST.some(s => s.name === saved)) {
-        return schoolOpts + `<option value="${_esc2(saved)}" selected disabled>${_esc2(saved)}（既有值，非當期國小）</option>`;
+        return schoolOpts + `<option value="${_esc2(saved)}" selected disabled>${_esc2(saved)}（${rosterReady ? '既有值，非當期國小' : '名冊讀取中'}）</option>`;
       }
       return _sel(schoolOpts, saved);
     }
@@ -11098,7 +11137,7 @@ async function renderPickupSchedule(el) {
       prevDate = r.date;
       const rowStyle = (isHoliday ? 'background:#f0efea;color:#999' : '') +
         (isFirstOfDay ? ';border-top:2px solid #01696F' : '');
-      const dis = isHoliday ? ' disabled' : '';
+      const dis = isHoliday || !rosterReady ? ' disabled' : '';
       const dateCell = isFirstOfDay
         ? `${r.date}<br><button class="btn-day-del" data-date="${_esc(r.date)}" title="刪除這一天所有路線" style="margin-top:4px;background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;cursor:pointer;font-size:0.7rem;padding:2px 6px;border-radius:4px">🗑 删整天</button>`
         : '';
@@ -11159,11 +11198,13 @@ async function renderPickupSchedule(el) {
         <tbody style="contain:content">${rowsHtml}</tbody>
       </table>
     `;
+    if (!rosterReady) document.querySelectorAll('#ps-table-wrap input, #ps-table-wrap select, #ps-table-wrap button')
+      .forEach(control => { control.disabled = true; });
     console.log('[接送排程] renderTable', filtered.length, '列 ·', (performance.now()-t0).toFixed(1), 'ms');
 
     // 背景並行讀名字、idle 時段才跑 (不阻塞 UI)
     const _idle = window.requestIdleCallback || function(fn){ return setTimeout(fn, 100); };
-    _idle(function(){ _hydrateRouteNames(filtered, auth_payload); }, { timeout: 800 });
+    if (rosterReady) _idle(function(){ _hydrateRouteNames(filtered, auth_payload); }, { timeout: 800 });
 
     // 📋 按鈕:開明細 modal
     // ❌ 硬刪除整列
@@ -11303,7 +11344,7 @@ async function renderPickupSchedule(el) {
     });
   }
 
-  document.getElementById('ps-refresh').onclick = loadAll;
+  document.getElementById('ps-refresh').onclick = () => { if (loading) return; invalidatePickupRoster(); return loadAll(); };
 
   async function appendRoutes(rows) {
     if (!isCurrent() || !loaded || appending) return;
