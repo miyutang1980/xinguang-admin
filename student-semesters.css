@@ -45,6 +45,8 @@ html:has(.ss-host),body:has(.ss-host){overflow-x:clip}
   body:has(.ss-host) .sidebar-menu{display:flex;flex:none;overflow-x:auto;overflow-y:hidden;padding:4px 0;max-width:100%}
   body:has(.ss-host) .sidebar-item{flex:0 0 auto;white-space:nowrap;padding:10px 16px;border-left:0;border-bottom:3px solid transparent}
   body:has(.ss-host) .sidebar-item.active{border-bottom-color:#7DFFB3}
+  body:has(.ss-host) #nav-students{order:-2}
+  body:has(.ss-host) #nav-classAssign{order:-1}
   body:has(.ss-host) .sidebar-bottom{padding:4px 18px 8px;text-align:right;border:0}
   body:has(.ss-host) .sidebar-bottom button{width:auto}
   .main:has(.ss-host) .topbar{padding:14px 18px}

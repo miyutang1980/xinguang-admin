@@ -189,8 +189,7 @@
         requestAnimationFrame(() => {
           if (!visible()) return;
           const nav = document.querySelector('.sidebar-menu');
-          const active = nav && nav.querySelector('.sidebar-item.active');
-          if (active) nav.scrollLeft += active.getBoundingClientRect().left - nav.getBoundingClientRect().left - 12;
+          if (nav) nav.scrollLeft = 0;
         });
       }
     } catch (error) {
