@@ -24,6 +24,29 @@
   let dialog = null;
   let focusBeforeDialog = null;
   let saving = false;
+  let pendingRender = null;
+  const timings = [];
+
+  // Memory-only diagnostics: never retain URLs, credentials, rows or payloads.
+  function recordTiming(action, started, ok) {
+    timings.push({ action, milliseconds: Math.round(performance.now() - started), ok });
+    if (timings.length > 30) timings.shift();
+  }
+
+  function progress(button, initial) {
+    const started = performance.now();
+    let label = initial;
+    const paint = () => {
+      if (button.isConnected) button.textContent = `${label} · ${Math.floor((performance.now() - started) / 1000)} 秒`;
+    };
+    paint();
+    const timer = setInterval(paint, 1000);
+    return {
+      stage(text) { label = text; paint(); },
+      stop() { clearInterval(timer); },
+      elapsed() { return ((performance.now() - started) / 1000).toFixed(1); }
+    };
+  }
 
   function auth() {
     const u = session();
@@ -35,6 +58,8 @@
   }
 
   async function api(action, payload = {}) {
+    const started = performance.now();
+    let ok = false;
     const params = Object.assign({}, payload, auth());
     const query = new URLSearchParams({ _action: action });
     Object.keys(params).forEach(key => query.set(typeof params[key] === 'object' ? key + '_json' : key,
@@ -48,13 +73,14 @@
       if (!result || Array.isArray(result) || result.success !== true) {
         throw new Error(result && result.error ? String(result.error) : '後端尚未升級或回應格式不符，已停止操作。');
       }
+      ok = true;
       return result;
     } catch (error) {
       if (error.name === 'AbortError') throw new Error('連線逾時；若剛才正在儲存，結果尚未確認，請重新整理核對後再操作。');
       if (error instanceof SyntaxError) throw new Error('後端回傳的不是有效資料，請管理員確認 Gateway 部署版本。');
       if (error instanceof TypeError) throw new Error('無法連線；若剛才正在儲存，請重新整理核對結果，勿重複送出。');
       throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); recordTiming(action, started, ok); }
   }
 
   function validateList(result, kind, semester) {
@@ -165,7 +191,21 @@
       openEditor(el, all.find(row => Number(row._row) === Number(btn.dataset.row))));
   }
 
-  async function render(el, kind) {
+  function render(el, kind, verified = null) {
+    // Coalesce only simultaneous page loads, not pre-write or post-write reads.
+    if (!verified && pendingRender && pendingRender.el === el && pendingRender.kind === kind &&
+        pendingRender.semester === state.semester && pendingRender.owner === session() &&
+        pendingRender.request === state.request) return pendingRender.promise;
+    const load = { el, kind, semester: state.semester, owner: session() };
+    load.promise = renderView(el, kind, verified).finally(() => {
+      if (pendingRender === load) pendingRender = null;
+    });
+    load.request = state.request;
+    pendingRender = load;
+    return load.promise;
+  }
+
+  async function renderView(el, kind, verified) {
     const request = ++state.request;
     const owner = session();
     const semester = state.semester;
@@ -174,8 +214,11 @@
     state.master = []; state.assignments = [];
     el.classList.add('ss-host');
     el.innerHTML = banner(kind === 'master' ? '學生主檔' : '學期班級指派', '正在讀取正式資料，請稍候…', kind !== 'master');
+    const status = progress(el.querySelector('.ss-banner p'), '正在讀取正式資料');
     try {
-      const result = await readList(kind, semester);
+      // Use the just-verified server response; do not issue a fourth round trip.
+      const result = verified || await readList(kind, semester);
+      validateList(result, kind, semester);
       if (request !== state.request || owner !== session() || !visible()) return;
       if (kind === 'master') state.master = result.list;
       else {
@@ -185,6 +228,7 @@
       state.active = result.active === true;
       state.ready = true;
       shell(el, kind);
+      if (!verified) el.querySelector('#ssNotice').textContent += ` · 讀取 ${status.elapsed()} 秒`;
       if (window.matchMedia('(max-width:768px)').matches) {
         requestAnimationFrame(() => {
           if (!visible()) return;
@@ -198,7 +242,7 @@
         `<div class="ss-error" role="alert">${esc(error.message)}<p>請確認登入與網路；若後端尚未升級，請管理員完成 Gateway 部署。不要改用舊名冊覆寫。</p></div>` +
         button('重新讀取', 'ssRetry');
       el.querySelector('#ssRetry').onclick = () => render(el, kind);
-    }
+    } finally { status.stop(); }
   }
 
   function showDialog(title, html) {
@@ -336,6 +380,7 @@
       if (readonly || saving || reconcileRequired) return;
       const save = form.querySelector('#ssSave');
       let writeAttempted = false;
+      let status;
       try {
         mustEdit(kind, semester);
         const allowed = master ? MASTER.filter(k => !['學生編號','建立時間','更新時間'].includes(k)) : YELLOW.slice(1);
@@ -351,11 +396,12 @@
         const changed = original ? Object.fromEntries(Object.entries(fields).filter(([k,v]) => v !== val(original,k))) : fields;
         if (!Object.keys(changed).length) { message(form, '沒有變更，尚未送出。'); return; }
         saving = true; form.querySelectorAll('input,select,textarea,button').forEach(i => i.disabled = true);
-        save.textContent = '核對及儲存中…'; message(form, '');
+        status = progress(save, '1/3 核對最新資料'); message(form, '');
         // Re-read before row_index writes to avoid targeting moved rows and stale edits.
         const latest = await readList(kind, semester);
         requireActive(latest);
         mustEdit(kind, semester);
+        if (request !== state.request || !form.isConnected) throw new Error('頁面已變更，未送出儲存。請重新開啟編輯。');
         if (original) {
           const identity = master ? '學生編號' : '指派編號';
           const fresh = latest.list.find(r => r[identity] === original[identity]);
@@ -368,12 +414,14 @@
           'semester_assignment_' + (original ? 'update' : 'create');
         const payload = { fields: changed };
         if (original) payload.row_index = Number(original._row);
+        status.stage('2/3 寫入及同步');
         writeAttempted = true;
         const result = await api(action, payload);
         if (!original && (master ? !result.studentNo : !result.assignmentNo)) {
           throw new Error('後端未回傳建立識別碼，結果尚未確認；請關閉視窗並重新整理，勿直接重送。');
         }
         // A nominal success is not enough: verify the persisted fields by a fresh read.
+        status.stage('3/3 讀回驗證');
         const checked = await readList(kind, semester);
         const identity = master ? '學生編號' : '指派編號';
         const id = original ? original[identity] : master ? result.studentNo : result.assignmentNo;
@@ -381,15 +429,16 @@
         if (!persisted || Object.entries(changed).some(([k,v]) => val(persisted,k) !== String(v))) {
           throw new Error('儲存回應已收到，但重新讀取尚未核對成功。請關閉視窗、重新整理確認，勿重複新增。');
         }
-        closeDialog(true);
-        if (visible()) {
-          await render(el, kind);
-          if (state.ready && visible()) el.querySelector('#ssNotice').textContent = '已儲存並重新讀取確認。';
+        if (request === state.request && visible() && form.isConnected) {
+          closeDialog(true);
+          await render(el, kind, checked);
+          if (state.ready && visible()) el.querySelector('#ssNotice').textContent += ` · 已儲存並讀回確認，共 ${status.elapsed()} 秒`;
         }
       } catch (error) {
         reconcileRequired = writeAttempted;
         if (form.isConnected) message(form, error.message + (writeAttempted ? '\n請關閉視窗並重新整理核對後再編輯；本視窗已停用再次送出。' : ''));
       } finally {
+        if (status) status.stop();
         saving = false; form.querySelectorAll('input,select,textarea,button').forEach(i => i.disabled = false);
         save.disabled = reconcileRequired;
         save.textContent = reconcileRequired ? '請先關閉並核對結果' : '儲存';
@@ -402,6 +451,8 @@
   function openBulk(el) {
     try { mustEdit('assignment', state.semester); } catch (_) { return; }
     if (saving) return;
+    const request = state.request;
+    let reconcileRequired = false;
     const codes = unique(state.assignments.map(r => r['弋果班級']));
     if (!codes.length) { el.querySelector('#ssNotice').textContent = '本學期沒有班代號，請先建立指派及班代號。'; return; }
     const modal = showDialog('整班升級／調整 · ' + CURRENT, `<form id="ssBulkForm">
@@ -418,7 +469,7 @@
     const invalidate = () => { preview = null; form.querySelector('#ssBulkPreview').innerHTML = ''; message(form, ''); };
     form.querySelectorAll('input,select').forEach(input => input.addEventListener('input', invalidate));
     form.querySelector('#ssPreview').onclick = async () => {
-      if (saving) return;
+      if (saving || reconcileRequired) return;
       const previewButton = form.querySelector('#ssPreview');
       try {
         mustEdit('assignment', CURRENT);
@@ -451,23 +502,29 @@
         commit.disabled = true;
         form.querySelector('#ssAcknowledged').onchange = event => { commit.disabled = !event.target.checked; };
         commit.onclick = async () => {
-          if (!preview || saving || !form.querySelector('#ssAcknowledged').checked) return;
+          if (!preview || saving || reconcileRequired || !form.querySelector('#ssAcknowledged').checked) return;
           const approved = preview;
+          let writeAttempted = false;
+          let status;
           try {
             mustEdit('assignment', CURRENT);
             if (!confirm(`確認更新 ${CURRENT}／班代號 ${approved.code} 的全班 ${approved.rows.length} 筆？\n\n欄位：${Object.keys(approved.fields).join('、')}\n114-2 歷史與學生主檔不變。`)) return;
             saving = true; form.querySelectorAll('input,select,button').forEach(i => i.disabled = true);
-            commit.textContent = '核對及更新全班…';
+            status = progress(commit, '1/3 核對全班資料');
             const fresh = await readList('assignment', CURRENT);
             requireActive(fresh);
             mustEdit('assignment', CURRENT);
+            if (request !== state.request || !form.isConnected) throw new Error('頁面已變更，未送出全班更新。');
             if (!same(snapshot(classRows(fresh.list, approved.code)), approved.snapshot)) {
               throw new Error('全班資料在預覽後已變更。請重新預覽，禁止套用過期名單。');
             }
+            status.stage('2/3 寫入及同步全班');
+            writeAttempted = true;
             const result = await api('semester_class_update', { semester: CURRENT, classCode: approved.code, fields: approved.fields });
             if (!Number.isInteger(result.updated) || result.updated < 1) {
               throw new Error('後端未提供有效更新筆數，結果尚未確認。請關閉視窗、重新整理核對，勿重複送出。');
             }
+            status.stage('3/3 讀回全班驗證');
             const checked = await readList('assignment', CURRENT);
             const saved = classRows(checked.list, approved.code);
             if (saved.length !== approved.rows.length || approved.rows.some(old =>
@@ -475,14 +532,19 @@
                 saved.some(r => Object.entries(approved.fields).some(([k,v]) => val(r,k) !== v))) {
               throw new Error('後端已回應，但全班更新結果尚未核對一致。請重新整理並請管理員檢查，勿重複送出。');
             }
-            closeDialog(true);
-            if (visible()) {
-              await render(el, 'assignment');
-              if (state.ready && visible()) el.querySelector('#ssNotice').textContent = `已核對 ${approved.code} 全班 ${saved.length} 筆；歷史學期不變。`;
+            if (request === state.request && visible() && form.isConnected) {
+              closeDialog(true);
+              await render(el, 'assignment', checked);
+              if (state.ready && visible()) el.querySelector('#ssNotice').textContent += ` · 已核對 ${approved.code} 全班 ${saved.length} 筆，共 ${status.elapsed()} 秒；歷史學期不變。`;
             }
           } catch (error) {
-            if (form.isConnected) { invalidate(); message(form, error.message); }
-          } finally { saving = false; form.querySelectorAll('input,select,button').forEach(i => i.disabled = false); }
+            reconcileRequired = writeAttempted;
+            if (form.isConnected) { invalidate(); message(form, error.message + (writeAttempted ? '\n請關閉視窗並重新整理核對，勿重複送出。' : '')); }
+          } finally {
+            if (status) status.stop();
+            saving = false; form.querySelectorAll('input,select,button').forEach(i => i.disabled = false);
+            form.querySelector('#ssPreview').disabled = reconcileRequired;
+          }
         };
       } catch (error) { if (form.isConnected) message(form, error.message); }
       finally { previewButton.disabled = false; previewButton.textContent = '預覽全班變更'; }
@@ -490,9 +552,11 @@
   }
 
   window.XGStudents = {
+    diagnostics: () => timings.map(entry => Object.assign({}, entry)),
     renderMaster: el => render(el, 'master'),
     renderAssignments: el => render(el, 'assignment'),
     reset: () => {
+      pendingRender = null; timings.length = 0;
       ++state.request; state.ready = false; state.active = false; state.owner = null; state.master = []; state.assignments = [];
       state.semester = CURRENT; state.semesters = [CURRENT,'114-2'];
       state.keyword = ''; state.masterKeyword = ''; state.status = ''; state.classCode = '';
