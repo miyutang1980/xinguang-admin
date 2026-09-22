@@ -4318,8 +4318,8 @@ function gwCall(action, params, options) {
   return fetch(GW_URL + '?' + qs.toString(), options);
 }
 // 便利函數: 直接拿 JSON
-async function gwCallJson(action, params) {
-  if (String(action).indexOf('routes_') !== 0) return gwCall(action, params).then(function(r){ return r.json(); });
+async function gwCallJson(action, params, fresh = false) {
+  if (!fresh && String(action).indexOf('routes_') !== 0) return gwCall(action, params).then(function(r){ return r.json(); });
   // Route writes use GET transport too: never cache/replay them as safe GETs.
   // Fresh reads are required to verify an append and to make refresh meaningful.
   const controller = new AbortController();
@@ -10285,8 +10285,15 @@ function _routeNameForDate(name, date) {
 // 學生快取(避免重複打 API)
 const _schoolStudentsCache = {};
 let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 過濾
+let _pickupRosterOwner = '';
 async function _loadAllStudentsOnce(authPayload) {
-  if (_allStudentsCache) return _allStudentsCache;
+  const owner = String(_authEpoch) + ':' + String((_currentUser || {}).username || '');
+  if (_pickupRosterOwner !== owner) {
+    _pickupRosterOwner = owner;
+    _allStudentsCache = null;
+    Object.keys(_schoolStudentsCache).forEach(k => delete _schoolStudentsCache[k]);
+  }
+  if (_allStudentsCache && Date.now() - _allStudentsCache.at < 60000) return _allStudentsCache.list;
   try {
     // v2.20.2: 接送名單以目前學期指派為準，不再讀舊「在校學生」API。
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
@@ -10295,9 +10302,12 @@ async function _loadAllStudentsOnce(authPayload) {
       adminUser: u.username || 'admin',
       adminPass: pwd,
       semester: '115-1'
-    });
+    }, true);
     if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
-    const list = (r.list || r.rows || []).map(s => ({
+    if (r.active === false) throw new Error('學期班級指派新制尚未啟用，不能將候選名冊視為空白');
+    const rows = r.list || r.rows;
+    if (!Array.isArray(rows)) throw new Error('115-1 學期指派回應缺少名冊，不能視為零人');
+    const list = rows.map(s => ({
       student_id: s['學生編號'] || s.studentNo || s.student_id || '',
       chinese_name: s['學生姓名'] || s.name || s.chinese_name || '',
       english_name: s['英文名'] || s.englishName || s.english_name || '',
@@ -10306,28 +10316,18 @@ async function _loadAllStudentsOnce(authPayload) {
       pickup_method: s['交通車'] || s.pickupMethod || s.pickup_method || '',
       status: (s['學期狀態'] === '在學' || s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
     }));
-    _allStudentsCache = list;
+    if (owner !== _pickupRosterOwner) throw new Error('登入狀態已變更，請重新開啟明細');
+    _allStudentsCache = {list, at: Date.now()};
+    return list;
   } catch (e) {
-    console.error('[students-list] failed:', e);
-    _allStudentsCache = [];
+    _allStudentsCache = null;
+    throw e;
   }
-  return _allStudentsCache;
 }
 async function _getSchoolStudents(schoolName, authPayload) {
-  if (_schoolStudentsCache[schoolName]) return _schoolStudentsCache[schoolName];
-  // 先試原本的 pickup-details API，失敗或空時 fallback 到 students/list 過濾
-  let list = [];
-  try {
-    const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
-      action: 'get_students_by_school', school_name: schoolName
-    }, authPayload));
-    list = (r && r.students) || [];
-  } catch (e) {}
-  // Fallback: 讀全部學生 → 前端過濾 (接送彈窗依賴 chinese_name + student_id)
-  // v2.17.5: 移除 has_pickup filter — 使用者自己選學生加入路線（不管 walk/bus/parent）
-  if (list.length === 0) {
+  // 唯一候選名冊來源：115-1 學期指派；讀取錯誤不可快取成空名單。
     const all = await _loadAllStudentsOnce(authPayload);
-    list = all.filter(s => {
+    const list = all.filter(s => {
       if (s.school_name !== schoolName) return false;
       if (s.status !== 'active') return false;
       return true;
@@ -10339,8 +10339,6 @@ async function _getSchoolStudents(schoolName, authPayload) {
       school_name: s.school_name,
       pickup_method: s.pickup_method
     }));
-  }
-  _schoolStudentsCache[schoolName] = list;
   return list;
 }
 
@@ -10348,7 +10346,9 @@ async function _getRouteDetails(scheduleRow, session, authPayload) {
   const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
     action: 'get_route_details', schedule_row: scheduleRow, session
   }, authPayload));
-  return r || { details: [], total_count: 0 };
+  if (!r || r.success !== true) throw new Error((r && r.error) || '接送明細讀取未成功');
+  if (!Array.isArray(r.details)) throw new Error('接送明細回應格式錯誤，不能視為零人');
+  return r;
 }
 
 async function _saveRouteDetails(scheduleRow, session, date, route, details, authPayload) {
@@ -10372,6 +10372,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   overlay.id = 'rd-modal-overlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = `
+    <style>#rd-modal-overlay button:disabled{opacity:.45;cursor:not-allowed!important}</style>
     <div style="background:#fff;border-radius:8px;width:680px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.3)">
       <div style="padding:16px 20px;background:#1B474D;color:#fff;display:flex;justify-content:space-between;align-items:center">
         <div>
@@ -10384,28 +10385,73 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
         <div style="text-align:center;color:#888;padding:40px">載入中…</div>
       </div>
       <div style="padding:12px 20px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <div id="rd-summary" style="font-size:0.95rem;color:#01696F;font-weight:600">合計 0 人</div>
+        <div id="rd-summary" style="font-size:0.95rem;color:#01696F;font-weight:600">人數尚未確認</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="rd-clear-all" style="padding:8px 14px;border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:4px;cursor:pointer;font-weight:600">🗑️ 清空整筆明細</button>
+          <button id="rd-clear-all" disabled title="舊版清空介面不支援 Gateway，暫停使用以保護資料" style="padding:8px 14px;border:1px solid #DC2626;background:#fff;color:#DC2626;border-radius:4px;font-weight:600">清空整筆明細（暫停）</button>
           <button id="rd-cancel" style="padding:8px 16px;border:1px solid #d4d1ca;background:#fff;border-radius:4px;cursor:pointer">取消</button>
-          <button id="rd-save" style="padding:8px 18px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">💾 儲存</button>
+          <button id="rd-save" disabled style="padding:8px 18px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600">💾 儲存</button>
         </div>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
+  const modalEpoch = _authEpoch;
+  const isCurrent = () => overlay.isConnected && modalEpoch === _authEpoch;
+  const el = id => overlay.querySelector('#' + id);
+  el('rd-close').onclick = close;
+  el('rd-cancel').onclick = close;
+  const sourceNote = document.createElement('div');
+  sourceNote.style.cssText = 'padding:10px 20px;background:#f5f6f6;font-size:12px;color:#555;line-height:1.6';
+  sourceNote.textContent = '已排學生：接送學員（排程列 ' + rowData.row_index + ' / ' + session +
+    '）；候選學生：115-1 學期班級指派，依學校及「在學」篩選。候選名冊不等於已加入本班次。';
+  el('rd-body').before(sourceNote);
+  function showLoadError(err, uncertainWrite = false) {
+    if (!isCurrent()) return;
+    el('rd-save').disabled = true;
+    el('rd-summary').textContent = '人數尚未確認';
+    const body = el('rd-body');
+    body.replaceChildren();
+    const message = document.createElement('p');
+    message.style.color = '#b91c1c';
+    message.textContent = (uncertainWrite ? '儲存結果待核對：' : '讀取未完成：') + err.message +
+      (uncertainWrite ? '。請勿重複送出，先重新取得資料。' : '。這不是零人，此次讀取沒有更動資料。');
+    const retry = document.createElement('button');
+    retry.id = 'rd-retry';
+    retry.textContent = '重新取得資料';
+    retry.style.cssText = 'padding:8px 14px;border:1px solid #01696f;color:#01696f;background:white;border-radius:4px;cursor:pointer';
+    retry.onclick = () => {
+      _allStudentsCache = null;
+      openRouteDetailsModal(rowData, session, authPayload, onSaved);
+    };
+    body.append(message, retry);
+  }
 
   // 讀現有明細 (加 try/catch 避免卡「載入中…」)
   let existing;
   try {
     existing = await _getRouteDetails(rowData.row_index, session, authPayload);
-    if (!existing || typeof existing !== 'object') existing = { details: [], all_row_numbers: [] };
+    if (!isCurrent()) return;
+    if (existing.details.some(d => !d || !d.school_name ||
+      (!Array.isArray(d.student_ids) && !Array.isArray(d.student_names)) ||
+      (d.student_ids !== undefined && !Array.isArray(d.student_ids)) ||
+      (d.student_names !== undefined && !Array.isArray(d.student_names)))) {
+      throw new Error('接送明細欄位格式不符');
+    }
+    const legacy = existing.details.filter(d =>
+      (d.student_names || []).length && (!(d.student_ids || []).length ||
+       d.student_ids.length !== d.student_names.length || d.student_ids.some(id => !id)));
+    if (legacy.length) {
+      el('rd-body').textContent = '已取得既有姓名明細，但缺少可核對的學生編號，目前僅供查閱，禁止直接覆寫。需先修正 Gateway 的明細讀寫格式。';
+      const names = document.createElement('p');
+      names.textContent = existing.details.map(d => d.school_name + '：' + (d.student_names || []).join('、')).join('；');
+      el('rd-body').append(names);
+      el('rd-summary').textContent = '舊明細唯讀，未更動資料';
+      return;
+    }
   } catch (err) {
-    document.getElementById('rd-body').innerHTML = '<div style="text-align:center;padding:30px;color:#DC2626">⚠️ 讀取失敗：' + err.message + '<br><br><button onclick="openRouteDetailsModal(' + JSON.stringify(rowData).replace(/"/g,'&quot;') + ',&quot;' + session + '&quot;,JSON.parse(\'' + JSON.stringify(authPayload).replace(/'/g,"\\'") + '\'))" style="padding:6px 14px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer">重試</button></div>';
+    showLoadError(err);
     return;
   }
-  // 記住所有屬於這個班次的 sheet row 號 (含重複)，供「清空整筆」使用
-  const allDetailRows = (existing.all_row_numbers || []).slice();
   // schoolMap: school_name -> { school_code, selected_ids:Set, students:[] }
   const schoolMap = new Map();
   (existing.details || []).forEach(d => {
@@ -10427,14 +10473,20 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   }
 
   function calcTotal() {
+    if (!isCurrent()) return 0;
     let n = 0;
     schoolMap.forEach(v => { n += v.selected_ids.size; });
-    document.getElementById('rd-summary').innerHTML = `合計 <span style="font-size:1.2rem">${n}</span> 人 · 上限 ${rowData.capacity || '-'} 人`;
+    el('rd-summary').innerHTML = `合計 <span style="font-size:1.2rem">${n}</span> 人 · 上限 ${rowData.capacity || '-'} 人`;
     return n;
   }
 
+  let renderVersion = 0;
   async function renderBody() {
-    const body = document.getElementById('rd-body');
+    const version = ++renderVersion;
+    if (!isCurrent()) return;
+    const body = el('rd-body');
+    el('rd-save').disabled = true;
+    try {
     if (schoolMap.size === 0) {
       body.innerHTML = `
         <div style="text-align:center;padding:30px;color:#888;background:#fafafa;border-radius:6px">
@@ -10446,6 +10498,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
       `;
       document.getElementById('rd-add-school-empty').onclick = openSchoolPicker;
       calcTotal();
+      el('rd-save').disabled = false;
       return;
     }
 
@@ -10453,6 +10506,14 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     let html = '';
     for (const [name, val] of schoolMap.entries()) {
       const students = await _getSchoolStudents(name, authPayload);
+      if (!isCurrent() || version !== renderVersion) return;
+      if (students.some(s => !s.student_id) ||
+          new Set(students.map(s => s.student_id)).size !== students.length) {
+        throw new Error('學期候選名冊含缺漏或重複學生編號，請先核對指派');
+      }
+      if ([...val.selected_ids].some(id => !students.some(s => s.student_id === id))) {
+        throw new Error('既有明細含不在目前學期候選名冊的學生，已阻止覆寫');
+      }
       val.students = students;
       const checkedAll = students.length > 0 && students.every(s => val.selected_ids.has(s.student_id));
       html += `
@@ -10481,6 +10542,10 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     body.innerHTML = html;
     bindBodyEvents();
     calcTotal();
+    el('rd-save').disabled = false;
+    } catch (err) {
+      if (version === renderVersion) showLoadError(err);
+    }
   }
 
   function bindBodyEvents() {
@@ -10579,42 +10644,13 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
 
   function close() {
     overlay.remove();
+    document.getElementById('rd-school-picker')?.remove();
   }
 
   document.getElementById('rd-close').onclick = close;
   document.getElementById('rd-cancel').onclick = close;
-  document.getElementById('rd-clear-all').onclick = async () => {
-    if (allDetailRows.length === 0 && schoolMap.size === 0) {
-      alert('本班次本來就沒明細');
-      return;
-    }
-    const c = await _confirmDialog({
-      title: '清空整筆明細',
-      message: '請確認要清空：' + rowData.date + ' · ' + rowData.route + ' · ' + sessionLabel + '\n\n這會從 Sheets 刪除這個班次的所有學校與學生明細 (' + allDetailRows.length + ' 筆)，無法復原。',
-      options: [
-        { label: '取消', value: '', color: '#6B7280' },
-        { label: '確定清空', value: 'clear', color: '#DC2626' }
-      ]
-    });
-    if (c !== 'clear') return;
-    document.getElementById('rd-clear-all').disabled = true;
-    document.getElementById('rd-clear-all').textContent = '清空中…';
-    // 從大到小刪，避免 row index 偏移
-    const sortedRows = allDetailRows.slice().sort((a,b) => b - a);
-    let okCount = 0, failCount = 0;
-    for (const rowNum of sortedRows) {
-      try {
-        const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
-          action: 'hard_delete', row_number: rowNum
-        }, authPayload));
-        if (r && r.success) okCount++; else failCount++;
-      } catch (e) { failCount++; }
-    }
-    alert('已刪除 ' + okCount + ' 筆' + (failCount ? ' (失敗 ' + failCount + ')' : ''));
-    if (typeof onSaved === 'function') onSaved(0);
-    close();
-  };
   document.getElementById('rd-save').onclick = async () => {
+    if (!isCurrent() || el('rd-save').disabled) return;
     // 整理 details
     const details = [];
     schoolMap.forEach(val => {
@@ -10633,21 +10669,23 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     if (rowData.capacity && total > parseInt(rowData.capacity)) {
       if (!confirm(`合計 ${total} 人 已超過上限 ${rowData.capacity},仍要儲存?`)) return;
     }
-    document.getElementById('rd-save').disabled = true;
-    document.getElementById('rd-save').textContent = '儲存中…';
+    el('rd-save').disabled = true;
+    el('rd-save').textContent = '儲存中…';
+    // Do not allow selections to change while this snapshot is being saved.
+    el('rd-body').querySelectorAll('button,input').forEach(control => control.disabled = true);
     try {
       const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload);
-      if (r && r.success) {
+      if (r && r.success && isCurrent()) {
         if (typeof onSaved === 'function') onSaved(total);
         close();
+      } else if (r && r.success) {
+        return;
       } else {
-        alert('儲存失敗: ' + (r && r.error || '未知錯誤'));
+        throw new Error((r && r.error) || '儲存回應不明');
       }
     } catch (e) {
-      alert('網路錯誤: ' + e.message);
-    } finally {
-      const sb = document.getElementById('rd-save');
-      if (sb) { sb.disabled = false; sb.textContent = '💾 儲存'; }
+      showLoadError(new Error('無法確認儲存結果（' + e.message + '）'), true);
+      if (isCurrent()) el('rd-save').textContent = '需重新讀取';
     }
   };
 

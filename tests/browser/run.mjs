@@ -10,7 +10,8 @@ const output = await fs.mkdtemp(path.join(os.tmpdir(), 'xg-browser-qa-')) + '/';
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 for (const files of [
   ['login-regression.js'],
-  ['pickup-setup.js', 'pickup-regression.js']
+  ['pickup-setup.js', 'pickup-regression.js'],
+  ['details-regression.js']
 ]) {
   const fixture = await fs.readFile(path.join(here, 'bootstrap.js'), 'utf8');
   const checks = (await Promise.all(files.map(f => fs.readFile(path.join(here, f), 'utf8')))).join('\n');
