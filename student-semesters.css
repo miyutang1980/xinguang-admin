@@ -1,0 +1,52 @@
+/* Extends the existing green admin design; scoped to the two student views. */
+.ss-host{min-width:0}
+.ss-banner{padding:16px 18px;background:var(--green-light);border-left:4px solid var(--green);border-radius:8px;margin-bottom:16px;color:var(--green-dark)}
+.ss-banner h3{font-size:.98rem;margin:0 0 5px}
+.ss-banner p{font-size:.84rem;line-height:1.7;margin:0}
+.ss-yellow{background:#FFFBEB;border-color:#D69E23;color:#78350F}
+.ss-tools{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin-bottom:14px}
+.ss-tools label,.ss-field{display:flex;flex-direction:column;gap:6px;font-size:.8rem;font-weight:600;min-width:0}
+.ss-tools input,.ss-tools select,.ss-field input,.ss-field select,.ss-field textarea{font:inherit;font-weight:400;padding:9px 10px;border:1px solid var(--border);border-radius:6px;background:#fff;color:var(--text);min-width:0;max-width:100%}
+.ss-tools input{min-width:215px}
+.ss-tools a{text-decoration:none}
+.ss-host .btn:disabled,.ss-dialog .btn:disabled{opacity:.48;cursor:not-allowed}
+.ss-host :focus-visible,.ss-dialog :focus-visible{outline:2px solid var(--green);outline-offset:3px}
+.ss-table-scroll{max-width:100%;overflow:auto}
+.ss-empty{padding:32px!important;text-align:center}
+#ssNotice{font-size:.82rem;line-height:1.7;color:var(--text-muted);margin-bottom:12px}
+.ss-error,.ss-form-error{color:#9B1C1C;font-size:.85rem;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+.ss-error{padding:16px;background:#FFF1F2;border:1px solid #FECDD3;border-radius:8px;margin:12px 0}
+.ss-dialog{margin:auto;padding:0;border:1px solid var(--border);border-radius:16px;max-width:840px;width:calc(100% - 32px);max-height:90vh;overflow-y:auto;color:var(--text);box-shadow:0 25px 60px rgba(0,0,0,.25)}
+.ss-dialog::backdrop{background:rgba(0,0,0,.5)}
+.ss-dialog .modal-header{gap:12px}
+.ss-dialog .modal-header h3{font-size:1rem}
+.ss-help{font-size:.84rem;line-height:1.75;color:var(--text-muted);margin-bottom:16px}
+.ss-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0}
+.ss-field{padding:10px;border-radius:7px;background:#F0FDF4}
+.ss-field-yellow{background:#FFFBEB}
+.ss-field input[readonly],.ss-field textarea[readonly]{background:#F1F5F9;color:#64748B;cursor:default}
+.ss-field small{font-size:.73rem;font-weight:400;line-height:1.5;color:#64748B}
+.ss-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
+.ss-check{display:flex;align-items:center;gap:8px;font-size:.84rem;line-height:1.6}
+.ss-check input{width:18px;height:18px;flex-shrink:0;accent-color:var(--green)}
+.ss-bulk-field>.ss-check{margin:0 0 5px}
+.ss-confirm{margin:16px 0}
+.ss-dialog .ss-diff{white-space:normal;min-width:150px;overflow-wrap:anywhere}
+/* Let the existing main column shrink instead of the wide data table stretching the page. */
+.main:has(.ss-host){min-width:0;max-width:calc(100% - var(--sidebar-w))}
+.main:has(.ss-host) .topbar-actions{display:none}
+body:has(.ss-host) #btnSaveSidebar,body:has(.ss-host) #saveBtnHint{display:none!important}
+body:has(.ss-host) .sidebar div:has(>#btnSheetsSync){display:none!important}
+html:has(.ss-host),body:has(.ss-host){overflow-x:clip}
+@media(max-width:768px){
+  body:has(.ss-host) .sidebar{max-width:100%;overflow:hidden}
+  body:has(.ss-host) .sidebar-logo{padding:10px 18px}
+  body:has(.ss-host) .sidebar-logo span{display:none}
+  body:has(.ss-host) .sidebar-menu{display:flex;flex:none;overflow-x:auto;overflow-y:hidden;padding:4px 0;max-width:100%}
+  body:has(.ss-host) .sidebar-item{flex:0 0 auto;white-space:nowrap;padding:10px 16px;border-left:0;border-bottom:3px solid transparent}
+  body:has(.ss-host) .sidebar-item.active{border-bottom-color:#7DFFB3}
+  body:has(.ss-host) .sidebar-bottom{padding:4px 18px 8px;text-align:right;border:0}
+  body:has(.ss-host) .sidebar-bottom button{width:auto}
+  .main:has(.ss-host) .topbar{padding:14px 18px}
+}
+@media(max-width:768px){.main:has(.ss-host){max-width:100%}.ss-host{padding:18px!important}.ss-tools{align-items:stretch}.ss-tools>label{flex:1 1 150px}.ss-tools input{min-width:0;width:100%}.ss-tools .btn{justify-content:center}.ss-dialog .modal-body{padding:16px}.ss-dialog .modal-header{padding:16px}.ss-fields{grid-template-columns:1fr}.ss-dialog{width:calc(100% - 20px)}}
