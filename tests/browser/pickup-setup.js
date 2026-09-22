@@ -7,6 +7,7 @@ await ssQAContext.route('**/*',async route=>{
  pickupCalls.push(action);
  if(action==='routes_get_staff') return route.fulfill({json:{success:true,staff:[{name:'測試老師'}]}});
  if(action==='routes_list') return route.fulfill({json:pickupMode==='list-error'?{success:false,error:'測試讀取失敗'}:{success:true,rows:pickupRows}});
+ if(action==='routes_get_details') return route.fulfill({json:{success:true,details:[],total_count:0}});
  if(action==='routes_append') {
   if(pickupMode==='hold-append') {pickupAppendPending=route;return;}
   const rows=JSON.parse(url.searchParams.get('rows_json'));

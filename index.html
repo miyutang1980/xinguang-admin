@@ -10272,6 +10272,16 @@ const VEHICLES_LIST = [
   '步行', 'A5', 'A6', 'B3', 'B4', 'C1', 'C4', '小巴6', '小巴8'
 ];
 
+// Plate replacement applies to 115-1 onward; historical route labels stay intact.
+function _routeNameForDate(name, date) {
+  if (String(date || '') < '2026-08-31') return name;
+  const replacements = {
+    '交通車B (RDW-1655)': '交通車B (RGE-2523)',
+    '交通車C (RFD-9763)': '交通車C (RGE-2522)'
+  };
+  return replacements[name] || name;
+}
+
 // 學生快取(避免重複打 API)
 const _schoolStudentsCache = {};
 let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 過濾
@@ -11196,6 +11206,7 @@ async function renderPickupSchedule(el) {
 
   async function appendRoutes(rows) {
     if (!isCurrent() || !loaded || appending) return;
+    rows = rows.map(row => ({...row, fields:{...row.fields, route:_routeNameForDate(row.fields.route, row.fields.date)}}));
     appending = true;
     setCreateEnabled(false);
     const statusEl = el.querySelector('#ps-status');
@@ -11237,8 +11248,8 @@ async function renderPickupSchedule(el) {
     const routes = [
       {name:'走路接送', cap:''},
       {name:'交通車A (RDW-5365)', cap:'6'},
-      {name:'交通車B (RDW-1655)', cap:'4'},
-      {name:'交通車C (RFD-9763)', cap:'4'},
+      {name:'交通車B (RGE-2523)', cap:'4'},
+      {name:'交通車C (RGE-2522)', cap:'4'},
       {name:'小巴', cap:'8'},
     ];
     const status = (dow === 0 || dow === 6) ? '休' : '上';
@@ -11356,7 +11367,8 @@ async function renderPickupSchedule(el) {
       const srcDate = new Date(srcR.date + 'T00:00:00');
       const offset = (dstD.getTime() - srcD.getTime());
       const targetDate = _localDateStr(new Date(srcDate.getTime() + offset));
-      const targetRow = allRows.find(x => x.date === targetDate && x.route === srcR.route);
+      const targetRoute = _routeNameForDate(srcR.route, targetDate);
+      const targetRow = allRows.find(x => x.date === targetDate && x.route === targetRoute);
       if (!targetRow) {
         errs.push('找不到目標列: ' + targetDate + ' / ' + srcR.route);
         continue;
@@ -11372,7 +11384,7 @@ async function renderPickupSchedule(el) {
           const src = await _getRouteDetails(srcR.row_index, session, auth_payload);
           const details = (src && src.details) || [];
           if (details.length === 0) continue; // 來源也是空、跳過
-          const sv = await _saveRouteDetails(targetRow.row_index, session, targetDate, srcR.route, details, auth_payload);
+          const sv = await _saveRouteDetails(targetRow.row_index, session, targetDate, targetRoute, details, auth_payload);
           if (sv && (sv.success || sv.ok)) {
             copied++;
           } else {
@@ -11409,16 +11421,17 @@ async function renderPickupSchedule(el) {
       // 跳過週末
       if (newD.getDay() === 0 || newD.getDay() === 6) return;
       const newDate = _localDateStr(newD);
-      if (allRows.some(x => x.date === newDate && x.route === r.route)) return;
+      const newRoute = _routeNameForDate(r.route, newDate);
+      if (allRows.some(x => x.date === newDate && x.route === newRoute)) return;
       newRows.push({row_index:99999, fields:{
-        date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:r.route, capacity:String(r.capacity||''),
+        date:newDate, weekday:wdMap[newD.getDay()], status:r.status||'上', route:newRoute, capacity:String(r.capacity||''),
         noon_vehicle:r.noon_vehicle||'', noon_driver:r.noon_driver||'', noon_driver2:r.noon_driver2||'',
         noon_school:r.noon_school||'', noon_count:String(r.noon_count||''), noon_time:r.noon_time||'',
         pm_vehicle:r.pm_vehicle||'', pm_driver:r.pm_driver||'', pm_driver2:r.pm_driver2||'',
         pm_school:r.pm_school||'', pm_count:String(r.pm_count||''), pm_time:r.pm_time||'',
         remark:r.remark||''
       }});
-      sourceMapping.push({ srcRowIndex: r.row_index, newDate, route: r.route });
+      sourceMapping.push({ srcRowIndex: r.row_index, newDate, route: newRoute });
     });
     if (newRows.length === 0) {
       alert('⚠️ 沒有可複製的路線列\n\n來源週: ' + srcMon + '\n目標週: ' + dstMon + '\nallRows.length: ' + allRows.length + '\n可能原因：來源週本身無路線、或目標週都已存在');
@@ -11486,6 +11499,17 @@ async function renderPickupSchedule(el) {
     const dstMon = prompt('目標週次(週一日期, YYYY-MM-DD)?', '');
     if (!dstMon || !/^\d{4}-\d{2}-\d{2}$/.test(dstMon)) return;
     if (srcMon === dstMon) { alert('來源與目標同週'); return; }
+
+    // Legacy server copy uses exact route names. Use the normalized client copy
+    // (skip existing rows) when an old-plate source is copied into the new semester.
+    const sourceEnd = new Date(srcMon + 'T00:00:00'); sourceEnd.setDate(sourceEnd.getDate() + 4);
+    const needsPlateUpdate = allRows.some(r => r.date >= srcMon && r.date <= _localDateStr(sourceEnd) &&
+      _routeNameForDate(r.route, dstMon) !== r.route);
+    if (needsPlateUpdate) {
+      if (!confirm('來源週含歷史車牌。將以本學期新車牌複製到 ' + dstMon + '，只補缺少的路線，不覆蓋目標週已有資料。是否繼續？')) return;
+      await _doCopyWeek(srcMon, dstMon);
+      return;
+    }
 
     // 檢查目標週是否已有資料
     const dstD = new Date(dstMon + 'T00:00:00');
