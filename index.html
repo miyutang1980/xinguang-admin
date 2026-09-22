@@ -10162,17 +10162,13 @@ async function _pickupCallGateway(originalUrl, payload) {
     return { success: false, error: 'endpoint not yet migrated to Gateway: ' + originalUrl };
   }
 
-  // ⚠️ Content-Type 必須是 text/plain 避免 CORS preflight (Apps Script 不回 CORS headers)
-  var res = await fetch(GW_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(gwBody),
-    redirect: 'follow'
-  });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  var txt = await res.text();
-  if (!txt || !txt.trim()) throw new Error('Gateway empty body');
-  return JSON.parse(txt);
+  // v2.20.2: Workspace 環境會阻擋 Apps Script POST/CORS。
+  // 接送模組直接使用與學生新制相同的 GET-as-POST，不再依賴全域 fetch 攔截。
+  var gwAction = gwBody._action;
+  delete gwBody._action;
+  var result = await gwCallJson(gwAction, gwBody);
+  if (!result || typeof result !== 'object') throw new Error('Gateway 回應格式錯誤');
+  return result;
 }
 
 // ========================================================================
@@ -10210,31 +10206,23 @@ let _allStudentsCache = null;  // 一次讀全部學生，前端依 school_name 
 async function _loadAllStudentsOnce(authPayload) {
   if (_allStudentsCache) return _allStudentsCache;
   try {
-    // v2.17: 改走 Gateway students_list (原 N8N webhook 已棄用)
-    // ⚠️ Content-Type 必須是 text/plain 避免 CORS preflight (Apps Script 不回 CORS headers)
+    // v2.20.2: 接送名單以目前學期指派為準，不再讀舊「在校學生」API。
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
     var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: {'Content-Type': 'text/plain;charset=utf-8'},
-      body: JSON.stringify({
-        _action: 'students_list',
-        adminUser: u.username || 'admin',
-        adminPass: pwd
-      }),
-      redirect: 'follow'
+    const r = await gwCallJson('semester_assignments_list', {
+      adminUser: u.username || 'admin',
+      adminPass: pwd,
+      semester: '115-1'
     });
-    const r = await res.json();
-    // Gateway 返 list:[{studentNo,name,englishName,cls,school_name,...}]
-    // v2.17.5: 补齊 english_name + class_code, 接送彈窗顯示用
+    if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
     const list = (r.list || r.rows || []).map(s => ({
-      student_id: s.studentNo || s.student_id || '',
-      chinese_name: s.name || s.chinese_name || '',
-      english_name: s.englishName || s.english_name || '',
-      class_code: s.cls || s.class_code || '',
-      school_name: s.school_name || '',
-      pickup_method: s.pickupMethod || s.pickup_method || '',
-      status: (s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
+      student_id: s['學生編號'] || s.studentNo || s.student_id || '',
+      chinese_name: s['學生姓名'] || s.name || s.chinese_name || '',
+      english_name: s['英文名'] || s.englishName || s.english_name || '',
+      class_code: s['小學班級'] || s.gradeClass || s.class_code || '',
+      school_name: s['學校'] || s.school_name || '',
+      pickup_method: s['交通車'] || s.pickupMethod || s.pickup_method || '',
+      status: (s['學期狀態'] === '在學' || s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
     }));
     _allStudentsCache = list;
   } catch (e) {
@@ -10666,18 +10654,11 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
   try {
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
     var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
-    const res = await fetch(GW_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        _action: 'routes_get_details_batch',
-        adminUser: u.username || 'admin',
-        adminPass: pwd,
-        schedule_rows: ridsToFetch
-      }),
-      redirect: 'follow'
+    const r = await gwCallJson('routes_get_details_batch', {
+      adminUser: u.username || 'admin',
+      adminPass: pwd,
+      schedule_rows: ridsToFetch
     });
-    const r = await res.json();
     const details = (r && r.details) || {};
     // details = { "<rid>:noon": [{school_name, student_names:[]}], "<rid>:pm": [...] }
     ridsToFetch.forEach(rid => {
@@ -10810,9 +10791,9 @@ async function renderPickupSchedule(el) {
       statusEl.innerHTML = '<span style="color:#dc2626">⚠️ 載入失敗：' + (e.message || e) + '</span>';
       document.getElementById('ps-table-wrap').innerHTML =
         '<div style="padding:40px;text-align:center">' +
-        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ N8N 接送排程 workflow 異常</div>' +
+        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ 接送排程 Gateway 載入失敗</div>' +
         '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + (e.message||e) + '</div>' +
-        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">Endpoint: ' + ROUTE_API + '</div>' +
+        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：Apps Script Gateway</div>' +
         '<button onclick="renderPickupSchedule(document.getElementById(\'content\'))" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
         '</div>';
     }
@@ -11644,11 +11625,8 @@ async function _doQuickTransfer(rowIndex, session) {
     // 1. 寫接送排程 Sheets：該 row 該 session 的 driver 改為新老師
     var ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
     var field = (session === 'noon' ? 'noon_driver' : 'pm_driver');
-    var saveResp = await fetch(ROUTE_API, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(Object.assign({action:'save', row_index:rowIndex, field:field, value:teacher}, auth_payload))
-    });
-    var saveJson = await saveResp.json();
+    var saveJson = await _pickupCall(ROUTE_API,
+      Object.assign({action:'save', row_index:rowIndex, field:field, value:teacher}, auth_payload));
     if (!saveJson.success) throw new Error(saveJson.error || '寫入失敗');
 
     // 2. 記錄到 transfer events (供老師月報統計用)
