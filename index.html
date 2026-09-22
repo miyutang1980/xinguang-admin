@@ -433,7 +433,20 @@ var _loggedIn = false;
 var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
 var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
 
+// v2.20.4: A remembered login, Enter and button clicks share one attempt.
+var _loginFlight = null;
+var _authEpoch = 0;
+var _sessionCheckDone = false;
 async function doLogin() {
+  if (_loggedIn) return;
+  if (_loginFlight) return _loginFlight.promise;
+  var attempt = { epoch: _authEpoch, promise: null };
+  _loginFlight = attempt;
+  attempt.promise = _performLogin(attempt);
+  try { return await attempt.promise; }
+  finally { if (_loginFlight === attempt) _loginFlight = null; }
+}
+async function _performLogin(attempt) {
   const u = document.getElementById('loginUser').value.trim();
   const p = document.getElementById('loginPass').value;
   const errEl = document.getElementById('loginErr');
@@ -456,6 +469,7 @@ async function doLogin() {
       body: JSON.stringify({ _action: 'auth_login', username: u, password: p })
     });
     let gwResult = await gwResp.json();
+    if (attempt.epoch !== _authEpoch) return;
     if (Array.isArray(gwResult)) gwResult = gwResult[0] || {};
     if (gwResult.success) {
       _loggedIn = true;
@@ -509,6 +523,7 @@ async function doLogin() {
       }
     }
   } catch (err) {
+    if (attempt.epoch !== _authEpoch) return;
     console.warn('Gateway 驗證失敗 · 轉 n8n fallback:', err);
   }
   
@@ -526,6 +541,7 @@ async function doLogin() {
       });
       
       let result = await response.json();
+      if (attempt.epoch !== _authEpoch) return;
       // n8n 回傳可能是陣列，取第一個
       if (Array.isArray(result)) result = result[0] || {};
       
@@ -579,6 +595,7 @@ async function doLogin() {
         return;
       }
     } catch (err) {
+      if (attempt.epoch !== _authEpoch) return;
       console.warn('雲端驗證失敗，改用本地帳號：', err);
       // 繼續往下走 fallback 到本地驗證
     }
@@ -653,6 +670,13 @@ function applyPermissions() {
   }
 }
 function doLogout() {
+  _authEpoch++;
+  _sectionVersion++;
+  _loginFlight = null;
+  _appInitialized = false;
+  clearTimeout(_appSyncTimer);
+  clearInterval(_appClockTimer);
+  _appClockTimer = null;
   if (window.XGStudents) window.XGStudents.reset();
   _loggedIn = false;
   _currentUser = null;
@@ -674,6 +698,8 @@ function doLogout() {
   _DB = emptyData();
 }
 function checkSession() {
+  if (_sessionCheckDone || _loggedIn || _loginFlight) return;
+  _sessionCheckDone = true;
   // 「記住我」：頁面載入時檢查是否有有效 token、有則自動填入並跳過登入
   try {
     var raw = localStorage.getItem('xg_remember');
@@ -691,29 +717,38 @@ function checkSession() {
     if (passInput) passInput.value = saved.password || '';
     if (cbInput) cbInput.checked = true;
     // 延遲一下讓頁面載完、AUTH_API_URL 設好後再跳登入
+    var sessionEpoch = _authEpoch;
     setTimeout(function(){
-      if (typeof doLogin === 'function') doLogin();
+      if (sessionEpoch === _authEpoch && !_loggedIn && !_loginFlight && typeof doLogin === 'function') doLogin();
     }, 200);
   } catch(e){
     console.warn('auto-login 失敗', e);
   }
 }
-// 頁面載入後跰 checkSession 動作自動登入
+// Only one startup trigger; wait until all inline modules have loaded.
 document.addEventListener('DOMContentLoaded', function(){
   setTimeout(checkSession, 100);
 });
 
 // ── 初始化 ────────────────────────────────────────────────
 let currentSection = 'dashboard';
+var _sectionVersion = 0;
+var _appInitialized = false;
+var _appClockTimer = null;
+var _appSyncTimer = null;
 function initApp() {
-  setInterval(() => {
+  if (_appInitialized) return;
+  _appInitialized = true;
+  _appClockTimer = setInterval(() => {
     document.getElementById('topbarTime').textContent = new Date().toLocaleString('zh-TW');
   }, 1000);
   updateBadges(loadData());
   switchSection('dashboard');
   // 登入後自動從 Google Sheets 同步一次（不需手動點按鈕）
   // 延遲 800ms 讓 syncFromSheets 定義完成、畫面也適合顯示 Toast
-  setTimeout(function(){
+  var syncOwner = _currentUser;
+  _appSyncTimer = setTimeout(function(){
+    if (!_loggedIn || _currentUser !== syncOwner) return;
     if (typeof window.syncFromSheets === 'function') {
       try {
         if (typeof showToast === 'function') showToast('⏳ 正在從 Google Sheets 同步資料…');
@@ -755,6 +790,8 @@ function switchSection(sec) {
       return;
     }
   }
+  var sectionVersion = ++_sectionVersion;
+  currentSection = sec;
   // 帳號管理頁面
   if (sec === 'accounts') {
     document.getElementById('pageTitle').textContent = '帳號管理';
@@ -763,6 +800,7 @@ function switchSection(sec) {
     if (navAcc) navAcc.classList.add('active');
     // 延遲渲染，確保帳號管理模組已載入
     setTimeout(function() {
+      if (sectionVersion !== _sectionVersion) return;
       if (typeof renderAccountsPage === 'function') {
         document.getElementById('mainContent').innerHTML = renderAccountsPage();
       } else {
@@ -772,7 +810,6 @@ function switchSection(sec) {
     return;
   }
 
-  currentSection = sec;
   document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
   const navEl = document.getElementById('nav-'+sec);
   if(navEl) navEl.classList.add('active');
@@ -830,10 +867,12 @@ function switchSection(sec) {
  * 用輪詢方式等最多 3 秒，每 100ms retry 一次。
  */
 function _lazyRender(container, fnName, modName) {
+  var sectionVersion = _sectionVersion;
   container.innerHTML = '<div style="padding:60px;text-align:center;color:#9CA3AF"><div style="font-size:2rem">⏳</div><div style="margin-top:8px">載入' + modName + '中…</div></div>';
   var tries = 0;
   var maxTries = 30; // 30 × 100ms = 3 秒
   var timer = setInterval(function(){
+    if (sectionVersion !== _sectionVersion) { clearInterval(timer); return; }
     tries++;
     if (typeof window[fnName] === 'function') {
       clearInterval(timer);
@@ -1231,12 +1270,17 @@ window.SEMESTER_CLASSES = {
 };
 
 function renderClasses(el){
+  if (currentSection !== 'classes') return;
+  var sectionVersion = _sectionVersion;
+  var owner = _currentUser;
+  function isCurrent() { return sectionVersion === _sectionVersion && owner === _currentUser && currentSection === 'classes'; }
   // v2.18.42: 從 Gateway 拿 Sheet 資料 · 儲存結果到 window 快取
   if (!window._classesLoaded) {
     el.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF">🔄 讀取班別設定中...</div>';
     fetch(GW_URL + '?action=classes')
       .then(r => r.json())
       .then(r => {
+        if (!isCurrent()) return;
         if (r.success && r.data) {
           window.SEMESTER_CLASSES = r.data;
           window._classesUpdatedAt = r.updatedAt || '';
@@ -1246,7 +1290,10 @@ function renderClasses(el){
         renderClasses(el);
       })
       .catch(e => {
-        el.innerHTML = '<div style="padding:40px;text-align:center;color:#DC2626">❌ 讀取班別設定失敗: ' + e.message + '</div>';
+        if (!isCurrent()) return;
+        el.innerHTML = '<div style="padding:40px;text-align:center;color:#DC2626">讀取班別設定失敗：' +
+          escapeHtml(e.name === 'AbortError' ? '連線逾時，請重新讀取。' : e.message) +
+          '<br><button onclick="switchSection(\'classes\')" style="margin-top:16px;padding:8px 16px">重新讀取</button></div>';
       });
     return;
   }
@@ -4254,7 +4301,7 @@ const GW_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9d
 // v2.18.47: Workspace 擋 POST · 使用 GET-as-POST 包裝
 // 用法: gwCall('students_list', { adminUser: 'x', adminPass: 'y' }) → 返 fetch promise
 // 複雜物件 (data: {...} 或 details: [...]) 請加 _json 後綴: gwCall('classes_save', { data_json: JSON.stringify(obj), operator: 'me' })
-function gwCall(action, params) {
+function gwCall(action, params, options) {
   params = params || {};
   var qs = new URLSearchParams();
   qs.append('_action', action);
@@ -4268,10 +4315,21 @@ function gwCall(action, params) {
       qs.append(k, String(v));
     }
   });
-  return fetch(GW_URL + '?' + qs.toString());
+  return fetch(GW_URL + '?' + qs.toString(), options);
 }
 // 便利函數: 直接拿 JSON
-function gwCallJson(action, params) { return gwCall(action, params).then(function(r){ return r.json(); }); }
+async function gwCallJson(action, params) {
+  if (String(action).indexOf('routes_') !== 0) return gwCall(action, params).then(function(r){ return r.json(); });
+  // Route writes use GET transport too: never cache/replay them as safe GETs.
+  // Fresh reads are required to verify an append and to make refresh meaningful.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const response = await gwCall(action, params, { cache:'no-store', signal:controller.signal });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    return await response.json();
+  } finally { clearTimeout(timer); }
+}
 
 // v2.18.47: 全域 fetch 拦截 · fetch(GW_URL, {method:'POST', body:JSON.stringify({_action:xxx, ...})}) 自動轉 GET
 // 這樣所有現有代碼不用動手改, 都會走 GET-as-POST
@@ -5359,8 +5417,7 @@ function _doDeleteSelected(key) {
   }
 })();
 
-// ── 初始化 ────────────────────────────────────────────────
-checkSession();
+// Session restoration is scheduled once by DOMContentLoaded above.
 </script>
 <script>
 /**
@@ -10749,6 +10806,9 @@ function _rehydrateRouteCells(rowsToHydrate) {
 
 // ─── 全新版 renderPickupSchedule:讀路線排程_2026Q2 ───
 async function renderPickupSchedule(el) {
+  if (!el || currentSection !== 'pickup') return;
+  const sectionVersion = _sectionVersion, owner = _currentUser;
+  const isCurrent = () => sectionVersion === _sectionVersion && owner === _currentUser && currentSection === 'pickup';
   // v2.17: ROUTE_API 仍指向舊位址, _pickupCall 會自動轉到 Gateway
   const ROUTE_API = 'https://miyutang.app.n8n.cloud/webhook/admin/route-schedule';
   const auth = JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -10756,7 +10816,7 @@ async function renderPickupSchedule(el) {
 
   el.innerHTML = `
     <div style="padding:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div>
           <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程</h2>
           <div style="color:#7a7974;font-size:0.85rem;margin-top:4px">
@@ -10779,6 +10839,13 @@ async function renderPickupSchedule(el) {
 
   let staffList = [];
   let allRows = [];
+  let loaded = false, appending = false, loading = false;
+  function setCreateEnabled(enabled) {
+    ['ps-add-day','ps-add-route'].forEach(id => {
+      const button = el.querySelector('#' + id);
+      if (button) button.disabled = !enabled;
+    });
+  }
 
   async function api(payload) {
     // v2.17: 走 Gateway (透過 _pickupCall 自動轉接)
@@ -10786,6 +10853,10 @@ async function renderPickupSchedule(el) {
   }
 
   async function loadAll() {
+    if (!isCurrent() || loading) return false;
+    loading = true;
+    loaded = false;
+    setCreateEnabled(false);
     const statusEl = document.getElementById('ps-status');
     statusEl.textContent = '載入中…';
     // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
@@ -10795,22 +10866,32 @@ async function renderPickupSchedule(el) {
         api({action: 'get_staff'}),
         api({action: 'list'})
       ]);
+      if (!isCurrent()) return false;
+      if (!staffR || !staffR.success || !Array.isArray(staffR.staff)) throw new Error((staffR && staffR.error) || '員工清單回應不完整');
+      if (!listR || !listR.success || !Array.isArray(listR.rows)) throw new Error((listR && listR.error) || '排程清單回應不完整');
       staffList = (staffR.staff || []).map(s => s.name);
       allRows = listR.rows || [];
       populateWeekFilter();
       renderTable();
       statusEl.innerHTML =
         `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+      loaded = true;
+      return true;
     } catch(e) {
+      if (!isCurrent()) return false;
       console.error('[接送排程] 載入失敗:', e);
-      statusEl.innerHTML = '<span style="color:#dc2626">⚠️ 載入失敗：' + (e.message || e) + '</span>';
+      statusEl.textContent = '載入失敗：' + (e.name === 'AbortError' ? '連線逾時，請重新載入。' : e.message || e);
       document.getElementById('ps-table-wrap').innerHTML =
         '<div style="padding:40px;text-align:center">' +
         '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ 接送排程 Gateway 載入失敗</div>' +
-        '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + (e.message||e) + '</div>' +
+        '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + escapeHtml(e.message||e) + '</div>' +
         '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：Apps Script Gateway</div>' +
-        '<button onclick="renderPickupSchedule(document.getElementById(\'content\'))" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
+        '<button onclick="switchSection(\'pickup\')" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
         '</div>';
+      return false;
+    } finally {
+      loading = false;
+      if (isCurrent()) setCreateEnabled(loaded && !appending);
     }
   }
 
@@ -10865,6 +10946,7 @@ async function renderPickupSchedule(el) {
   // 4. innerHTML 一次塞 + table-layout:fixed + contain:content 給 tbody
   // 5. 名字 hydrate 改 requestIdleCallback + 並行批次
   function renderTable() {
+    if (!isCurrent()) return;
     const t0 = performance.now();
     const week = document.getElementById('ps-filter-week').value;
     const filtered = (!week ? allRows : allRows.filter(r => {
@@ -11112,8 +11194,34 @@ async function renderPickupSchedule(el) {
 
   document.getElementById('ps-refresh').onclick = loadAll;
 
+  async function appendRoutes(rows) {
+    if (!isCurrent() || !loaded || appending) return;
+    appending = true;
+    setCreateEnabled(false);
+    const statusEl = el.querySelector('#ps-status');
+    statusEl.textContent = '新增中…請勿重複送出';
+    try {
+      const r = await api({action:'append', rows});
+      if (!isCurrent()) return;
+      if (!r || !r.success) throw new Error((r && r.error) || '未取得新增確認');
+      if (!await loadAll()) return;
+      if (!rows.every(row => allRows.some(saved => saved.date === row.fields.date && saved.route === row.fields.route))) {
+        throw new Error('新增後讀回未找到全部路線');
+      }
+      showToast('新增完成，已讀回確認 ' + rows.length + ' 條路線');
+    } catch(e) {
+      if (!isCurrent()) return;
+      loaded = false;
+      statusEl.textContent = '無法確認新增結果：' + (e.name === 'AbortError' ? '連線逾時' : e.message) + '。請先按「重新載入」核對，勿直接重複新增。';
+    } finally {
+      appending = false;
+      if (isCurrent()) setCreateEnabled(loaded);
+    }
+  }
+
   // ─── A1: 新增日期(一鍵加 5 條路線) ───
   document.getElementById('ps-add-day').onclick = async () => {
+    if (!loaded || appending) return;
     const dateStr = prompt('新增日期 (YYYY-MM-DD)\n依該日週幾自動套用週一~五班表:', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
     if (allRows.some(r => r.date === dateStr)) {
@@ -11143,29 +11251,30 @@ async function renderPickupSchedule(el) {
         remark:''
       }
     }));
-    document.getElementById('ps-status').textContent = '新增中…';
-    const r = await api({action:'append', rows: newRows});
-    if (r && r.success) { showToast('✅ 新增 ' + dateStr + ' × 5 條路線'); await loadAll(); }
-    else alert('新增失敗: ' + ((r&&r.error)||'未知錯誤'));
+    await appendRoutes(newRows);
   };
 
   // ─── A2: 新增單一路線 ───
   document.getElementById('ps-add-route').onclick = async () => {
+    if (!loaded || appending) return;
     const dateStr = prompt('日期 (YYYY-MM-DD)?', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
     const routeName = prompt('路線名稱?例: 臨時交通車 / 越野車 / B車認加', '');
     if (!routeName || !routeName.trim()) return;
     const cap = prompt('載客上限 (可留空)', '');
+    if (cap === null) return;
+    if (allRows.some(r => r.date === dateStr && r.route === routeName.trim())) {
+      alert('該日期與路線已存在，請直接編輯。');
+      return;
+    }
     const d = new Date(dateStr + 'T00:00:00');
     const wdMap = ['週日','週一','週二','週三','週四','週五','週六'];
-    const r = await api({action:'append', rows:[{
+    await appendRoutes([{
       row_index:99999,
       fields:{date:dateStr, weekday:wdMap[d.getDay()], status:'上', route:routeName.trim(), capacity:cap.trim(),
         noon_vehicle:'', noon_driver:'', noon_driver2:'', noon_school:'', noon_count:'', noon_time:'',
         pm_vehicle:'', pm_driver:'', pm_driver2:'', pm_school:'', pm_count:'', pm_time:'', remark:''}
-    }]});
-    if (r && r.success) { showToast('✅ 新增路線完成'); await loadAll(); }
-    else alert('新增失敗: ' + ((r&&r.error)||'未知錯誤'));
+    }]);
   };
 
   // ─── A3+: 一鍵複製到下一週（從現在選的週次 → +7 天）
@@ -11440,7 +11549,7 @@ async function renderPickupSchedule(el) {
   };
 
   await loadAll();
-  _addCopyNextBtn();
+  if (isCurrent()) _addCopyNextBtn();
 }
 
 // ========================================================================
