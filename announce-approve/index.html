@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>公告審核｜太平新光分校</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f4f7f5;--paper:#fff;--text:#19372d;--muted:#52645e;--line:#d6e3dc;--brand:#0f4a3e}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Noto Sans TC",sans-serif;line-height:1.7}
+    main{max-width:620px;margin:8vh auto;padding:24px}header{display:flex;gap:12px;align-items:center;margin-bottom:32px;font-size:14px;font-weight:650}
+    svg{width:32px;height:32px}article{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:32px}
+    .eyebrow{font-size:13px;letter-spacing:.1em;color:var(--muted)}h1{font-size:30px;line-height:1.3;margin:10px 0 20px}p{margin:12px 0}#status{color:var(--muted)}
+    a{display:block;background:var(--brand);color:#fff;text-align:center;text-decoration:none;padding:14px 18px;border-radius:10px;font-weight:650;margin-top:28px;min-height:48px}
+    a:focus-visible{outline:3px solid #b78a20;outline-offset:4px}small{display:block;color:var(--muted);margin-top:20px;font-size:13px}footer{font-size:13px;color:var(--muted);padding:20px 4px}
+    @media(max-width:480px){main{margin:4vh auto;padding:20px}article{padding:24px}h1{font-size:26px}}
+    @media(prefers-color-scheme:dark){:root{--bg:#10221c;--paper:#182f26;--text:#ebf3ee;--muted:#b4c8bc;--line:#3b5145;--brand:#266750}}
+  </style>
+</head>
+<body>
+<main>
+  <header><svg viewBox="0 0 32 32" role="img" aria-label="太平新光"><path d="M3 7h26L16 28 3 7Zm7 5h12l-6 10-6-10Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>弋果美語 · 太平新光分校</header>
+  <article>
+    <div class="eyebrow">STAFF NOTICE REVIEW</div>
+    <h1>公告審核</h1>
+    <p id="status" role="status">請登入校務後台，再選擇要審核的公告。</p>
+    <p>主管登入後可核對公告全文，再確認同意或拒絕。開啟此連結不會自動發布公告。</p>
+    <a id="continue" href="https://admin.taipingxinguang.org/?section=announce">登入後台檢視公告</a>
+    <small>僅供具有公告權限的校內人員使用。請勿將審核連結轉傳給家長。</small>
+    <noscript><p>瀏覽器未啟用 JavaScript。請登入後台，在公告列表選擇對應公告。</p></noscript>
+  </article>
+  <footer>校務通知與審核 · 如無法登入，請聯絡行政管理員。</footer>
+</main>
+<script>
+  (function () {
+    const query = new URLSearchParams(location.search);
+    const rows = query.getAll('row'), actions = query.getAll('action');
+    const row = rows[0] || '';
+    const valid = rows.length === 1 && /^[1-9]\d*$/.test(row) &&
+      Number.isSafeInteger(Number(row)) && Number(row) >= 2 &&
+      actions.length <= 1 && (!actions.length || ['approve','reject'].includes(actions[0]));
+    if (valid) {
+      const destination = new URL('https://admin.taipingxinguang.org/');
+      destination.searchParams.set('section','announce');
+      destination.searchParams.set('review_row',row);
+      destination.searchParams.set('review_action',actions[0] === 'reject' ? 'reject' : 'approve');
+      document.getElementById('continue').href = destination.href;
+      document.getElementById('status').textContent = '已帶入公告紀錄 ' + row + '。登入後將開啟這份公告全文。';
+    } else if (rows.length || actions.length) {
+      document.getElementById('status').textContent = '公告連結格式不完整。請登入後從公告列表重新選擇，或開啟原始通知連結。';
+    }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+#annMobileMenu{display:none}
+#annReview button:focus-visible,#annMobileMenu:focus-visible{outline:3px solid #ad790c;outline-offset:3px}
+@media(max-width:768px){
+  .announcement-mode #appScreen{max-width:100%;overflow-wrap:anywhere}
+  .announcement-mode .sidebar-logo{padding:12px 16px}
+  .announcement-mode #annMobileMenu{display:inline-flex;align-self:flex-start;margin:12px 16px 0;min-height:44px}
+  .announcement-mode:not(.ann-menu-expanded) .sidebar-menu,
+  .announcement-mode:not(.ann-menu-expanded) .sidebar-bottom{display:none}
+  .announcement-mode .topbar{position:relative;padding:16px;flex-wrap:wrap;gap:12px}
+  .announcement-mode .topbar-actions{flex-wrap:wrap;min-width:0}
+  .announcement-mode .topbar-actions #topbarTime{width:100%}
+  .announcement-mode .content{padding:16px;min-width:0}
+  .announcement-mode #annReview .card{padding:20px!important}
+}

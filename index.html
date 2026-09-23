@@ -131,6 +131,7 @@ body:not(.is-admin) [onclick*="clearAll"],
 body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 </style>
 <link rel="stylesheet" href="operations-current.css?v=20260923">
+<link rel="stylesheet" href="announcement-review.css?v=20260923-1">
 </head>
 <body>
 
@@ -778,7 +779,11 @@ function initApp() {
     document.getElementById('topbarTime').textContent = new Date().toLocaleString('zh-TW');
   }, 1000);
   updateBadges(loadData());
-  switchSection('dashboard');
+  const announcementLink = new URLSearchParams(location.search).get('section') === 'announce';
+  switchSection(announcementLink && effectivePermissions(_currentUser).includes('announce') ? 'announce' : 'dashboard');
+  if (announcementLink && !effectivePermissions(_currentUser).includes('announce')) {
+    showToast('此帳號沒有公告權限，請使用有公告權限的主管帳號登入。');
+  }
   // 登入後自動從 Google Sheets 同步一次（不需手動點按鈕）
   // 延遲 800ms 讓 syncFromSheets 定義完成、畫面也適合顯示 Toast
   var syncOwner = _currentUser;
@@ -827,6 +832,7 @@ function switchSection(sec) {
   }
   var sectionVersion = ++_sectionVersion;
   currentSection = sec;
+  document.body.classList.toggle('announcement-mode', sec === 'announce');
   // 帳號管理頁面
   if (sec === 'accounts') {
     document.getElementById('pageTitle').textContent = '帳號管理';
@@ -849,7 +855,7 @@ function switchSection(sec) {
   const navEl = document.getElementById('nav-'+sec);
   if(navEl) navEl.classList.add('active');
   const titles = {
-    dashboard:'儀表板', inquiry:'問課諮詢', booking:'預約紀錄',
+    dashboard:'儀表板', announce:'公告審核與管理', inquiry:'問課諮詢', booking:'預約紀錄',
     camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
     trial:'🗓️ 體驗課排班', trialBookings:'📅 體驗預約一覽', documents:'📎 說明會簡報',
     students:'學生管理 · 主檔',
@@ -6680,8 +6686,7 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 </script>
-</body> in xinguang-admin/index.html
-     ══════════════════════════════════════════════════════════════════ -->
+<!-- 操作說明書樣式與視窗 -->
 
 <style>
 /* ── Manual Nav Button ── */
@@ -12103,9 +12108,11 @@ async function renderAnnounce(el) {
       <button class="${_annTab==='rejected'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('rejected')">❌ 已拒絕</button>
       <button class="${_annTab==='withdrawn'?'btn btn-green':'btn btn-outline'}" style="flex:1;min-width:120px" onclick="_annSwitchTab('withdrawn')">↩ 已撤回</button>
     </div>
+    <div id="annReview"></div>
     <div id="annBody"></div>
   `;
   el.innerHTML = tabBar;
+  if (window.AnnReview) window.AnnReview.mount();
   _annRenderBody();
 }
 
@@ -12168,8 +12175,8 @@ function _annRenderCard(a) {
   if (isPending) {
     actions = `
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn btn-green" onclick="_annApproveCard(${a.row})" style="flex:1">✓ 同意發布</button>
-        <button class="btn btn-outline" onclick="_annRejectCard(${a.row})" style="flex:1;color:#DC2626;border-color:#DC2626">✕ 拒絕</button>
+        <button class="btn btn-green" onclick="_annApproveCard(${a.row})" style="flex:1">檢視全文與審核</button>
+        <button class="btn btn-outline" onclick="_annRejectCard(${a.row})" style="flex:1;color:#DC2626;border-color:#DC2626">檢視後拒絕</button>
       </div>`;
   } else if (isPublished && a.pdfUrl) {
     actions = `
@@ -12328,16 +12335,8 @@ async function _annSubmit() {
 }
 
 async function _annApproveCard(row) {
-  const approver = prompt('請輸入您的姓名 (作為審核記錄):');
-  if (!approver) return;
-  if (!confirm('確定同意發布這份公告? 發布後會自動生成 PDF 並推送到全體員工群。')) return;
-  try {
-    const res = await gwCall('announce_approve', { row: row, approver: approver });
-    const r = await res.json();
-    if (!r.success) { alert('❌ ' + r.error); return; }
-    showToast('✅ 公告已發布 · ' + r.no);
-    _annRenderBody();
-  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+  if (window.AnnReview) return window.AnnReview.open(row, 'approve');
+  alert('審核模組尚未載入，請重新整理後再試。');
 }
 
 async function _annRegenPdf(row) {
@@ -12403,17 +12402,8 @@ async function _annWithdraw(row) {
 }
 
 async function _annRejectCard(row) {
-  const approver = prompt('請輸入您的姓名:');
-  if (!approver) return;
-  const reason = prompt('拒絕原因:');
-  if (!reason) return;
-  try {
-    const res = await gwCall('announce_reject', { row: row, approver: approver, reason: reason });
-    const r = await res.json();
-    if (!r.success) { alert('❌ ' + r.error); return; }
-    showToast('公告已拒絕');
-    _annRenderBody();
-  } catch (e) { alert('❌ 連線錯誤: ' + e.message); }
+  if (window.AnnReview) return window.AnnReview.open(row, 'reject');
+  alert('審核模組尚未載入，請重新整理後再試。');
 }
 
 // ===== END 公告模組 =====
@@ -12736,5 +12726,6 @@ setInterval(_leadsPrefetchBadge, 180000);
 </script>
 <script src="student-semesters.js?v=2.20.3"></script>
 <script src="operations-current.js?v=20260923"></script>
+<script src="announcement-review.js?v=20260923-1"></script>
 </body>
 </html>
