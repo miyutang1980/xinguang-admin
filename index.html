@@ -712,6 +712,7 @@ function doLogout() {
   _appClockTimer = null;
   if (window.XGStudents) window.XGStudents.reset();
   if (window.xgClearGatewayCache) window.xgClearGatewayCache();
+  resetCloudAccounts();
   _loggedIn = false;
   _currentUser = null;
   // 登出時連「記住我」token 一起清，以免下次又自動登入
@@ -941,7 +942,7 @@ function renderLineSourceAnalysis(container){
   container.innerHTML = '<div style="padding:24px">' +
     '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;flex-wrap:wrap">' +
       '<h3 style="margin:0;font-size:1.1rem;font-weight:800">LINE 加好友點擊來源</h3>' +
-      '<select id="lineSrcRange" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.85rem">' +
+      '<select id="lineSrcRange" onchange="loadLineSourceData()" style="padding:6px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:0.85rem">' +
         '<option value="7">最近 7 天</option>' +
         '<option value="30" selected>最近 30 天</option>' +
         '<option value="90">最近 90 天</option>' +
@@ -962,7 +963,7 @@ function renderLineSourceAnalysis(container){
       '</table>' +
     '</div>' +
     '<div style="margin-top:16px;padding:12px 16px;background:#FEF3C7;border-radius:6px;font-size:0.8rem;color:#92400E">' +
-      '資料來源：Google Sheets 「LINE_Click_Log」分頁。如果表格是空的、先到 Apps Script 跑一次 setupLineClickLog()。' +
+      '資料來源：社群自動化中樞「LINE_Click_Log」。只統計點擊，不代表已加好友人數。分頁已存在；若出現端點錯誤，請核對社群行銷 Apps Script 的 ranking 路由，不要重建資料表。' +
     '</div>' +
   '</div>';
   loadLineSourceData();
@@ -970,39 +971,58 @@ function renderLineSourceAnalysis(container){
 
 // LINE 點擊追蹤：走現有 marketing_dashboard 同一個 Web App URL、以 ?lct=ranking 區分
 var LINE_TRACKER_URL = 'h'+'ttps'+':'+'/'+'/'+'script.google.com/macros/s/AKfycbw_xFWnKLYm3xtNTGd8lFpDzFk1PU1Qolyyyis8NXfsNV_m4ca5s0gOD-BBr_SK8XrYqA/exec';
+var _lineSourceRequest = null;
 
 function loadLineSourceData(){
-  var days = parseInt(document.getElementById('lineSrcRange').value, 10) || 30;
-  // 用 JSONP 繞 CORS：Apps Script 不支援 CORS、但支援 ?callback= 包成 JSONP
+  if (_lineSourceRequest) _lineSourceRequest.cancel();
+  var range = document.getElementById('lineSrcRange'), tbody = document.getElementById('lineSrcTbody');
+  if (!range || !tbody) return;
+  var days = parseInt(range.value, 10) || 30, owner = _currentUser, version = _sectionVersion;
+  // Ranking must explicitly return callback({success:true,data:[...]}), not dashboard HTML.
   var cbName = '__lineSrcCb_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
   var url = LINE_TRACKER_URL + '?lct=ranking&days=' + days + '&callback=' + cbName;
-  document.getElementById('lineSrcTbody').innerHTML =
+  document.getElementById('lineSrcSummary').innerHTML = '';
+  tbody.innerHTML =
     '<tr><td colspan="4" style="padding:40px;text-align:center;color:#999">載入中...</td></tr>';
   var done = false;
   var s = document.createElement('script');
-  var timer = setTimeout(function(){
-    if(done) return; done = true;
+  function current(){ return owner === _currentUser && version === _sectionVersion && document.getElementById('lineSrcTbody') === tbody; }
+  function fail(message){
+    if(done) return;
+    done = true;
     cleanup();
-    document.getElementById('lineSrcTbody').innerHTML =
-      '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入逾時，請稍後再試<br><small>若一直失敗，可能是 Apps Script 部署權限沒設成「任何人」</small></td></tr>';
-  }, 15000);
+    if(current()) tbody.innerHTML = '<tr><td colspan="4" style="padding:28px;color:#b91c1c;line-height:1.8" role="alert">' +
+      escapeHtml(message) + '<br><button class="btn btn-outline" onclick="loadLineSourceData()">重新讀取</button></td></tr>';
+  }
+  var timer = setTimeout(function(){
+    fail('來源統計讀取超過 45 秒，請稍後重試。這不表示資料遺失，也不能據此判定部署權限。');
+  }, 45000);
   function cleanup(){
-    try{ delete window[cbName]; }catch(e){ window[cbName] = undefined; }
+    // A late JSONP response may still run after removal. Keep a short-lived no-op.
+    window[cbName] = function(){};
+    setTimeout(function(){ try{delete window[cbName];}catch(e){} },60000);
     if(s && s.parentNode) s.parentNode.removeChild(s);
     clearTimeout(timer);
+    if(_lineSourceRequest && _lineSourceRequest.name === cbName) _lineSourceRequest = null;
   }
   window[cbName] = function(res){
-    if(done) return; done = true;
+    if(done) return;
+    if(!res || res.success === false || res.ok === false || !Array.isArray(res.data)) {
+      fail((res && res.error) || '統計端點回應格式不符，請確認已部署 ranking 路由。');
+      return;
+    }
+    if(res.data.some(function(r){return !r || typeof r.src !== 'string' || !Number.isFinite(r.clicks) || r.clicks < 0;})){
+      fail('統計資料格式不符，未將錯誤回應當成零筆資料。'); return;
+    }
+    done = true;
     cleanup();
-    var data = (res && res.data) || [];
-    renderLineSourceTable(data);
+    if(current()) renderLineSourceTable(res.data);
   };
+  s.onload = function(){if(!done) fail('統計端點沒有回傳 ranking 資料，可能載入了 HTML 頁面。請更新社群行銷 Apps Script 的統計路由。');};
   s.onerror = function(){
-    if(done) return; done = true;
-    cleanup();
-    document.getElementById('lineSrcTbody').innerHTML =
-      '<tr><td colspan="4" style="padding:40px;text-align:center;color:#dc2626">載入失敗，請確認 Apps Script 部署為「任何人」</td></tr>';
+    fail('統計端點未能以 JSONP 載入。已知舊部署回傳社群行銷 HTML；請核對 ranking 路由與網路狀態，不要直接判定為權限問題。');
   };
+  _lineSourceRequest = {name:cbName,cancel:function(){if(!done){done=true;cleanup();}}};
   s.src = url;
   document.head.appendChild(s);
 }
@@ -1022,7 +1042,7 @@ function renderLineSourceTable(data){
     '</div>' +
     '<div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px">' +
       '<div style="font-size:0.75rem;color:#6b7280">冠軍來源</div>' +
-      '<div style="font-size:0.95rem;font-weight:800;margin-top:4px">' + top1.src + '</div>' +
+      '<div style="font-size:0.95rem;font-weight:800;margin-top:4px">' + escapeHtml(top1.src) + '</div>' +
       '<div style="font-size:0.75rem;color:#6b7280">' + top1.clicks + ' 次</div>' +
     '</div>';
 
@@ -7190,6 +7210,14 @@ var ROLE_LABELS = {
 
 var _cloudAccounts = []; // 從 n8n 拉下來的帳號清單
 var _accountsLoading = false;
+var _accountsLoaded = false, _accountsError = '', _accountsOwner = null;
+var _accountLoadPromise = null, _accountLoadGeneration = 0;
+function resetCloudAccounts(){
+  _accountLoadGeneration++;
+  _cloudAccounts = []; window._cloudAccounts = _cloudAccounts;
+  _accountsLoaded = false; _accountsLoading = false; _accountsError = '';
+  _accountLoadPromise = null; _accountsOwner = _currentUser;
+}
 
 function getAccountLogs(){try{return JSON.parse(localStorage.getItem(ACCOUNT_LOG_KEY)||'[]')}catch(e){return[]}}
 function addAccountLog(action,target,detail){
@@ -7250,51 +7278,92 @@ async function callAccountApi(action, extra){
   };
   if (Object.keys(fields).length) payload.fields = fields;
   if (rowIndex) payload.row_index = rowIndex;
+  var accountTimer = null, controller = action === 'list' ? new AbortController() : null;
+  var requestOwner = _currentUser, requestEpoch = _authEpoch;
   try {
-    var resp = await fetch(GW_URL, {
+    var requestOptions = {
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify(payload),
       redirect: 'follow'
+    };
+    if(controller) { requestOptions.signal = controller.signal; requestOptions.cache = 'no-store'; }
+    var task = fetch(GW_URL, requestOptions).then(function(resp){
+      if(!resp.ok) throw new Error('HTTP ' + resp.status);
+      return resp.json();
     });
-    var result = await resp.json();
+    var result = await (controller ? Promise.race([task,new Promise(function(resolve,reject){
+      accountTimer = setTimeout(function(){controller.abort();reject(new Error('帳號查詢超過 45 秒，請稍後手動重試。'));},45000);
+    })]) : task);
+    if(requestOwner !== _currentUser || requestEpoch !== _authEpoch) return {success:false,error:'登入狀態已變更，已忽略舊回應'};
     if(Array.isArray(result)) result = result[0] || {};
     return result;
   } catch(e){
     return { success:false, error:'網路錯誤：' + e.message };
+  } finally {
+    clearTimeout(accountTimer);
   }
 }
 
 // 載入清單
 async function reloadCloudAccounts(){
+  if (_accountsOwner !== _currentUser) resetCloudAccounts();
+  if (_accountLoadPromise) return _accountLoadPromise;
+  var owner = _currentUser, epoch = _authEpoch, generation = ++_accountLoadGeneration;
   _accountsLoading = true;
-  var r = await callAccountApi('list');
-  _accountsLoading = false;
-  if(r.success && Array.isArray(r.list)){
-    // Gateway 回的是 { username, name, role, title, status, _row }、讓舊 UI 仍能讀 (層 .account / .username 並存)
-    _cloudAccounts = r.list.map(function(x){
-      return Object.assign({}, x, { account: x.username });
-    });
-    window._cloudAccounts = _cloudAccounts;
-    return true;
-  } else {
-    alert('載入帳號失敗：' + (r.error || '未知錯誤'));
-    return false;
-  }
+  _accountsError = '';
+  var promise = (async function(){
+    try {
+      var r = await callAccountApi('list');
+      if(owner !== _currentUser || epoch !== _authEpoch || generation !== _accountLoadGeneration) return false;
+      if(r.success && Array.isArray(r.list)){
+        _cloudAccounts = r.list.map(function(x){ return Object.assign({}, x, {account:x.username}); });
+        window._cloudAccounts = _cloudAccounts;
+        _accountsLoaded = true;
+        return true;
+      }
+      _accountsError = (r && r.error) || '帳號回應格式不符';
+      return false;
+    } catch(e) {
+      if(owner === _currentUser && generation === _accountLoadGeneration) _accountsError = e.message;
+      return false;
+    } finally {
+      if(generation === _accountLoadGeneration) { _accountsLoading = false; _accountLoadPromise = null; }
+    }
+  })();
+  _accountLoadPromise = promise;
+  return promise;
+}
+async function retryCloudAccounts(){
+  var owner = _currentUser;
+  var task = reloadCloudAccounts();
+  if(currentSection === 'accounts') document.getElementById('mainContent').innerHTML = renderAccountsPage();
+  await task;
+  if(owner === _currentUser && currentSection === 'accounts') document.getElementById('mainContent').innerHTML = renderAccountsPage();
 }
 
 function renderAccountsPage(){
   if(!_currentUser||_currentUser.role!=='admin') return '<div style="padding:40px;text-align:center;color:#999">⛔ 只有管理員可以存取此頁面</div>';
-  // 第一次載入時，先觸發抓取再重渲
-  if(_cloudAccounts.length === 0 && !_accountsLoading){
+  if(_accountsOwner !== _currentUser) resetCloudAccounts();
+  // Empty data is a valid loaded state; errors never trigger an automatic retry loop.
+  if(!_accountsLoaded && !_accountsError && !_accountsLoading){
+    _accountsLoading = true;
+    var owner = _currentUser;
     setTimeout(async function(){
-      var ok = await reloadCloudAccounts();
-      if(ok) switchSection('accounts');
+      if(owner !== _currentUser) return;
+      if(currentSection !== 'accounts') { _accountsLoading = false; return; }
+      await reloadCloudAccounts();
+      if(owner === _currentUser && currentSection === 'accounts') document.getElementById('mainContent').innerHTML = renderAccountsPage();
     }, 50);
-    return '<div style="padding:60px;text-align:center;color:#888"><div style="font-size:1.1rem;margin-bottom:10px">⏳ 從雲端載入帳號中...</div><div style="font-size:0.85rem;color:#aaa">第一次載入需 1-2 秒</div></div>';
+  }
+  if(!_accountsLoaded){
+    if(_accountsError) return '<div style="padding:32px;line-height:1.8"><h3>帳號清單尚未讀取成功</h3><p role="alert">' + escapeHtml(_accountsError) +
+      '</p><p>沒有更改任何帳號。可手動重試；請勿因逾時重建或刪除員工資料。</p><button class="btn btn-green" onclick="retryCloudAccounts()">重新讀取帳號</button></div>';
+    return '<div style="padding:40px;text-align:center;color:#52645e" role="status"><h3>正在從雲端讀取帳號</h3><p>Apps Script 冷啟動可能較久，本次最多等候 45 秒。</p><p>不會重複送出查詢；你可以先切換其他頁面。</p></div>';
   }
 
   var h='<div style="max-width:900px">';
+  if(_accountsError) h+='<div role="alert" style="padding:16px;background:#FEF3C7;margin-bottom:16px">重新讀取失敗，目前顯示先前清單：'+escapeHtml(_accountsError)+'</div>';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
   h+='<h3 style="margin:0;font-size:1.1rem">👥 帳號管理</h3>';
   h+='<div style="display:flex;gap:8px">';
@@ -7354,12 +7423,7 @@ function renderAccountsPage(){
   h+='</div></div></div>';
   setTimeout(function(){
     var rb=document.getElementById('btnReloadAcc');
-    if(rb)rb.onclick=async function(){
-      rb.textContent='⏳ 載入中...';rb.disabled=true;
-      _cloudAccounts=[];
-      var ok = await reloadCloudAccounts();
-      if(ok) switchSection('accounts');
-    };
+    if(rb) { rb.disabled = _accountsLoading; if(_accountsLoading)rb.textContent='讀取中…'; rb.onclick=retryCloudAccounts; }
     var nb=document.getElementById('btnNewAcc');
     if(nb)nb.onclick=function(){ showCreateAccountModal(); };
     var cl=document.getElementById('btnClearLogs');

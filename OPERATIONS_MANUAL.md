@@ -118,7 +118,17 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 
 個人帳號、最小權限，試算表不開任何人編輯；密碼、LINE token 與完整 Gateway 不放公開手冊。歷史公開過的密碼應撤銷／更換，刪掉文字不等於撤銷憑證。
 
-本輪只更新後台文件與群組名稱，並強化家長請假入口；預約、公告與其他舊API尚未全面安全重構，不宣稱全系統已完成安全稽核。
+本輪更新文件、群組名稱、家長請假入口及公告審核前端。公告審核須先看全文，登入姓名作為審核紀錄，確認前重讀最新狀態；送出結果不明不自動重送。預約、公告與其他舊 API 尚未全面安全重構；前端權限防護不等於伺服器端授權。
+
+## LINE 來源分析與帳號讀取修復
+
+2026-09-23 核對：來源分析網址回傳社群行銷後台 HTML，不是 ranking 統計資料。LINE_Click_Log 分頁已存在，不需重建；後台不再把此錯誤一律解讀為部署權限問題。
+
+來源統計修補位於 xinguang-liff 的 marketing_backend/line_click_ranking.gs。須新增到社群行銷 Apps Script，並在既有 doGet 加入 lct=ranking 路由，再更新原 Web App 部署。這不是校務 Gateway，GitHub 更新不代表 Apps Script 已部署。
+
+帳號清單查詢改為最多等待 45 秒，失敗提供頁面內重新讀取；並行查詢合併，合法空清單不重複載入，換帳號或登出後忽略舊回應。這是容錯修復，不代表後端已加速至 3 秒。
+
+隔離測試已涵蓋超過 15 秒後成功、45 秒逾時、手動重試、空資料、登入切換及統計回應錯誤。本輪未登入讀取真實員工密碼或修改帳號；正式登入後速度及統計數值仍待部署後驗收。
 
 ## 正式驗收與待辦
 
@@ -130,7 +140,9 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 
 待辦四：核對每日彙整與新版 5 分鐘通知重試排程，量測冷啟動、名冊與送單速度。
 
-待辦五：既有公告審核通知指向 /announce-approve/，2026-09-23 裸路徑查核回傳 404；須恢復頁面並再驗證帶參數的審核流程。本次未發出或核准公告。
+公告審核：新入口 https://admin.taipingxinguang.org/announce-approve/ 已上線，帶參數入口 HTTP 200，正式後台載入新版審核模組。原 taipingxinguang.org/announce-approve/ 仍為 404；須在 Cloudflare 將這個舊路徑轉至新入口並保留 query string，或把缺少頁面併入正式資產。此次 GitHub 網站提交沒有自動恢復 Cloudflare 舊網址。
+
+公告審核操作：登入具公告權限的帳號，核對全文與狀態，再按確認同意或確認拒絕；拒絕須填原因。通過後系統嘗試產生 PDF 並通知提報人，不自動推送全體員工群。正式審核及 LINE 收件尚未實測，本次未發出或核准公告。
 
 回復時前後端一起回復並保留事件與綁定紀錄；已推播訊息不會因回復程式撤回。此次文件更新不寫正式請假、名冊，不發 LINE。
 
@@ -180,7 +192,8 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 | 接送完成回報 | [接送完成回報](https://taipingxinguang.org/return-pickup/) | row、session、route | 接送老師回報，不是家長請假／找人代接 |
 | 轉接送 | [轉接送](https://taipingxinguang.org/transfer-pickup/) | row、session、route、driver | 依路線通知與校方接送流程操作 |
 | 未接到學生 | [未接到學生](https://taipingxinguang.org/missing-pickup/) | row、session、route | 接送老師回報；先確認學生安全 |
-| 公告審核 | [公告審核](https://taipingxinguang.org/announce-approve/) | row；拒絕時 action=reject | 2026-09-23 裸路徑查核回傳 404，需恢復頁面並另驗證帶參數入口；不轉傳審核連結 |
+| 公告審核 | [公告審核](https://admin.taipingxinguang.org/announce-approve/) | row；拒絕時 action=reject | 2026-09-23 後台新入口 HTTP 200。登入後核對全文，再確認同意或拒絕；不轉傳審核連結 |
+| 公告審核舊通知 | [公告審核舊通知](https://taipingxinguang.org/announce-approve/) | 保留 row 與 action | 舊 LINE 卡片入口仍為 404；程式庫已補頁，但正式 Cloudflare 路由尚待部署或轉址，不代表已恢復 |
 
 ## 版本核對依據
 
