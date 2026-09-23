@@ -1,4 +1,6 @@
 var pickupAssert=(await import('node:assert/strict')).default;
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_list').length,1);
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_get_staff').length,1);
 await pickupPendingClasses[0].abort('timedout');
 await new Promise((resolve,reject)=>{var start=Date.now(),timer=setInterval(()=>{if(pickupPendingClasses.length===2){clearInterval(timer);resolve();}else if(Date.now()-start>3000){clearInterval(timer);reject(new Error('Missing legacy read retry'));}},20);});
 await pickupPendingClasses[1].abort('timedout');
@@ -20,6 +22,7 @@ await ssQAPage.waitForTimeout(150);
 pickupAssert.equal(await ssQAPage.locator('#ssMasterSearch').count(),1);
 await ssQAPage.locator('#nav-pickup').click();
 await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('最後同步'));
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_list').length,1,'page revisit uses short-lived read cache');
 ssQAPage.removeAllListeners('dialog');
 ssQAPage.on('dialog',async d=>{
  pickupDialogs.push(d.message());
@@ -46,8 +49,10 @@ pickupAssert.equal(pickupRows[5].route,'離線臨時路線');
 await ssQAPage.screenshot({path:'/home/user/workspace/frontend_qa/pickup-fixed-desktop.png'});
 // Failed read must not be presented as an empty editable schedule; retry must work.
 pickupMode='list-error';
+var listsBeforeManualRefresh=pickupCalls.filter(a=>a==='routes_list').length;
 await ssQAPage.locator('#ps-refresh').click();
 await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('載入失敗'));
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_list').length,listsBeforeManualRefresh+1,'manual refresh bypasses cache');
 pickupAssert.equal(await ssQAPage.locator('#ps-add-day').isDisabled(),true);
 pickupMode='ok';
 await ssQAPage.locator('#ps-table-wrap button').click();
@@ -77,4 +82,4 @@ await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textCon
 pickupAssert.equal(await ssQAPage.locator('#ps-add-route').isDisabled(),true);
 pickupAssert.equal(pickupCalls.filter(a=>a==='routes_append').length,4);
 pickupAssert.equal(ssQAErrors.length,0);
-console.log({pickupRegression:'PASS',checks:['exact screenshot reproduction fixed','late classes success ignored','account/lazy navigation isolation','add day creates 5 routes','duplicate date blocked','add single route','load error disables create','retry works','uncertain write not repeated'],syntheticRows:pickupRows.length,productionWrites:0});
+console.log({pickupRegression:'PASS',checks:['exact screenshot reproduction fixed','late classes success ignored','account/lazy navigation isolation','short-lived read cache','manual refresh bypasses cache','add day creates 5 routes','duplicate date blocked','add single route','load error disables create','retry works','uncertain write not repeated'],syntheticRows:pickupRows.length,productionWrites:0});

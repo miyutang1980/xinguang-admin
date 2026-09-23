@@ -1,7 +1,13 @@
 var pickupCalls=[], pickupPendingClasses=[], pickupRows=[], pickupDialogs=[];
 var pickupMode='ok', pickupAppendPending=null;
 await ssQAContext.route('**/*',async route=>{
- const url=new URL(route.request().url()), action=url.searchParams.get('_action');
+ const req=route.request(),url=new URL(req.url());
+ let action=url.searchParams.get('_action');
+ if(url.hostname==='miyutang.app.n8n.cloud'&&url.pathname.includes('/admin/route-schedule')){
+  const direct=req.postDataJSON()?.action;
+  if(direct==='list')action='routes_list';
+  if(direct==='get_staff')action='routes_get_staff';
+ }
  if(url.searchParams.get('action')==='classes') {pickupPendingClasses.push(route);return;}
  if(!action?.startsWith('routes_')) return route.fallback();
  pickupCalls.push(action);

@@ -10186,9 +10186,52 @@ async function _assessDelete(idx) {
   }
 }
 
-// v2.17: 全部接送相關呼叫都走 Gateway, action 名稱手動 mapping
+// 接送排程清單與人員使用已驗證較快的 n8n 唯讀來源；寫入與明細仍走 Gateway。
+var _pickupReadCache = new Map();
+var _pickupReadPending = new Map();
+window.invalidatePickupScheduleReads = function () {
+  _pickupReadCache.clear();
+};
+async function _pickupN8nRead(url, payload) {
+  var user = String((_currentUser && _currentUser.username) || payload.admin_username || '');
+  var key = user + ':' + payload.action;
+  var cached = _pickupReadCache.get(key);
+  if (cached && Date.now() - cached.at < 15000) return cached.result;
+  if (_pickupReadPending.has(key)) return _pickupReadPending.get(key);
+  var controller = new AbortController();
+  var timer = setTimeout(function(){ controller.abort(); }, 10000);
+  var promise = fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+    signal: controller.signal
+  }).then(function(res){
+    if (!res.ok) throw new Error('接送唯讀服務 HTTP ' + res.status);
+    return res.json();
+  }).then(function(result){
+    if (!result || result.success !== true) throw new Error((result && result.error) || '接送唯讀服務回應不完整');
+    if (payload.action === 'list' && !Array.isArray(result.rows)) throw new Error('接送排程缺少 rows');
+    if (payload.action === 'get_staff' && !Array.isArray(result.staff)) throw new Error('接送人員缺少 staff');
+    _pickupReadCache.set(key, {at:Date.now(), result:result});
+    return result;
+  }).catch(function(error){
+    if (error.name === 'AbortError') throw new Error('接送唯讀服務超過 10 秒，已停止等待');
+    throw error;
+  }).finally(function(){
+    clearTimeout(timer);
+    _pickupReadPending.delete(key);
+  });
+  _pickupReadPending.set(key, promise);
+  return promise;
+}
 async function _pickupCall(url, payload) {
-  // 如果 url 是 N8N webhook (舊代碼), 轉接到 Gateway
+  // 排程清單與人員是唯讀，可直接使用較快的來源並共用短效快取。
+  if (typeof url === 'string' && url.indexOf('/admin/route-schedule') >= 0 &&
+      (payload.action === 'list' || payload.action === 'get_staff')) {
+    return _pickupN8nRead(url, payload);
+  }
+  // 其他接送操作轉接到 Gateway。
   if (typeof url === 'string' && url.indexOf('miyutang.app.n8n.cloud') >= 0) {
     return _pickupCallGateway(url, payload);
   }
@@ -10276,6 +10319,9 @@ async function _pickupCallGateway(originalUrl, payload) {
   delete gwBody._action;
   var result = await gwCallJson(gwAction, gwBody);
   if (!result || typeof result !== 'object') throw new Error('Gateway 回應格式錯誤');
+  if (result.success === true && !['routes_get_staff','routes_list','routes_get_details','routes_get_details_batch'].includes(gwAction)) {
+    invalidatePickupScheduleReads();
+  }
   return result;
 }
 
@@ -11050,9 +11096,9 @@ async function renderPickupSchedule(el) {
       statusEl.textContent = '載入失敗：' + (e.name === 'AbortError' ? '連線逾時，請重新載入。' : e.message || e);
       document.getElementById('ps-table-wrap').innerHTML =
         '<div style="padding:40px;text-align:center">' +
-        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ 接送排程 Gateway 載入失敗</div>' +
+        '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ 接送排程載入失敗</div>' +
         '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + escapeHtml(e.message||e) + '</div>' +
-        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：Apps Script Gateway</div>' +
+        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：接送唯讀服務（n8n）</div>' +
         '<button onclick="switchSection(\'pickup\')" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
         '</div>';
       return false;
@@ -11371,7 +11417,12 @@ async function renderPickupSchedule(el) {
     });
   }
 
-  document.getElementById('ps-refresh').onclick = () => { if (loading) return; invalidatePickupRoster(); return loadAll(); };
+  document.getElementById('ps-refresh').onclick = () => {
+    if (loading) return;
+    invalidatePickupScheduleReads();
+    invalidatePickupRoster();
+    return loadAll();
+  };
 
   async function appendRoutes(rows) {
     if (!isCurrent() || !loaded || appending) return;

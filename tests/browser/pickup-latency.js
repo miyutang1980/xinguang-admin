@@ -6,7 +6,13 @@ var latencyRows=[{...ssQAAssignments[0],'學校':'新光國小','學生中英文
 var finishRoster=route=>route.fulfill({json:{success:true,active:true,currentSemester:'115-1',semester:'115-1',
   semesters:['115-1','114-2'],displayNameSource:'學期班級指派!W',list:latencyRows}});
 await ssQAContext.route('**/*',route=>{
-  const action=new URL(route.request().url()).searchParams.get('_action');
+  const req=route.request(),url=new URL(req.url());
+  let action=url.searchParams.get('_action');
+  if(url.hostname==='miyutang.app.n8n.cloud'&&url.pathname.includes('/admin/route-schedule')){
+    const direct=req.postDataJSON()?.action;
+    if(direct==='list')action='routes_list';
+    if(direct==='get_staff')action='routes_get_staff';
+  }
   if(action==='semester_assignments_list'){
     rosterReads++;
     if(latencyMode==='legacy')return route.fulfill({json:{success:true,active:true,
