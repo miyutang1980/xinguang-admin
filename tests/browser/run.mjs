@@ -15,8 +15,10 @@ for (const files of [
   ['details-regression.js'],
   ['pickup-setup.js','linkage-regression.js'],
   ['pickup-latency.js'],
-  ['roster-efficiency.js']
+  ['roster-efficiency.js'],
+  ['system-performance.js']
 ]) {
+  if (process.argv[2] && !files.includes(process.argv[2])) continue;
   const fixture = await fs.readFile(path.join(here, 'bootstrap.js'), 'utf8');
   const checks = (await Promise.all(files.map(f => fs.readFile(path.join(here, f), 'utf8')))).join('\n');
   const code = (fixture + '\ntry {\n' + checks + '\n} finally { await ssQABrowser.close(); }')

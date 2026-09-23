@@ -3,9 +3,8 @@ pickupAssert.equal(pickupCalls.filter(a=>a==='routes_list').length,1);
 pickupAssert.equal(pickupCalls.filter(a=>a==='routes_get_staff').length,1);
 pickupAssert.equal((await ssQAPage.locator('#ps-table-wrap').textContent()).includes('歷史不顯示'),false);
 await pickupPendingClasses[0].abort('timedout');
-await new Promise((resolve,reject)=>{var start=Date.now(),timer=setInterval(()=>{if(pickupPendingClasses.length===2){clearInterval(timer);resolve();}else if(Date.now()-start>3000){clearInterval(timer);reject(new Error('Missing legacy read retry'));}},20);});
-await pickupPendingClasses[1].abort('timedout');
 await ssQAPage.waitForTimeout(150);
+pickupAssert.equal(pickupPendingClasses.length,1,'failed reads must not trigger a hidden second 15s wait');
 pickupAssert.equal(await ssQAPage.locator('#ps-add-day').count(),1,'stale classes timeout must not erase pickup');
 pickupAssert.equal(await ssQAPage.locator('#mainContent').textContent().then(s=>s.includes('讀取班別設定失敗')),false);
 // Late success is also forbidden from painting a new page.
@@ -13,7 +12,7 @@ await ssQAPage.locator('#nav-classes').click();
 await ssQAPage.waitForFunction(()=>document.querySelector('#mainContent').textContent.includes('讀取班別設定中'));
 await ssQAPage.locator('#nav-classAssign').click();
 await ssQAPage.locator('#ssSemester').waitFor();
-await pickupPendingClasses[2].fulfill({json:{success:true,data:await ssQAPage.evaluate(()=>SEMESTER_CLASSES)}});
+await pickupPendingClasses[1].fulfill({json:{success:true,data:await ssQAPage.evaluate(()=>SEMESTER_CLASSES)}});
 await ssQAPage.waitForTimeout(100);
 pickupAssert.equal(await ssQAPage.locator('#ssSemester').count(),1);
 // Queued lazy/account renderers cannot overwrite a later navigation.

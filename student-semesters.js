@@ -28,6 +28,16 @@
   let pendingRender = null;
   let nameSource = '';
   const timings = [];
+  const viewCache = new Map();
+  const VIEW_TTL = 5 * 60 * 1000;
+  let viewEpoch = -1, viewOwner = null, viewGeneration = 0;
+  let viewSnapshotAt = 0;
+  function clearViews() { viewGeneration++; viewCache.clear(); }
+  function viewScope() {
+    if (viewEpoch !== _authEpoch || viewOwner !== session()) {
+      clearViews(); viewEpoch = _authEpoch; viewOwner = session();
+    }
+  }
 
   // Memory-only diagnostics: never retain URLs, credentials, rows or payloads.
   function recordTiming(action, started, ok) {
@@ -60,6 +70,8 @@
   }
 
   async function api(action, payload = {}) {
+    viewScope();
+    if (!action.endsWith('_list')) clearViews();
     const started = performance.now();
     let ok = false;
     const params = Object.assign({}, payload, auth());
@@ -85,6 +97,7 @@
     } finally {
       clearTimeout(timer); recordTiming(action, started, ok);
       if (!action.endsWith('_list') && typeof window.invalidatePickupRoster === 'function') {
+        clearViews();
         window.invalidatePickupRoster();
       }
     }
@@ -113,10 +126,21 @@
     }
     return result.list;
   }
-  async function readList(kind, semester = state.semester) {
+  async function readList(kind, semester = state.semester, reuse = false) {
+    viewScope();
+    const key = kind === 'master' ? 'master' : semester;
+    const saved = viewCache.get(key);
+    if (reuse && saved && Date.now()-saved.at < VIEW_TTL) {
+      return JSON.parse(JSON.stringify(saved.result));
+    }
+    const owner = session(), epoch = _authEpoch, generation = viewGeneration;
     const result = await api(kind === 'master' ? 'student_master_list' : 'semester_assignments_list',
       kind === 'master' ? {} : { semester });
     validateList(result, kind, semester);
+    if (owner !== session() || epoch !== _authEpoch || generation !== viewGeneration) {
+      throw new Error('登入或名冊已變更，請重新讀取。');
+    }
+    viewCache.set(key, {result:JSON.parse(JSON.stringify(result)),at:Date.now()});
     if (kind === 'assignment' && semester === CURRENT && typeof window.primePickupSemester === 'function') {
       window.primePickupSemester(result);
     }
@@ -170,7 +194,7 @@
       tools.querySelector('#ssSearch').oninput = event => { state.keyword = event.target.value; drawRows(el); };
       if (!historical) tools.querySelector('#ssBulk').onclick = () => openBulk(el);
     }
-    tools.querySelector('#ssRefresh').onclick = () => render(el, kind);
+    tools.querySelector('#ssRefresh').onclick = () => { clearViews(); return render(el, kind); };
     if (tools.querySelector('#ssAdd')) tools.querySelector('#ssAdd').onclick = () => openEditor(el, null);
     if (!state.active) {
       ['#ssAdd','#ssBulk'].forEach(id => { const b = tools.querySelector(id); if (b) b.remove(); });
@@ -193,7 +217,9 @@
     el.querySelector('#ssNotice').textContent = `顯示 ${filtered.length} / ${all.length} 筆` +
       (!all.length ? (master ? ' · 主檔尚未建檔；如與預期不符，請先確認移轉結果。' :
         ` · ${state.semester} 尚無指派；不會自動複製歷史資料。`) : '') +
-      (!master && state.semester === CURRENT ? ' · 姓名來源：' + nameSource : '');
+      (!master && state.semester === CURRENT ? ' · 姓名來源：' + nameSource : '') +
+      (viewSnapshotAt ? ' · 資料取得 ' + new Date(viewSnapshotAt).toLocaleTimeString('zh-TW') +
+        '（5 分鐘內共用；重新整理可更新，儲存前會重新核對）' : '');
     el.querySelector('#ssList').innerHTML = table(headers, filtered.map(row => `<tr>${
       headers.slice(0,-1).map(h => { const text = h === DISPLAY_NAME ? row[h] || row['學生姓名'] : row[h]; return `<td title="${esc(text)}">${esc(text || '—')}</td>`; }).join('')}
       <td><button type="button" class="btn btn-outline ss-row-edit" data-row="${Number(row._row)}">${
@@ -228,9 +254,11 @@
     const status = progress(el.querySelector('.ss-banner p'), '正在讀取正式資料');
     try {
       // Use the just-verified server response; do not issue a fourth round trip.
-      const result = verified || await readList(kind, semester);
+      const result = verified || await readList(kind, semester, true);
       validateList(result, kind, semester);
       if (request !== state.request || owner !== session() || !visible()) return;
+      const snapshot = viewCache.get(kind === 'master' ? 'master' : semester);
+      viewSnapshotAt = snapshot ? snapshot.at : Date.now();
       if (kind === 'master') state.master = result.list;
       else {
         state.assignments = result.list;
@@ -270,7 +298,7 @@
       el.innerHTML = banner('無法載入｜已停用寫入', '這不是空名冊。未取得完整資料前，不提供新增、修改或整班升級。', true) +
         `<div class="ss-error" role="alert">${esc(error.message)}<p>請確認登入與網路；若後端尚未升級，請管理員完成 Gateway 部署。不要改用舊名冊覆寫。</p></div>` +
         button('重新讀取', 'ssRetry');
-      el.querySelector('#ssRetry').onclick = () => render(el, kind);
+      el.querySelector('#ssRetry').onclick = () => { clearViews(); return render(el, kind); };
     } finally { status.stop(); }
   }
 
@@ -582,10 +610,12 @@
   }
 
   window.XGStudents = {
+    invalidateViewCache: clearViews,
     diagnostics: () => timings.map(entry => Object.assign({}, entry)),
     renderMaster: el => render(el, 'master'),
     renderAssignments: el => render(el, 'assignment'),
     reset: () => {
+      clearViews(); viewSnapshotAt = 0;
       pendingRender = null; timings.length = 0;
       ++state.request; state.ready = false; state.active = false; state.owner = null; state.master = []; state.assignments = [];
       state.semester = CURRENT; state.semesters = [CURRENT,'114-2'];

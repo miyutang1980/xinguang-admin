@@ -709,6 +709,7 @@ function doLogout() {
   clearInterval(_appClockTimer);
   _appClockTimer = null;
   if (window.XGStudents) window.XGStudents.reset();
+  if (window.xgClearGatewayCache) window.xgClearGatewayCache();
   _loggedIn = false;
   _currentUser = null;
   // 登出時連「記住我」token 一起清，以免下次又自動登入
@@ -901,6 +902,9 @@ function switchSection(sec) {
  */
 function _lazyRender(container, fnName, modName) {
   var sectionVersion = _sectionVersion;
+  if (typeof window[fnName] === 'function') {
+    return window[fnName](container);
+  }
   container.innerHTML = '<div style="padding:60px;text-align:center;color:#9CA3AF"><div style="font-size:2rem">⏳</div><div style="margin-top:8px">載入' + modName + '中…</div></div>';
   var tries = 0;
   var maxTries = 30; // 30 × 100ms = 3 秒
@@ -1058,14 +1062,25 @@ window.SHEET_OPTIONAL_HEADERS = {
   '正式註冊':   ['LINE userId']
 };
 
-window.healthState = { lastReport: null, isChecking: false };
+window.healthState = { lastReport: null, isChecking: false, pending: null };
 
 async function fetchSheetHeaders(sheetName){
   var url = 'https://docs.google.com/spreadsheets/d/' + (window.SHEET_ID||'1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w') +
     '/gviz/tq?tqx=out:csv&headers=0&range=A1:BZ1&sheet=' + encodeURIComponent(sheetName);
-  var resp = await fetch(url, {cache:'no-store'});
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-  var text = await resp.text();
+  var ctrl = new AbortController(), timer;
+  var text;
+  try {
+    text = await Promise.race([
+      fetch(url, {cache:'no-store', signal:ctrl.signal}).then(function(resp){
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.text();
+      }),
+      new Promise(function(_, reject){
+        timer = setTimeout(function(){ ctrl.abort(); reject(new Error('讀取逾時（15 秒）')); }, 15000);
+      })
+    ]);
+  } finally { clearTimeout(timer); }
+  if (/^\s*</.test(text)) throw new Error('回傳非資料格式');
   var cells = [];
   var cur = '', inQ = false;
   for (var i=0; i<text.length; i++){
@@ -1121,8 +1136,7 @@ async function runHealthCheck(){
     { key:'admin', label:'後台',     url:'https://admin.taipingxinguang.org/', deprecated:false },
     { key:'n8n',   label:'n8n 服務 (已棄用)', url:'https://miyutang.app.n8n.cloud/', deprecated:true }
   ];
-  for (var i=0; i<serviceTargets.length; i++){
-    var t = serviceTargets[i];
+  var serviceChecks = serviceTargets.map(async function(t){
     var r = await checkUrlAlive(t.url);
     var statusIcon = r.ok ? '✅' : (t.deprecated ? '⚫' : '❌');
     report.services[t.key] = { label:t.label, url:t.url, ok:r.ok, status:statusIcon, detail:r.status, deprecated: t.deprecated };
@@ -1131,10 +1145,9 @@ async function runHealthCheck(){
       if (t.deprecated) report.warnings.push(t.label + ' 連線失敗 (可忽略)');
       else report.issues.push(t.label + ' 連線失敗：' + r.status);
     }
-  }
+  });
   var sheetNames = Object.keys(window.SHEET_EXPECTED_HEADERS);
-  for (var j=0; j<sheetNames.length; j++){
-    var name = sheetNames[j];
+  var sheetChecks = sheetNames.map(async function(name){
     var expected = window.SHEET_EXPECTED_HEADERS[name];
     try {
       var headers = await fetchSheetHeaders(name);
@@ -1155,7 +1168,8 @@ async function runHealthCheck(){
       report.sheets[name] = { status:'❌', error: String(e && e.message || e) };
       report.issues.push(name + ' 讀取失敗：' + String(e && e.message || e));
     }
-  }
+  });
+  await Promise.all(serviceChecks.concat(sheetChecks));
   return report;
 }
 
@@ -1164,13 +1178,23 @@ function healthEscape(s){
 }
 
 async function renderHealth(el){
+  var epoch = _authEpoch, version = _sectionVersion;
   el.innerHTML = '<div style="padding:40px;text-align:center;color:#666">⏳ 進行健檢中…</div>';
-  if (window.healthState.isChecking) return;
-  window.healthState.isChecking = true;
+  if (!window.healthState.pending) {
+    window.healthState.isChecking = true;
+    window.healthState.pending = runHealthCheck().finally(function(){
+      window.healthState.isChecking = false;
+      window.healthState.pending = null;
+    });
+  }
   var report;
-  try { report = await runHealthCheck(); }
-  catch(e) { el.innerHTML = '<div style="padding:40px;color:#c00">健檢失敗：' + String(e && e.message || e) + '</div>'; window.healthState.isChecking=false; return; }
-  window.healthState.isChecking = false;
+  try { report = await window.healthState.pending; }
+  catch(e) {
+    if (epoch === _authEpoch && version === _sectionVersion)
+      el.innerHTML = '<div style="padding:40px;color:#c00">健檢失敗：' + healthEscape(e && e.message || e) + '</div>';
+    return;
+  }
+  if (epoch !== _authEpoch || version !== _sectionVersion) return;
   window.healthState.lastReport = report;
 
   var totalProblems = (report.issues||[]).length + (report.warnings||[]).length;
@@ -1260,7 +1284,7 @@ async function checkHealthInBackground(){
     window.healthState.lastReport = report;
   } catch(e){ console.warn('background health check failed', e); }
 }
-setTimeout(checkHealthInBackground, 5000);
+// Health checks are on demand, not competing with login and operational reads.
 
 // ===== 開班資訊模組 =====
 window.SEMESTER_CLASSES = {
@@ -1555,8 +1579,8 @@ function renderInquiry(el) {
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" id="searchInquiry" placeholder="搜尋姓名、電話、Email…" oninput="renderInquiry(document.getElementById('mainContent'))">
-        <select id="filterInquiryStatus" onchange="renderInquiry(document.getElementById('mainContent'))">
+        <input type="text" id="searchInquiry" placeholder="搜尋姓名、電話、Email…" oninput="filterRenderedTable('searchInquiry','inquiryTbody','filterInquiryStatus',7)">
+        <select id="filterInquiryStatus" onchange="filterRenderedTable('searchInquiry','inquiryTbody','filterInquiryStatus',7)">
           <option value="">全部狀態</option>
           ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
         </select>
@@ -1685,9 +1709,11 @@ async function _loadBookingsFromGateway() {
 }
 
 async function renderBooking(el) {
+  const routeVersion = _sectionVersion, authEpoch = _authEpoch;
   // 先 render 載入中、同步拉雲端
   el.innerHTML = '<div style="padding:40px;text-align:center;color:#9CA3AF">⏳ 從雲端載入預約紀錄中...</div>';
   const cloud = await _loadBookingsFromGateway();
+  if (routeVersion !== _sectionVersion || authEpoch !== _authEpoch) return;
   const d = loadData();
   if (cloud) {
     d.bookings = cloud;
@@ -1701,8 +1727,8 @@ async function renderBooking(el) {
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋…" oninput="renderBooking(document.getElementById('mainContent'))" id="searchBooking">
-        <select onchange="renderBooking(document.getElementById('mainContent'))" id="filterBookingStatus">
+        <input type="text" placeholder="搜尋…" oninput="filterRenderedTable('searchBooking','bookingTbody','filterBookingStatus',8)" id="searchBooking">
+        <select onchange="filterRenderedTable('searchBooking','bookingTbody','filterBookingStatus',8)" id="filterBookingStatus">
           <option value="">全部</option>
           ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
         </select>
@@ -1874,6 +1900,8 @@ async function _wc_save() {
 // ── 體驗預約一覽 ──────────────────────────────────────────
 // 顯示所有「體驗課」類型的預約、按日期+班分組、檢測重複
 async function renderTrialBookings(el) {
+  const routeVersion = _sectionVersion, authEpoch = _authEpoch;
+  el.innerHTML = '<div class="card" role="status" style="padding:24px">正在讀取體驗預約，可先切換其他頁面。</div>';
   const d = loadData();
   // v2.18.73 · 先拉遠端 trial_bookings (包含體驗課預約) 合併本機
   var remoteTrials = [];
@@ -1882,6 +1910,7 @@ async function renderTrialBookings(el) {
     var dataTb = await respTb.json();
     if (dataTb && dataTb.ok) remoteTrials = dataTb.bookings || [];
   } catch(e) {}
+  if (routeVersion !== _sectionVersion || authEpoch !== _authEpoch) return;
 
   // 本機體驗課預約
   const localTrials = d.bookings.filter(r => {
@@ -1940,7 +1969,7 @@ async function renderTrialBookings(el) {
         <p style="margin:4px 0 0;font-size:0.82rem;color:var(--text-muted)">所有家長報名的體驗課預約。同班同日只能 1 人預約 — 衝突會用紅色標示。</p>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-outline" onclick="renderTrialBookings(document.getElementById('mainContent'))">🔄 重新整理</button>
+        <button class="btn btn-outline" onclick="if(window.xgClearGatewayCache)window.xgClearGatewayCache();renderTrialBookings(document.getElementById('mainContent'))">🔄 重新整理</button>
       </div>
     </div>
 
@@ -1958,8 +1987,8 @@ async function renderTrialBookings(el) {
 
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋家長/電話/孩子/日期…" oninput="renderTrialBookings(document.getElementById('mainContent'))" id="searchTrialBkg">
-        <select onchange="renderTrialBookings(document.getElementById('mainContent'))" id="filterTrialBkgStatus">
+        <input type="text" placeholder="搜尋家長/電話/孩子/日期…" oninput="filterRenderedTable('searchTrialBkg','trialBkgTbody','filterTrialBkgStatus',8)" id="searchTrialBkg">
+        <select onchange="filterRenderedTable('searchTrialBkg','trialBkgTbody','filterTrialBkgStatus',8)" id="filterTrialBkgStatus">
           <option value="">全部狀態</option>
           ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
         </select>
@@ -2711,7 +2740,7 @@ function renderCamp(el) {
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋家長/電話/學生…" id="searchCamp" oninput="renderCamp(document.getElementById('mainContent'))">
+        <input type="text" placeholder="搜尋家長/電話/學生…" id="searchCamp" oninput="filterRenderedTable('searchCamp','campTbody')">
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
@@ -2905,7 +2934,7 @@ function renderAssess(el) {
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋學生…" id="searchAssess" oninput="renderAssess(document.getElementById('mainContent'))">
+        <input type="text" placeholder="搜尋學生…" id="searchAssess" oninput="filterRenderedTable('searchAssess','assessTbody')">
         <span style="margin-left:auto;font-size:0.8rem;color:var(--text-muted)">共 ${rows.length} 筆</span>
       </div>
       <table class="data-table">
@@ -3673,8 +3702,8 @@ function renderRegister(el) {
     </div>
     <div class="table-wrap">
       <div class="table-toolbar">
-        <input type="text" placeholder="搜尋…" id="searchReg" oninput="renderRegister(document.getElementById('mainContent'))">
-        <select id="filterRegStatus" onchange="renderRegister(document.getElementById('mainContent'))">
+        <input type="text" placeholder="搜尋…" id="searchReg" oninput="filterRenderedTable('searchReg','regTbody','filterRegStatus',11)">
+        <select id="filterRegStatus" onchange="filterRenderedTable('searchReg','regTbody','filterRegStatus',11)">
           <option value="">全部</option>
           ${statusOpts.map(s=>`<option>${s}</option>`).join('')}
         </select>
@@ -4095,6 +4124,28 @@ function showRegChangeModal(idx, action){
 }
 
 // ── 共用工具 ──────────────────────────────────────────────
+function filterRenderedTable(searchId, bodyId, statusId, statusColumn) {
+  const body = document.getElementById(bodyId);
+  if (!body) return;
+  const keyword = (document.getElementById(searchId)?.value || '').trim().toLocaleLowerCase();
+  const status = (statusId && document.getElementById(statusId)?.value) || '';
+  let count = 0;
+  for (const row of body.rows) {
+    if (row.cells.length < 2) continue;
+    const cellText = cell => cell?.querySelector('select')?.value || cell?.textContent.trim() || '';
+    const text = Array.from(row.cells).map(cellText).join(' ').toLocaleLowerCase();
+    row.hidden = !((!keyword || text.includes(keyword)) && (!status || cellText(row.cells[statusColumn]) === status));
+    if (!row.hidden) count++;
+  }
+  const id = bodyId + '-filter-count';
+  let notice = document.getElementById(id);
+  if (!notice) {
+    notice = document.createElement('div'); notice.id = id; notice.setAttribute('role','status');
+    notice.style.cssText = 'padding:8px 12px;color:#555;font-size:13px';
+    body.closest('table').after(notice);
+  }
+  notice.textContent = '篩選結果 ' + count + ' 筆（使用已載入資料，未重新查詢雲端）';
+}
 async function updateStatus(collection, idx, newStatus) {
   const data = loadData();
   if(data[collection] && data[collection][idx]) {
@@ -4415,55 +4466,111 @@ async function gwCallJson(action, params, fresh = false) {
   };
 })();
 
-// 2026/05/09: 包裝 fetch · 加 timeout(15s) + 客戶端快取 (60s)
-// 避免 Gateway 冷啟動造成「未載入」永遠卡住
+// Explicit safe-read policy: GET transport does not imply a read operation.
 (function patchFetch() {
   if (window._gwFetchPatched) return;
   window._gwFetchPatched = true;
   const _origFetch = window.fetch.bind(window);
   const _gwCache = new Map();
-  const CACHE_TTL = 60000; // 60 秒
-  const TIMEOUT_MS = 15000; // 15 秒 timeout
+  const pending = new Map();
+  const safeReads = new Set(['classes','bookingList','calendarSettings','trialBookings','trialClasses',
+    'trial_classes_get','leads_list','leave_admin_list','announce_list','announce_get','account_list']);
+  const CACHE_TTL = 60000;
+  let epoch = null, owner = null, generation = 0;
+  window._gatewayTimings = [];
+  const clear = () => { generation++; _gwCache.clear(); pending.clear(); };
+  window.xgClearGatewayCache = clear;
+  function scope() {
+    if (epoch !== _authEpoch || owner !== _currentUser) {
+      clear(); epoch = _authEpoch; owner = _currentUser;
+    }
+  }
+  function record(action, started, outcome) {
+    window._gatewayTimings.push({action, milliseconds:Math.round(performance.now()-started), outcome});
+    if (window._gatewayTimings.length > 100) window._gatewayTimings.shift();
+  }
+  function restore(data) {
+    return new Response(data.status === 204 ? null : data.body,
+      {status:data.status, statusText:data.statusText, headers:data.headers});
+  }
   window.fetch = function(input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     if (!url.startsWith(GW_URL)) {
       return _origFetch(input, init);
     }
-    // Structured student writes/verification opt out: never cache or retry a mutation
-    // transported over GET, and preserve the caller's AbortSignal.
-    if (init && (init.cache === 'no-store' || init.signal ||
-        (init.method && init.method.toUpperCase() !== 'GET'))) return _origFetch(input, init);
-    // GET 用快取
-    const isGet = !init || !init.method || init.method.toUpperCase() === 'GET';
-    const cacheKey = isGet ? url : null;
-    if (cacheKey) {
-      const c = _gwCache.get(cacheKey);
-      if (c && (Date.now() - c.t) < CACHE_TTL) {
-        return Promise.resolve(new Response(c.body, { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    scope();
+    const started = performance.now();
+    let action = '';
+    try {
+      const q = new URL(url).searchParams;
+      action = q.get('_action') || q.get('action') || '';
+      if (init && init.body && typeof init.body === 'string') {
+        const body = JSON.parse(init.body); action = body._action || body.action || action;
+      }
+    } catch (_) {}
+    const read = safeReads.has(action);
+    // Unknown operations are never cached, coalesced or automatically retried.
+    const mutation = !read && action !== 'auth_login' &&
+      !['student_master_list','semester_assignments_list','routes_list','routes_get_staff',
+        'routes_get_details','routes_get_details_batch'].includes(action);
+    if (mutation) clear();
+    // Existing verification/auth/route callers retain their own deadlines/signals.
+    if (init && init.signal) {
+      return _origFetch(input, init).finally(() => { if (mutation) clear(); });
+    }
+    const q = new URL(url).searchParams;
+    const eligible = read && action !== 'account_list' && typeof input === 'string' && !(init &&
+      ['no-store','reload','no-cache'].includes(init.cache)) && !q.has('_t');
+    const key = eligible ? url + '\n' + ((init && init.body) || '') : null;
+    const version = generation;
+    const requestEpoch = _authEpoch, requestOwner = _currentUser;
+    const current = () => version === generation && epoch === _authEpoch && owner === _currentUser;
+    if (key) {
+      const saved = _gwCache.get(key);
+      if (saved && Date.now()-saved.at < CACHE_TTL) {
+        record(action, started, 'cache'); return Promise.resolve(restore(saved));
+      }
+      if (pending.has(key)) {
+        record(action, started, 'shared'); return pending.get(key).then(restore);
       }
     }
-    // 加 timeout + 重試 1 次
-    function once() {
-      const ctrl = new AbortController();
-      const id = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-      const opts = Object.assign({}, init || {}, { signal: ctrl.signal });
-      return _origFetch(input, opts).then(r => {
-        clearTimeout(id);
-        if (cacheKey && r.ok) {
-          r.clone().text().then(t => _gwCache.set(cacheKey, { t: Date.now(), body: t })).catch(()=>{});
-        }
-        return r;
-      }).catch(e => {
-        clearTimeout(id);
-        throw e;
-      });
-    }
-    return once().catch(e => {
-      console.warn('[gw fetch] retry once after:', e.message);
-      return once();
+    const ctrl = new AbortController();
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        ctrl.abort();
+        reject(new Error(read ? '讀取超過 15 秒，已停止等待；請手動重新讀取' :
+          '操作超過 45 秒，結果尚未確認；請先重新查詢核對，勿重複送出'));
+      }, read ? 15000 : 45000);
     });
+    const task = Promise.race([timeout, (async () => {
+      const response = await _origFetch(input, Object.assign({}, init, {signal:ctrl.signal,cache:'no-store'}));
+      const body = await response.text(); // Deadline includes the response body.
+      return {body,status:response.status,statusText:response.statusText,headers:Array.from(response.headers)};
+    })()]).then(data => {
+      if (requestEpoch !== _authEpoch || requestOwner !== _currentUser || (read && !current())) {
+        throw new Error('登入或資料狀態已變更，請重新讀取');
+      }
+      if (key && data.status >= 200 && data.status < 300) {
+        try {
+          const parsed = JSON.parse(data.body);
+          if (parsed && parsed.success !== false && parsed.ok !== false && !parsed.error) {
+            if (_gwCache.size >= 40) _gwCache.delete(_gwCache.keys().next().value);
+            _gwCache.set(key, Object.assign({at:Date.now()}, data));
+          }
+        } catch (_) {}
+      }
+      record(action || 'unknown', started, data.status < 400 ? 'network' : 'http-error');
+      return data;
+    }, error => { record(action || 'unknown', started, 'error'); throw error; })
+      .finally(() => {
+        clearTimeout(timer);
+        if (key && pending.get(key) === task) pending.delete(key);
+        if (mutation) clear();
+      });
+    if (key) pending.set(key, task);
+    return task.then(restore);
   };
-  console.log('[gw fetch] patched - timeout 15s + 60s GET cache + 1 retry');
 })();
 let _trialClasses = [];
 let _trialDirty = false;
@@ -5702,7 +5809,12 @@ function _doDeleteSelected(key) {
    * 使用方式：
    *   直接呼叫 syncFromSheets() 或綁定到按鈕的 onclick 事件。
    */
+  var syncFlight = null;
   window.syncFromSheets = function () {
+    if (syncFlight && syncFlight.owner === _currentUser && syncFlight.epoch === _authEpoch) return syncFlight.promise;
+    var flight = {owner:_currentUser,epoch:_authEpoch};
+    flight.promise = new Promise(function(resolve) { flight.resolve = resolve; });
+    syncFlight = flight;
 
     // 顯示載入狀態
     var btn = document.getElementById('btnSheetsSync');
@@ -5734,11 +5846,16 @@ function _doDeleteSelected(key) {
      * 將結果寫入 _DB、存檔、刷新畫面。
      */
     function onAllDone() {
+      if (syncFlight !== flight || flight.owner !== _currentUser || flight.epoch !== _authEpoch) {
+        flight.resolve(false); return;
+      }
+      syncFlight = null;
 
       // 確認全域 _DB 存在
       if (typeof _DB === 'undefined') {
         console.error('[SheetsSync] 找不到 _DB，請確認管理後台已初始化。');
         _showSyncResult(btn, notify, false, '找不到 _DB 物件，請確認後台已載入。');
+        flight.resolve(false);
         return;
       }
 
@@ -5784,20 +5901,26 @@ function _doDeleteSelected(key) {
         : '⚠️ 部分工作表同步失敗（請先到 Google Sheets 發布工作表）：' + errors.join('、');
 
       _showSyncResult(btn, notify, ok, msg);
+      flight.resolve(ok);
     }
 
     // 逐一 fetch 每個工作表
     tasks.forEach(function (t) {
       var url = csvUrl(t.sheet);
-
-      fetch(url)
+      var ctrl = new AbortController();
+      var timer;
+      var deadline = new Promise(function(_, reject) {
+        timer = setTimeout(function() { ctrl.abort(); reject(new Error('同步超過 15 秒')); }, 15000);
+      });
+      Promise.race([deadline, fetch(url, {signal:ctrl.signal,cache:'no-store'})
         .then(function (resp) {
           if (!resp.ok) {
             throw new Error('HTTP ' + resp.status);
           }
           return resp.text();
-        })
+        })])
         .then(function (text) {
+          if (/^\s*</.test(text)) throw new Error('回應不是 CSV，保留原資料');
           var rows    = parseCsv(text);
           var objects = rowsToObjects(rows);
           results[t.key] = objects.map(t.mapper);
@@ -5807,10 +5930,12 @@ function _doDeleteSelected(key) {
           errors.push(t.sheet);
         })
         .finally(function () {
+          clearTimeout(timer);
           pending--;
           if (pending === 0) onAllDone();
         });
     });
+    return flight.promise;
   };
 
   // ──────────────────────────────────────────────────────────────────
@@ -10402,6 +10527,7 @@ window.primePickupSemester = function(result) {
   }
 };
 window.invalidatePickupRoster = function() {
+  if (window.XGStudents && window.XGStudents.invalidateViewCache) window.XGStudents.invalidateViewCache();
   _pickupRosterVersion++;
   _allStudentsCache = null;
   _pickupRosterPending = null;
@@ -14026,6 +14152,6 @@ setInterval(_leadsPrefetchBadge, 180000);
 // ===== END 潛客名單模組 =====
 
 </script>
-<script src="student-semesters.js?v=2.20.2"></script>
+<script src="student-semesters.js?v=2.20.3"></script>
 </body>
 </html>
