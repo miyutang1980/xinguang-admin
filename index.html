@@ -12495,6 +12495,12 @@ const LEAVE_TYPE_COLORS = {
   pickup_eng_nursery: '#EC4899',
   all: '#DC2626'
 };
+// Independent combinations coexist with legacy leave codes in filters/reports.
+for (let mask = 1; mask <= 15; mask++) {
+  const names = ['取消接送', '美語請假', '安親請假', '托育請假'];
+  LEAVE_TYPE_LABELS['services_' + mask] = names.filter((_, i) => mask & (1 << i)).join('＋');
+  LEAVE_TYPE_COLORS['services_' + mask] = '#047857';
+}
 
 async function _lvCallGw(action, payload) {
   const u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
