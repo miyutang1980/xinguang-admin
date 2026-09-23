@@ -130,6 +130,8 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 
 待辦四：核對每日彙整與新版 5 分鐘通知重試排程，量測冷啟動、名冊與送單速度。
 
+待辦五：既有公告審核通知指向 /announce-approve/，2026-09-23 裸路徑查核回傳 404；須恢復頁面並再驗證帶參數的審核流程。本次未發出或核准公告。
+
 回復時前後端一起回復並保留事件與綁定紀錄；已推播訊息不會因回復程式撤回。此次文件更新不寫正式請假、名冊，不發 LINE。
 
 ## 系統連結索引
@@ -178,7 +180,7 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 | 接送完成回報 | [接送完成回報](https://taipingxinguang.org/return-pickup/) | row、session、route | 接送老師回報，不是家長請假／找人代接 |
 | 轉接送 | [轉接送](https://taipingxinguang.org/transfer-pickup/) | row、session、route、driver | 依路線通知與校方接送流程操作 |
 | 未接到學生 | [未接到學生](https://taipingxinguang.org/missing-pickup/) | row、session、route | 接送老師回報；先確認學生安全 |
-| 公告審核 | [公告審核](https://taipingxinguang.org/announce-approve/) | row；拒絕時 action=reject | 既有通知指向；頁面部署待核對。僅主管操作，不轉傳審核連結 |
+| 公告審核 | [公告審核](https://taipingxinguang.org/announce-approve/) | row；拒絕時 action=reject | 2026-09-23 裸路徑查核回傳 404，需恢復頁面並另驗證帶參數入口；不轉傳審核連結 |
 
 ## 版本核對依據
 
