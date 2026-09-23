@@ -10392,6 +10392,9 @@ let _pickupRosterOwner = '';
 let _pickupRosterVersion = 0;
 let _pickupRosterPending = null;
 let _pickupSemesterSnapshot = null;
+// Reuse a validated current-term roster across a short editing session.
+// Explicit refresh/student writes invalidate it; never persist student data.
+const PICKUP_ROSTER_TTL_MS = 5 * 60 * 1000;
 window.primePickupSemester = function(result) {
   if (result && result.success === true && result.semester === '115-1' && Array.isArray(result.list)) {
     _pickupSemesterSnapshot = {result,owner:_currentUser,epoch:_authEpoch,version:_pickupRosterVersion,at:Date.now()};
@@ -10424,20 +10427,23 @@ async function _fetchPickupRoster(authPayload) {
     _allStudentsCache = null;
     Object.keys(_schoolStudentsCache).forEach(k => delete _schoolStudentsCache[k]);
   }
-  if (_allStudentsCache && Date.now() - _allStudentsCache.at < 60000) return _allStudentsCache.list;
+  if (_allStudentsCache && Date.now() - _allStudentsCache.at < PICKUP_ROSTER_TTL_MS) return _allStudentsCache.list;
   try {
     // v2.20.2: 接送名單以目前學期指派為準，不再讀舊「在校學生」API。
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
-    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || '';
+    if (!u.username || !pwd) throw new Error('登入憑證已失效，請重新登入');
     const auth = {
-      adminUser: u.username || 'admin',
+      adminUser: u.username,
       adminPass: pwd
     };
     const snapshot = _pickupSemesterSnapshot;
-    const r = snapshot && snapshot.owner === _currentUser && snapshot.epoch === _authEpoch &&
-      snapshot.version === rosterVersion && Date.now()-snapshot.at < 60000 ? snapshot.result :
+    const useSnapshot = snapshot && snapshot.owner === _currentUser && snapshot.epoch === _authEpoch &&
+      snapshot.version === rosterVersion && Date.now()-snapshot.at < PICKUP_ROSTER_TTL_MS;
+    const r = useSnapshot ? snapshot.result :
       await gwCallJson('semester_assignments_list', {...auth, semester:'115-1'}, true);
     if (!r || !r.success) throw new Error((r && r.error) || '115-1 學期指派載入失敗');
+    if (r.semester !== '115-1' || r.currentSemester !== '115-1') throw new Error('名冊學期不符，請重新載入並核對營運學期');
     if (r.active === false) throw new Error('學期班級指派新制尚未啟用，不能將候選名冊視為空白');
     const rows = r.list || r.rows;
     if (!Array.isArray(rows)) throw new Error('115-1 學期指派回應缺少名冊，不能視為零人');
@@ -10479,16 +10485,16 @@ async function _fetchPickupRoster(authPayload) {
       status: (s['學期狀態'] === '在學' || s.status === '在讀' || s.status === 'active') ? 'active' : 'inactive'
     }; });
     if (owner !== _pickupRosterOwner || rosterVersion !== _pickupRosterVersion) throw new Error('名冊或登入狀態已變更，請重新開啟明細');
-    _allStudentsCache = {list, at: Date.now(), displayNameSource:hasDisplayColumn ? r.displayNameSource : '主檔相容模式'};
+    _allStudentsCache = {list, at: useSnapshot ? snapshot.at : Date.now(), displayNameSource:hasDisplayColumn ? r.displayNameSource : '主檔相容模式'};
     return list;
   } catch (e) {
     if (owner === _pickupRosterOwner && rosterVersion === _pickupRosterVersion) _allStudentsCache = null;
     throw e;
   }
 }
-async function _getSchoolStudents(schoolName, authPayload) {
+async function _getSchoolStudents(schoolName, authPayload, roster) {
   // 唯一候選名冊來源：115-1 學期指派；讀取錯誤不可快取成空名單。
-    const all = await _loadAllStudentsOnce(authPayload);
+    const all = roster || await _loadAllStudentsOnce(authPayload);
     const list = all.filter(s => {
       if (s.school_name !== schoolName) return false;
       if (s.status !== 'active') return false;
@@ -10527,7 +10533,7 @@ function closeAllPickupModals() {
   document.getElementById('rd-school-picker')?.remove();
 }
 
-async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
+async function openRouteDetailsModal(rowData, session, authPayload, onSaved, retryRead) {
   // 移除舊 modal
   document.getElementById('rd-modal-overlay')?.remove();
   const sessionLabel = session === 'noon' ? '中午班' : '下午班';
@@ -10563,6 +10569,9 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   `;
   document.body.appendChild(overlay);
   const modalEpoch = _authEpoch;
+  const modalRosterVersion = _pickupRosterVersion;
+  let modalRoster = null, modalRosterAt = 0;
+  const successfulRead = {epoch:modalEpoch,version:modalRosterVersion,row:rowData.row_index,session};
   const isCurrent = () => overlay.isConnected && modalEpoch === _authEpoch;
   const el = id => overlay.querySelector('#' + id);
   el('rd-close').onclick = close;
@@ -10599,8 +10608,10 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     retry.textContent = '重新取得資料';
     retry.style.cssText = 'padding:8px 14px;border:1px solid #01696f;color:#01696f;background:white;border-radius:4px;cursor:pointer';
     retry.onclick = () => {
-      _allStudentsCache = null;
-      openRouteDetailsModal(rowData, session, authPayload, onSaved);
+      // A roster outage must not discard a successful detail read (or vice versa).
+      // Uncertain writes and malformed details always require a new detail read.
+      openRouteDetailsModal(rowData, session, authPayload, onSaved,
+        !uncertainWrite && !rosterDone ? successfulRead : null);
     };
     body.append(message, retry);
   }
@@ -10617,14 +10628,25 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
   const readTimer = setInterval(paintRead, 1000);
   try {
     const results = await Promise.all([
-      _loadAllStudentsOnce(authPayload).then(value => {rosterDone=true;paintRead();return value;}),
-      _getRouteDetails(rowData.row_index, session, authPayload).then(value => {detailsDone=true;paintRead();return value;})
+      _loadAllStudentsOnce(authPayload).then(value => {
+        modalRoster=value; modalRosterAt=_allStudentsCache.at;
+        rosterDone=true;paintRead();return value;
+      }),
+      (retryRead && retryRead.epoch === modalEpoch && retryRead.version === modalRosterVersion &&
+        retryRead.row === rowData.row_index && retryRead.session === session &&
+        retryRead.details && Date.now()-retryRead.at < 30000 ?
+        Promise.resolve(retryRead.details) : _getRouteDetails(rowData.row_index, session, authPayload))
+        .then(value => {
+          successfulRead.details=value;successfulRead.at=retryRead && retryRead.details === value ? retryRead.at : Date.now();
+          detailsDone=true;paintRead();return value;
+        })
     ]);
     if (!isCurrent()) return;
     sourceNote.textContent = '已排學生：接送學員；候選學生與國小：115-1 學期班級指派的在學名冊。姓名來源：' +
       (_allStudentsCache.displayNameSource === '學期班級指派!W' ? 'W 欄「學生中英文姓名」。' :
         '主檔相容模式（Gateway 未回傳 W 欄，需核對部署）。') +
-      ' 排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。';
+      ' 名冊取得 ' + new Date(modalRosterAt).toLocaleTimeString('zh-TW') +
+      '（5 分鐘內共用，重新載入可立即更新）。排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。';
     existing = results[1];
     if (!isCurrent()) return;
     if (existing.details.some(d => !d || !d.school_name ||
@@ -10701,7 +10723,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     // 每所學校一個區塊
     let html = '';
     for (const [name, val] of schoolMap.entries()) {
-      const students = await _getSchoolStudents(name, authPayload);
+      const students = await _getSchoolStudents(name, authPayload, modalRoster);
       if (!isCurrent() || version !== renderVersion) return;
       if (students.some(s => !s.student_id) ||
           new Set(students.map(s => s.student_id)).size !== students.length) {
@@ -10872,6 +10894,30 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved) {
     el('rd-save').textContent = '儲存中…';
     // Do not allow selections to change while this snapshot is being saved.
     el('rd-body').querySelectorAll('button,input').forEach(control => control.disabled = true);
+    // Keep the modal's roster stable while selecting. If its bounded snapshot
+    // expired, revalidate before sending anything, not once per school/render.
+    try {
+      if (modalRosterVersion !== _pickupRosterVersion) throw new Error('名冊已更新，請重新取得資料後核對勾選');
+      if (Date.now()-modalRosterAt >= PICKUP_ROSTER_TTL_MS) {
+        el('rd-save').textContent = '核對最新名冊…';
+        const latest = await _loadAllStudentsOnce(authPayload);
+        if (!isCurrent()) return;
+        if (modalRosterVersion !== _pickupRosterVersion) throw new Error('名冊已更新，請重新取得資料');
+        for (const detail of details) {
+          detail.student_names = detail.student_ids.map(id => {
+            const student = latest.find(s => s.student_id === id && s.status === 'active' && s.school_name === detail.school_name);
+            if (!student) throw new Error('所選學生的在學狀態或學校已變更，請重新取得資料後核對');
+            return student.chinese_name;
+          });
+        }
+      }
+    } catch (e) {
+      showLoadError(new Error('尚未送出儲存：' + e.message));
+      if (isCurrent()) el('rd-save').textContent = '需重新讀取';
+      return;
+    }
+    if (!isCurrent()) return;
+    el('rd-save').textContent = '儲存中…';
     try {
       const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload);
       if (r && r.success && isCurrent()) {
