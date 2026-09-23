@@ -49,7 +49,7 @@ body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(
 .sidebar-bottom button:hover{background:rgba(255,255,255,0.2)}
 
 /* Main */
-.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh}
+.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}
 .topbar{background:#fff;border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
 .topbar h2{font-size:1.15rem;font-weight:800}
 .topbar-actions{display:flex;gap:10px;align-items:center}
@@ -10186,50 +10186,62 @@ async function _assessDelete(idx) {
   }
 }
 
-// 接送排程清單與人員使用已驗證較快的 n8n 唯讀來源；寫入與明細仍走 Gateway。
+// 排程讀寫必須使用同一個 Gateway / 接送排程分頁；舊 n8n 來源不是此主檔。
+var PICKUP_TERM = Object.freeze({id:'115-1',start:'2026-08-31',end:'2027-01-20'});
+function _pickupInTerm(date) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(date)) &&
+    date >= PICKUP_TERM.start && date <= PICKUP_TERM.end &&
+    !isNaN(Date.parse(date)) && new Date(date+'T12:00:00Z').toISOString().slice(0,10) === date;
+}
+function _pickupWeekInTerm(monday) {
+  if (!_pickupInTerm(monday)) return false;
+  var d = new Date(monday+'T12:00:00Z');
+  if (d.getUTCDay() !== 1) return false;
+  d.setUTCDate(d.getUTCDate()+4);
+  return _pickupInTerm(d.toISOString().slice(0,10));
+}
 var _pickupReadCache = new Map();
 var _pickupReadPending = new Map();
+var _pickupReadGeneration = 0;
 window.invalidatePickupScheduleReads = function () {
+  _pickupReadGeneration++;
   _pickupReadCache.clear();
+  _pickupReadPending.clear();
 };
-async function _pickupN8nRead(url, payload) {
-  var user = String((_currentUser && _currentUser.username) || payload.admin_username || '');
-  var key = user + ':' + payload.action;
+async function _pickupScheduleRead(url, payload) {
+  var epoch = _authEpoch, generation = _pickupReadGeneration;
+  var key = epoch + ':' + generation + ':' + String((_currentUser || {}).username || '') + ':' + PICKUP_TERM.id + ':' + payload.action;
   var cached = _pickupReadCache.get(key);
-  if (cached && Date.now() - cached.at < 15000) return cached.result;
-  if (_pickupReadPending.has(key)) return _pickupReadPending.get(key);
-  var controller = new AbortController();
-  var timer = setTimeout(function(){ controller.abort(); }, 10000);
-  var promise = fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-    cache: 'no-store',
-    signal: controller.signal
-  }).then(function(res){
-    if (!res.ok) throw new Error('接送唯讀服務 HTTP ' + res.status);
-    return res.json();
-  }).then(function(result){
-    if (!result || result.success !== true) throw new Error((result && result.error) || '接送唯讀服務回應不完整');
+  if (cached && Date.now() - cached.at < 15000) return structuredClone(cached.result);
+  if (_pickupReadPending.has(key)) return structuredClone(await _pickupReadPending.get(key));
+  var promise = _pickupCallGateway(url, {...payload,semester:PICKUP_TERM.id}).then(function(result){
+    if (epoch !== _authEpoch || generation !== _pickupReadGeneration) throw new Error('接送讀取已失效，請重新載入');
+    if (!result || result.success !== true) throw new Error((result && result.error) || '接送 Gateway 回應不完整');
     if (payload.action === 'list' && !Array.isArray(result.rows)) throw new Error('接送排程缺少 rows');
     if (payload.action === 'get_staff' && !Array.isArray(result.staff)) throw new Error('接送人員缺少 staff');
-    _pickupReadCache.set(key, {at:Date.now(), result:result});
+    if (payload.action === 'list') {
+      if (result.semester && result.semester !== PICKUP_TERM.id) throw new Error('前後台學期不一致，請更新版本');
+      var seen = new Set();
+      var rows = result.rows.filter(function(row){ return _pickupInTerm(String(row.date || '')); });
+      rows.forEach(function(row){
+        if (!Number.isInteger(Number(row.row_index)) || Number(row.row_index) < 2 || seen.has(Number(row.row_index))) throw new Error('接送排程列號異常，暫停編輯');
+        seen.add(Number(row.row_index));
+      });
+      result = {...result,rows:rows.sort((a,b)=>a.date.localeCompare(b.date)),semester:PICKUP_TERM.id};
+    }
+    _pickupReadCache.set(key, {at:Date.now(), result:structuredClone(result)});
     return result;
-  }).catch(function(error){
-    if (error.name === 'AbortError') throw new Error('接送唯讀服務超過 10 秒，已停止等待');
-    throw error;
   }).finally(function(){
-    clearTimeout(timer);
-    _pickupReadPending.delete(key);
+    if (_pickupReadPending.get(key) === promise) _pickupReadPending.delete(key);
   });
   _pickupReadPending.set(key, promise);
-  return promise;
+  return structuredClone(await promise);
 }
 async function _pickupCall(url, payload) {
-  // 排程清單與人員是唯讀，可直接使用較快的來源並共用短效快取。
+  // 唯讀共用短效快取，絕不退回不同來源的歷史 n8n 清單。
   if (typeof url === 'string' && url.indexOf('/admin/route-schedule') >= 0 &&
       (payload.action === 'list' || payload.action === 'get_staff')) {
-    return _pickupN8nRead(url, payload);
+    return _pickupScheduleRead(url, payload);
   }
   // 其他接送操作轉接到 Gateway。
   if (typeof url === 'string' && url.indexOf('miyutang.app.n8n.cloud') >= 0) {
@@ -10250,7 +10262,8 @@ async function _pickupCall(url, payload) {
 // N8N webhook -> Gateway action 轉接
 async function _pickupCallGateway(originalUrl, payload) {
   var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
-  var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+  var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
+  if (!u.username || !pwd) throw new Error('登入已失效，請重新登入後讀取接送資料');
   var gwBody = {
     adminUser: u.username || 'admin',
     adminPass: pwd
@@ -10260,7 +10273,7 @@ async function _pickupCallGateway(originalUrl, payload) {
   // 接送排程 /admin/route-schedule
   if (originalUrl.indexOf('/route-schedule') >= 0) {
     if (n8nAction === 'get_staff') gwBody._action = 'routes_get_staff';
-    else if (n8nAction === 'list') gwBody._action = 'routes_list';
+    else if (n8nAction === 'list') { gwBody._action = 'routes_list'; gwBody.semester = payload.semester || PICKUP_TERM.id; }
     else if (n8nAction === 'save') {
       gwBody._action = 'routes_save';
       gwBody.row_index = payload.row_index;
@@ -10317,7 +10330,11 @@ async function _pickupCallGateway(originalUrl, payload) {
   // 接送模組直接使用與學生新制相同的 GET-as-POST，不再依賴全域 fetch 攔截。
   var gwAction = gwBody._action;
   delete gwBody._action;
-  var result = await gwCallJson(gwAction, gwBody);
+  var isRead = ['routes_get_staff','routes_list','routes_get_details','routes_get_details_batch'].includes(gwAction);
+  var result;
+  if (!isRead) invalidatePickupScheduleReads();
+  try { result = await gwCallJson(gwAction, gwBody); }
+  finally { if (!isRead) invalidatePickupScheduleReads(); }
   if (!result || typeof result !== 'object') throw new Error('Gateway 回應格式錯誤');
   if (result.success === true && !['routes_get_staff','routes_list','routes_get_details','routes_get_details_batch'].includes(gwAction)) {
     invalidatePickupScheduleReads();
@@ -11006,9 +11023,9 @@ async function renderPickupSchedule(el) {
     <div style="padding:24px">
       <div style="display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;margin-bottom:16px">
         <div>
-          <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程</h2>
+          <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程 · ${PICKUP_TERM.id}</h2>
           <div style="color:#7a7974;font-size:0.85rem;margin-top:4px">
-            5 條路線 × 每日中午/下午班次 · 假日週末自動標休 · 編輯後自動儲存
+            僅顯示 ${PICKUP_TERM.start}～${PICKUP_TERM.end} · 歷史資料保留後台，不列入本學期
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -11098,7 +11115,7 @@ async function renderPickupSchedule(el) {
         '<div style="padding:40px;text-align:center">' +
         '<div style="font-size:1.1rem;color:#dc2626;margin-bottom:12px">⚠️ 接送排程載入失敗</div>' +
         '<div style="color:#6b7280;font-size:0.9rem;margin-bottom:8px">' + escapeHtml(e.message||e) + '</div>' +
-        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：接送唯讀服務（n8n）</div>' +
+        '<div style="color:#9ca3af;font-size:0.85rem;margin-bottom:16px">資料來源：正式 Gateway「接送排程」· 115-1</div>' +
         '<button onclick="switchSection(\'pickup\')" style="padding:8px 20px;background:#01696F;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700">🔄 重試</button>' +
         '</div>';
       return false;
@@ -11426,6 +11443,7 @@ async function renderPickupSchedule(el) {
 
   async function appendRoutes(rows) {
     if (!isCurrent() || !loaded || appending) return;
+    if (rows.some(row=>!_pickupInTerm(row.fields.date))) { alert('只能新增 '+PICKUP_TERM.id+' 學期內的日期'); return; }
     rows = rows.map(row => ({...row, fields:{...row.fields, route:_routeNameForDate(row.fields.route, row.fields.date)}}));
     appending = true;
     setCreateEnabled(false);
@@ -11455,6 +11473,7 @@ async function renderPickupSchedule(el) {
     if (!loaded || appending) return;
     const dateStr = prompt('新增日期 (YYYY-MM-DD)\n依該日週幾自動套用週一~五班表:', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    if (!_pickupInTerm(dateStr)) { alert('日期不在 '+PICKUP_TERM.id+' 學期範圍內'); return; }
     if (allRows.some(r => r.date === dateStr)) {
       alert('該日期已存在排班，請到表格重新編輯。');
       return;
@@ -11490,6 +11509,7 @@ async function renderPickupSchedule(el) {
     if (!loaded || appending) return;
     const dateStr = prompt('日期 (YYYY-MM-DD)?', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
+    if (!_pickupInTerm(dateStr)) { alert('日期不在 '+PICKUP_TERM.id+' 學期範圍內'); return; }
     const routeName = prompt('路線名稱?例: 臨時交通車 / 越野車 / B車認加', '');
     if (!routeName || !routeName.trim()) return;
     const cap = prompt('載客上限 (可留空)', '');
@@ -11628,6 +11648,7 @@ async function renderPickupSchedule(el) {
   // 實際複製邏輯抽出來、供「複製整週」「複製下一週」「未來 4 週」共用
   // 同步複製接送明細（學生名單）
   async function _doCopyWeek(srcMon, dstMon) {
+    if (!_pickupWeekInTerm(srcMon) || !_pickupWeekInTerm(dstMon)) { alert('只允許複製本學期內的完整週間'); return; }
     const srcD = new Date(srcMon + 'T00:00:00');
     const offset = Math.round((new Date(dstMon + 'T00:00:00') - srcD) / 86400000);
     if (offset === 0) return;
@@ -11716,8 +11737,10 @@ async function renderPickupSchedule(el) {
   document.getElementById('ps-copy-week').onclick = async () => {
     const srcMon = prompt('來源週次(週一日期, YYYY-MM-DD)?', document.getElementById('ps-filter-week').value || '');
     if (!srcMon || !/^\d{4}-\d{2}-\d{2}$/.test(srcMon)) return;
+    if (!_pickupWeekInTerm(srcMon)) { alert('來源週不在本學期內，歷史排程不載入'); return; }
     const dstMon = prompt('目標週次(週一日期, YYYY-MM-DD)?', '');
     if (!dstMon || !/^\d{4}-\d{2}-\d{2}$/.test(dstMon)) return;
+    if (!_pickupWeekInTerm(dstMon)) { alert('目標週不在本學期內'); return; }
     if (srcMon === dstMon) { alert('來源與目標同週'); return; }
 
     // Legacy server copy uses exact route names. Use the normalized client copy

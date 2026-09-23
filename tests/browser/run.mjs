@@ -11,6 +11,7 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
 for (const files of [
   ['login-regression.js'],
   ['pickup-setup.js', 'pickup-regression.js'],
+  ['pickup-recovery.js'],
   ['details-regression.js'],
   ['pickup-setup.js','linkage-regression.js'],
   ['pickup-latency.js']

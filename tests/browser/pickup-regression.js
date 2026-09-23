@@ -1,6 +1,7 @@
 var pickupAssert=(await import('node:assert/strict')).default;
 pickupAssert.equal(pickupCalls.filter(a=>a==='routes_list').length,1);
 pickupAssert.equal(pickupCalls.filter(a=>a==='routes_get_staff').length,1);
+pickupAssert.equal((await ssQAPage.locator('#ps-table-wrap').textContent()).includes('歷史不顯示'),false);
 await pickupPendingClasses[0].abort('timedout');
 await new Promise((resolve,reject)=>{var start=Date.now(),timer=setInterval(()=>{if(pickupPendingClasses.length===2){clearInterval(timer);resolve();}else if(Date.now()-start>3000){clearInterval(timer);reject(new Error('Missing legacy read retry'));}},20);});
 await pickupPendingClasses[1].abort('timedout');
@@ -58,17 +59,23 @@ pickupMode='ok';
 await ssQAPage.locator('#ps-table-wrap button').click();
 await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('共 6 列'));
 pickupAssert.equal(await ssQAPage.locator('#ps-add-day').isEnabled(),true);
-// Copying historical B/C routes into this semester changes only destination plates.
+// History stays hidden, cannot be copied or recreated; current-term old plate compatibility remains.
+pickupAnswers=['2026-06-01'];
+await ssQAPage.locator('#ps-add-day').click();
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_append').length,2);
+pickupAnswers=['2026-06-01'];
+await ssQAPage.locator('#ps-copy-week').click();
+pickupAssert.equal(pickupCalls.filter(a=>a==='routes_copy_week').length,0);
 pickupRows.push(
- {row_index:20,date:'2026-06-01',weekday:'週一',status:'上',route:'交通車B (RDW-1655)',capacity:'4'},
- {row_index:21,date:'2026-06-01',weekday:'週一',status:'上',route:'交通車C (RFD-9763)',capacity:'4'}
+ {row_index:20,date:'2026-09-21',weekday:'週一',status:'上',route:'交通車B (RDW-1655)',capacity:'4'},
+ {row_index:21,date:'2026-09-21',weekday:'週一',status:'上',route:'交通車C (RFD-9763)',capacity:'4'}
 );
 await ssQAPage.locator('#ps-refresh').click();
 await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('共 8 列'));
-pickupAnswers=['2026-06-01','2026-09-28'];
+pickupAnswers=['2026-09-21','2026-09-28'];
 await ssQAPage.locator('#ps-copy-week').click();
-await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('共 10 列'));
-pickupAssert.equal(pickupRows.find(r=>r.date==='2026-06-01'&&r.row_index===20).route,'交通車B (RDW-1655)');
+await ssQAPage.waitForFunction(()=>document.querySelector('#ps-status')?.textContent.includes('共 16 列'));
+pickupAssert.equal(pickupRows.find(r=>r.row_index===20).route,'交通車B (RDW-1655)');
 pickupAssert.deepEqual(pickupRows.filter(r=>r.date==='2026-09-28').map(r=>r.route),['交通車B (RGE-2523)','交通車C (RGE-2522)']);
 // Unconfirmed write cannot be auto-retried, even on a repeated button click.
 pickupMode='hold-append';
