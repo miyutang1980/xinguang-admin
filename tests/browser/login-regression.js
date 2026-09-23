@@ -1,11 +1,10 @@
 // Run bootstrap.js first. Every network request remains intercepted.
 var loginAssert = (await import('node:assert/strict')).default;
-var authRoutes=[],authFallbackRoutes=[],authGatewayMode='hold';
+var authRoutes=[],authFallbackRoutes=[];
 await ssQAContext.route('**/*',async route=>{
  const req=route.request(), url=new URL(req.url());
  if(url.searchParams.get('_action')==='auth_login' || (req.method()==='POST' && req.postDataJSON()?._action==='auth_login')) {
   authRoutes.push(route);
-  if(authGatewayMode==='abort'){setTimeout(()=>route.abort('timedout').catch(()=>{}),100);}
   return;
  }
  if(url.hostname==='miyutang.app.n8n.cloud' && url.pathname==='/webhook/auth-login') {
@@ -14,13 +13,13 @@ await ssQAContext.route('**/*',async route=>{
  return route.fallback();
 });
 await ssQAContext.addInitScript(()=>{
- window.__XG_AUTH_GATEWAY_TIMEOUT_MS=80;
- window.__XG_AUTH_FALLBACK_TIMEOUT_MS=300;
+ window.__XG_AUTH_GATEWAY_TIMEOUT_MS=5000;
+ window.__XG_AUTH_FALLBACK_TIMEOUT_MS=10000;
  localStorage.setItem('xg_remember',JSON.stringify({username:'qa-login',password:'synthetic-only',expires:Date.now()+60000}));
 });
 var authOK={success:true,user:{username:'qa-login',name:'離線登入測試',role:'admin',permissions:['dashboard','students']}};
 await ssQAPage.reload({waitUntil:'load'});
-loginAssert.equal(await ssQAPage.evaluate(()=>AUTH_GATEWAY_TIMEOUT_MS),80);
+loginAssert.equal(await ssQAPage.evaluate(()=>AUTH_GATEWAY_TIMEOUT_MS),5000);
 await ssQAPage.waitForFunction(()=>!!_loginFlight);
 await ssQAPage.evaluate(()=>{doLogin();doLogin();checkSession();});
 await ssQAPage.waitForTimeout(450); // Covers both former 200ms/300ms startup timers.
@@ -69,14 +68,38 @@ await ssQAPage.locator('#nav-classAssign').click();
 await ssQAPage.locator('#ssSemester').waitFor();
 loginAssert.equal(authRoutes.length,4);
 loginAssert.equal(authFallbackRoutes.length,0);
-// A stalled Gateway must release to the already-supported n8n fallback quickly.
-authGatewayMode='abort';
+// Native 5-second deadline: leave route unresolved. Never abort it from the test.
+var deadlineStarted=Date.now();
 await ssQAPage.evaluate(()=>{doLogout();document.querySelector('#loginUser').value='qa-login';document.querySelector('#loginPass').value='synthetic-only';doLogin();});
-for(var fallbackWait=0;authFallbackRoutes.length<1&&fallbackWait<50;fallbackWait++)await ssQAPage.waitForTimeout(20);
+await ssQAPage.waitForFunction(()=>_loginFlight?.stage==='備援驗證',null,{timeout:8000});
+while(authFallbackRoutes.length<1&&Date.now()-deadlineStarted<8000)await ssQAPage.waitForTimeout(10);
 loginAssert.equal(authFallbackRoutes.length,1);
+var actualDeadlineMs=Date.now()-deadlineStarted;
+loginAssert.ok(actualDeadlineMs>=4500&&actualDeadlineMs<8000,'actual production 5s deadline');
+loginAssert.equal(authRoutes.length,5,'no hidden Gateway retry');
 await authFallbackRoutes[0].fulfill({json:authOK});
 await ssQAPage.locator('#appScreen').waitFor({state:'visible'});
 loginAssert.equal(await ssQAPage.evaluate(()=>_loggedIn),true);
 loginAssert.equal(await ssQAPage.locator('.login-btn').isDisabled(),false);
+// Both hung endpoints release the lock and fail closed. Shortened values only here.
+await ssQAPage.evaluate(()=>{doLogout();AUTH_GATEWAY_TIMEOUT_MS=100;AUTH_FALLBACK_TIMEOUT_MS=150;document.querySelector('#loginUser').value='qa-login';document.querySelector('#loginPass').value='synthetic-only';doLogin();});
+await ssQAPage.waitForFunction(()=>!_loginFlight);
+loginAssert.equal(await ssQAPage.evaluate(()=>_loggedIn),false);
+loginAssert.match(await ssQAPage.locator('#loginErr').textContent(),/尚未登入/);
+loginAssert.equal(await ssQAPage.locator('.login-btn').isDisabled(),false);
+await authRoutes[5].fulfill({json:authOK}).catch(()=>{});
+await authFallbackRoutes[1].fulfill({json:authOK}).catch(()=>{});
+await ssQAPage.waitForTimeout(50);
+loginAssert.equal(await ssQAPage.evaluate(()=>_loggedIn),false,'late success cannot log in');
+// Even a broken wrapper that completely ignores cancellation cannot hang login.
+var independentDeadline=await ssQAPage.evaluate(async()=>{
+ const original=window.fetch;const start=performance.now();
+ window.fetch=()=>new Promise(()=>{});
+ try {await _authFetch('https://offline.invalid',{},75);return {failed:false};}
+ catch(e){return {failed:e.name==='AbortError',ms:performance.now()-start};}
+ finally{window.fetch=original;}
+});
+loginAssert.equal(independentDeadline.failed,true);
+loginAssert.ok(independentDeadline.ms<1000);
 loginAssert.equal(ssQAErrors.length,0);
-console.log({loginRegression:'PASS',checks:['single-flight automatic/manual login','master route + records','assignment route + records','semester history','repeat initialization preserves route','background sync preserves route','logout ignores stale response','failed login permits retry','5s Gateway deadline releases fallback'],authRequests:authRoutes.length,productionWrites:0});
+console.log({loginRegression:'PASS',checks:['single-flight automatic/manual login','master route + records','assignment route + records','semester history','repeat initialization preserves route','background sync preserves route','logout ignores stale response','failed login permits retry','real 5s deadline without mock abort','no hidden retry','both providers stalled fail closed','late response ignored','independent deadline even without abort support'],actualDeadlineMs,authRequests:authRoutes.length,productionWrites:0});

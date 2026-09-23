@@ -438,11 +438,24 @@ var AUTH_FALLBACK_TIMEOUT_MS = window.__XG_AUTH_FALLBACK_TIMEOUT_MS || 10000;
 
 async function _authFetch(url, options, timeoutMs) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, Object.assign({}, options, {signal:controller.signal}));
+  let timer;
+  // A transport wrapper may ignore AbortSignal. Bound the entire operation,
+  // including response.json(), independently of network cancellation.
+  const deadline = new Promise((resolve,reject) => {
+    timer = setTimeout(() => {
+      const error = new Error('驗證連線逾時');
+      error.name = 'AbortError';
+      reject(error);
+      controller.abort();
+    }, timeoutMs);
+  });
+  const request = (async () => {
+    const response = await fetch(url, Object.assign({}, options, {cache:'no-store',signal:controller.signal}));
     if (!response.ok) throw new Error('HTTP ' + response.status);
     return await response.json();
+  })();
+  try {
+    return await Promise.race([request,deadline]);
   } finally {
     clearTimeout(timer);
   }
@@ -469,8 +482,10 @@ async function doLogin() {
   try { return await attempt.promise; }
   finally {
     clearInterval(timer);
-    if (loginButton) loginButton.disabled = false;
-    if (_loginFlight === attempt) _loginFlight = null;
+    if (_loginFlight === attempt) {
+      if (loginButton) loginButton.disabled = false;
+      _loginFlight = null;
+    }
   }
 }
 async function _performLogin(attempt) {
@@ -623,26 +638,15 @@ async function _performLogin(attempt) {
       }
     } catch (err) {
       if (attempt.epoch !== _authEpoch) return;
-      console.warn('雲端驗證失敗，改用本地帳號：', err);
-      // 繼續往下走 fallback 到本地驗證
+      console.warn('雲端驗證未完成：', err);
     }
   }
   
-  // Fallback：本地硬寫帳號 + localStorage 帳號（緊急备援）
-  const user = ADMIN_USERS[u];
-  if (user && user.password === p) {
-    _loggedIn = true;
-    _currentUser = { username: u, ...user };
-    errEl.style.display = 'none';
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('appScreen').style.display = 'flex';
-    applyPermissions();
-    initApp();
-  } else {
-    errEl.textContent = '帳號或密碼錯誤';
-    errEl.style.color = '#dc2626';
-    errEl.style.display = 'block';
-  }
+  // Network failure is not permission to authenticate from hardcoded/browser data.
+  if (attempt.epoch !== _authEpoch) return;
+  errEl.textContent = '驗證服務暫時無法回應，尚未登入。請稍後按「登入」重試。';
+  errEl.style.color = '#dc2626';
+  errEl.style.display = 'block';
 }
 function effectivePermissions(user) {
   if (!user) return [];
@@ -715,6 +719,8 @@ function doLogout() {
   } catch(e){}
   document.getElementById('appScreen').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
+  var loginButton = document.querySelector('.login-btn');
+  if (loginButton) loginButton.disabled = false;
   // 登出後清空輸入欄、勾選狀態
   var u = document.getElementById('loginUser');
   var p = document.getElementById('loginPass');
@@ -4396,7 +4402,11 @@ async function gwCallJson(action, params, fresh = false) {
             });
             // 拆 GW_URL 出來 (以防不同套裝函式用不同 URL)
             var baseUrl = u.split('?')[0];
-            return origFetch.call(window, baseUrl + '?' + qs.toString());
+            // Keep cancellation, no-store and all other caller controls while
+            // changing only POST transport to the Gateway's GET compatibility.
+            var getOptions = Object.assign({}, opts, {method:'GET'});
+            delete getOptions.body;
+            return origFetch.call(window, baseUrl + '?' + qs.toString(), getOptions);
           }
         }
       }
@@ -4421,7 +4431,8 @@ async function gwCallJson(action, params, fresh = false) {
     }
     // Structured student writes/verification opt out: never cache or retry a mutation
     // transported over GET, and preserve the caller's AbortSignal.
-    if (init && init.cache === 'no-store') return _origFetch(input, init);
+    if (init && (init.cache === 'no-store' || init.signal ||
+        (init.method && init.method.toUpperCase() !== 'GET'))) return _origFetch(input, init);
     // GET 用快取
     const isGet = !init || !init.method || init.method.toUpperCase() === 'GET';
     const cacheKey = isGet ? url : null;
