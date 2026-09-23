@@ -13,6 +13,20 @@
     ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const host = () => document.getElementById('annReview');
   const panel = html => '<section class="card" style="padding:24px;margin-bottom:20px;border:2px solid #0F4A3E;overflow-wrap:anywhere">' + html + '</section>';
+  function checkAccess() {
+    if (allowed()) return true;
+    const message = typeof _loggedIn === 'undefined' || !_loggedIn ||
+      typeof _currentUser === 'undefined' || !_currentUser ?
+      '登入狀態已失效，請重新登入後再開啟公告。' :
+      '此帳號未開啟「公告」權限，尚未送出任何審核。請由管理員在「帳號管理」勾選此帳號的「公告」權限，儲存後重新登入。';
+    if (host()) {
+      host().innerHTML = panel('<h2>無法開啟審核</h2><p role="alert">' + esc(message) + '</p>');
+      host().scrollIntoView({behavior:'auto', block:'start'});
+    } else if (typeof showToast === 'function') {
+      showToast(message);
+    }
+    return false;
+  }
   async function get(row) {
     const response = await gwCall('announce_get', {row: Number(row)}, {cache:'no-store'});
     const result = await response.json();
@@ -23,7 +37,7 @@
   function mount() {
     generation++;
     record = null;
-    if (!allowed() || !host()) return;
+    if (!checkAccess() || !host()) return;
     if (!document.getElementById('annMobileMenu')) {
       const sidebar = document.querySelector('.sidebar');
       if (sidebar) {
@@ -49,7 +63,12 @@
     return open(Number(rows[0]), params.get('review_action') === 'reject' ? 'reject' : 'approve');
   }
   async function open(row, nextIntent) {
-    if (!allowed() || !host() || !validRow(row) || busy) return;
+    if (!checkAccess() || !host()) return;
+    if (!validRow(row)) {
+      host().innerHTML = panel('<h2>公告編號格式不正確</h2><p role="alert">請重新載入公告列表後再試，尚未送出任何審核。</p>');
+      return;
+    }
+    if (busy) return;
     const container = host(), owner = _currentUser, ticket = ++generation;
     record = null;
     intent = nextIntent === 'reject' ? 'reject' : 'approve';
