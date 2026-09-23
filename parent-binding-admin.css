@@ -1,0 +1,18 @@
+#nav-parentBinding{border:0;background:transparent;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer}
+#nav-parentBinding.active{background:rgba(255,255,255,.15);color:#fff}
+#nav-parentBinding:focus-visible,#bindingMobileMenu:focus-visible{outline:3px solid #ad790c;outline-offset:-3px}
+#parentBindingFrame{display:block;width:100%;min-height:440px;border:0;background:transparent}
+.binding-session-info{font-size:14px;line-height:1.7;color:#52645e;margin:0 0 16px}
+.binding-mode .topbar-actions,.binding-mode #btnSaveSidebar,.binding-mode #saveBtnHint,
+.binding-mode .sidebar>div:has(#btnSheetsSync){display:none!important}
+#bindingMobileMenu{display:none}
+@media(max-width:768px){
+  .binding-mode #appScreen{max-width:100%;overflow-wrap:anywhere}
+  .binding-mode #bindingMobileMenu{display:inline-flex;margin:12px 16px;min-height:44px}
+  .binding-mode:not(.binding-menu-expanded) .sidebar-menu,
+  .binding-mode:not(.binding-menu-expanded) .sidebar-bottom{display:none}
+  .binding-mode .sidebar-logo{padding:12px 16px}
+  .binding-mode .topbar{position:relative;padding:16px;flex-wrap:wrap;gap:12px}
+  .binding-mode .topbar-actions{flex-wrap:wrap;min-width:0}
+  .binding-mode .content{padding:16px;min-width:0}
+}

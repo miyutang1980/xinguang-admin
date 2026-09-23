@@ -46,7 +46,9 @@ LINE 已受理只表示訊息 API 接受，不代表老師已讀；封鎖、未�
 
 ## 首次綁定與校方核驗
 
-新版部署後，行政／管理員使用家長綁定碼核發頁，依既有校方聯絡資料確認家長身分，輸入學生編號並選正確家長欄位。
+家長可免碼一次申請 1–5 位孩子，送出後等待校方核驗。行政／管理員登入本後台，點「請假紀錄」下方的「家長綁定審核」，沿用登入直接操作，不需另填帳密。
+
+依既有校方聯絡資料確認家長身分，逐位對應正確學生編號，勾選核驗聲明後按「一次核准 N 位孩子」，再核對最後確認視窗。資料不符時填寫原因退回整份；核准後請家長重新讀取家長中心。不能手動修改試算表狀態代替授權程序。
 
 綁定碼有效 30 分鐘，只交給核驗過的家長。重新核發使相同孩子與欄位的未使用舊碼失效；已有他人綁定的欄位不會被覆寫。
 
@@ -168,7 +170,7 @@ Gateway 沿用已確認 Apps Script 專案，先備份，再管理部署 → 原
 | 家長 | LINE 歡迎選單 | [LINE 歡迎選單](https://liff.line.me/2009757754-ZtkX6Igq) | 既有選單；不等於已綁定在校學生 |
 | 家長 | 請假與取消接送 | [請假與取消接送](https://liff.line.me/2009757754-paHJ5QJO) | 官方 LINE 固定入口；新版 parent-center-v2 待正式部署驗收 |
 | 校務 | 後台管理 | [後台管理](https://admin.taipingxinguang.org/) | 個人帳號登入；依角色授權 |
-| 校務 | 家長綁定碼核發 | [家長綁定碼核發](https://taipingxinguang.org/parent-binding/) | 待新版前後端部署後使用；限行政／管理員（待部署） |
+| 校務 | 家長綁定審核 | [後台家長綁定審核](https://admin.taipingxinguang.org/?section=parentBinding) | 沿用後台登入；限行政／管理員 |
 | 校務 | 學生資料操作手冊 | [學生資料操作手冊](https://admin.taipingxinguang.org/STUDENT_MANUAL.md) | 學生主檔與學期班級指派 |
 | 校務 | Google Sheets 資料 | [Google Sheets 資料](https://docs.google.com/spreadsheets/d/1Q3lZwp8BiA6dcz5Bu_WLOitn-a_4O1Z0jDQoG6VMC7w/edit) | 僅授權校務人員；不得公開分享 |
 | 校務 | Apps Script Gateway 專案 | [Apps Script Gateway 專案](https://script.google.com/home/projects/1a58uIi0Zbtxr6esICbVuE8CM9i7gtdozANhnu1SLUfhTrwNHAtqB_5lN/edit) | 沿用既有專案與部署網址 |

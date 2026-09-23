@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><title>家長綁定申請審核｜太平新光分校</title>
+  <link rel="stylesheet" href="./base.css?v=20260923-5">
+  <link rel="stylesheet" href="./binding.css?v=20260923-5">
+  <script src="./binding.js?v=20260923-5" defer></script>
+</head>
+<body><a class="skip-link" href="#main">跳至主要內容</a><main id="main">
+  <header class="staff-heading"><div><p class="eyebrow">FAMILY CONNECTION / STAFF</p><h1>家長綁定申請審核</h1><p class="muted">一張申請、多位孩子；核對完整後，一次開通。</p></div>
+    <svg viewBox="0 0 40 40" role="img" aria-label="家校連線" width="42" height="42"><rect width="40" height="40" rx="12" fill="currentColor"/><path d="M10 15l10-5 10 5-10 5-10-5zm4 5v7c4 3 8 3 12 0v-7" fill="none" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>
+  </header>
+  <section id="authPanel" class="panel"><h2>校方安全登入</h2><p class="muted">僅限管理員及行政人員。帳號密碼只保留在本頁記憶體，不存入瀏覽器儲存空間。</p>
+    <form id="authForm"><div class="auth-grid"><label>校方帳號<input name="adminUser" autocomplete="username" required></label><label>校方密碼<input type="password" name="adminPass" autocomplete="current-password" required></label></div><button class="primary" type="submit">讀取待審申請</button></form>
+  </section>
+  <p id="result" role="status" aria-live="polite"></p>
+  <section id="reviewPanel" hidden>
+    <div class="staff-toolbar"><h2 id="pendingCount">待審核</h2><div><button id="refreshReviews" class="secondary" type="button">重新讀取</button><button id="signOut" class="secondary" type="button">登出</button></div></div>
+    <p class="review-warning">電話與姓名只是申請資料，不是身分證明。請透過校方原本留存的聯絡管道核驗，逐位對應學生；不要直接以申請人提供的新電話完成核驗。</p>
+    <div id="applications"></div>
+    <details class="history-section"><summary>最近已處理申請（最多 50 筆）</summary><div id="reviewHistory"></div></details>
+    <details class="history-section"><summary>備用：核發一次性綁定碼</summary>
+      <form id="issueForm" class="panel"><p class="muted">一般申請不需綁定碼。此備用方式只支援原本的媽媽／爸爸欄位，不會覆寫既有綁定。</p>
+        <label>學生編號<input name="studentNo" required autocomplete="off"></label>
+        <label>家長欄位<select name="slot"><option value="1">家長一（新主檔：媽媽）</option><option value="2">家長二（新主檔：爸爸）</option></select></label>
+        <label class="makeup"><input type="checkbox" required>已透過校方既有聯絡管道完成核驗</label>
+        <button class="secondary" type="submit">核發 30 分鐘一次性綁定碼</button><p id="codeResult" role="status"></p>
+      </form>
+    </details>
+  </section>
+  <footer class="help">本工具不會代替家長送出請假。爸爸、媽媽等照顧者需各自申請，校方分別核驗。</footer>
+</main></body></html>
