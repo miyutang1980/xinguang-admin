@@ -9528,18 +9528,20 @@ function _pickupValidateDetails(details,row,session) {
   if(expected!==''&&(!/^\d+$/.test(expected)||Number(expected)!==seen.size))
     throw new Error('排程人數與已排學生不同，請重新載入班表');
 }
-function _pickupRememberDetails(row,session,details,source='validated-batch') {
+function _pickupRememberDetails(row,session,details,source='validated-batch',revision='') {
   _pickupValidateDetails(details,row,session);
   const key=_pickupDetailsKey(row,session);
   // Complete IDs only, current login only, short lived, never persistent storage.
   if(_pickupDetailsSnapshots.size>=400)_pickupDetailsSnapshots.delete(_pickupDetailsSnapshots.keys().next().value);
   _pickupDetailsSnapshots.set(key,{at:Date.now(),count:String(row[session+'_count']??''),
-    result:{success:true,details:structuredClone(details),readerVersion:'pickup-identity-v1',readSource:source}});
+    result:{success:true,details:structuredClone(details),readerVersion:'pickup-identity-v1',readSource:source,
+      revision:/^[a-f0-9]{64}$/.test(revision)?revision:''}});
 }
 function _pickupCachedDetails(row,session) {
   const key=_pickupDetailsKey(row,session),value=_pickupDetailsSnapshots.get(key);
   if(!value)return null;
-  if(Date.now()-value.at>=30000||value.count!==String(row[session+'_count']??'')){
+  const ttl=value.result.revision?5*60*1000:30000;
+  if(Date.now()-value.at>=ttl||value.count!==String(row[session+'_count']??'')){
     _pickupDetailsSnapshots.delete(key);return null;
   }
   _pickupValidateDetails(value.result.details,row,session);
@@ -9656,6 +9658,7 @@ async function _pickupCallGateway(originalUrl, payload) {
       gwBody.date = payload.date;
       gwBody.route = payload.route;
       gwBody.details = payload.details;
+      if(payload.expected_revision)gwBody.expected_revision=payload.expected_revision;
     }
     else if (n8nAction === 'get_students_by_school') {
       // 不實作, 讓上層 fallback 走 students_list
@@ -9869,7 +9872,7 @@ async function _getRouteDetails(scheduleRow, session, authPayload, rowData, fres
     if (!r || r.success !== true) throw new Error((r && r.error) || '接送明細讀取未成功');
     if (!Array.isArray(r.details)) throw new Error('接送明細回應格式錯誤，不能視為零人');
     if(rowData&&r.readerVersion==='pickup-identity-v1'){
-      _pickupRememberDetails(rowData,session,r.details,'validated-detail-cache');
+      _pickupRememberDetails(rowData,session,r.details,'validated-detail-cache',r.revision);
     }
     return r;
   })();
@@ -9878,9 +9881,9 @@ async function _getRouteDetails(scheduleRow, session, authPayload, rowData, fres
   finally{if(key&&_pickupDetailsPending.get(key)===promise)_pickupDetailsPending.delete(key);}
 }
 
-async function _saveRouteDetails(scheduleRow, session, date, route, details, authPayload) {
+async function _saveRouteDetails(scheduleRow, session, date, route, details, authPayload, revision='') {
   return _pickupCall(PICKUP_DETAILS_API, Object.assign({
-    action: 'save_route_details', schedule_row: scheduleRow, session, date, route, details
+    action: 'save_route_details', schedule_row: scheduleRow, session, date, route, details, expected_revision:revision
   }, authPayload));
 }
 
@@ -10005,7 +10008,9 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
         '主檔相容模式（Gateway 未回傳 W 欄，需核對部署）。') +
       ' 名冊取得 ' + new Date(modalRosterAt).toLocaleTimeString('zh-TW') +
       '（5 分鐘內共用，重新載入可立即更新）。排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。' +
-      (['validated-batch','validated-detail-cache'].includes(results[1].readSource)?' 已排學生共用 30 秒內取得的完整明細（含學生編號）。':' 已排學生已向 Gateway 重新讀取。');
+      (['validated-batch','validated-detail-cache'].includes(results[1].readSource)?
+        (results[1].revision?' 已排學生共用 5 分鐘內的版本化明細，儲存時會核對是否被他人更改。':' 已排學生共用 30 秒內取得的完整明細（舊 Gateway 相容模式）。'):
+        ' 已排學生已向 Gateway 重新讀取。');
     existing = results[1];
     if (!isCurrent()) return;
     if (existing.details.some(d => !d || !d.school_name ||
@@ -10294,13 +10299,19 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     if (!isCurrent()) return;
     el('rd-save').textContent = '儲存中…';
     try {
-      const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload);
+      const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload, existing.revision||'');
       if (r && r.success && isCurrent()) {
         rowData[session+'_school']=r.school_summary || '';
         rowData[session+'_count']=total;
         if(window._routeNamesCache?.[rowData.row_index]){
           delete window._routeNamesCache[rowData.row_index][session];
           delete window._routeNamesCache[rowData.row_index]['stops_'+session];
+        }
+        if(r.revision&&Array.isArray(r.details)){
+          _pickupRememberDetails(rowData,session,r.details,'validated-detail-cache',r.revision);
+          window._routeNamesCache[rowData.row_index] ||= {};
+          window._routeNamesCache[rowData.row_index][session]=r.details.flatMap(d=>d.student_names);
+          window._routeNamesCache[rowData.row_index]['stops_'+session]=r.details.map(d=>d.school_name);
         }
         const stopSummary=document.querySelector(`#ps-table-wrap tr[data-row="${Number(rowData.row_index)}"] [data-stop-summary="${session}"]`);
         if(stopSummary)stopSummary.textContent=rowData[session+'_school'] || '尚未安排';
@@ -10309,10 +10320,11 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       } else if (r && r.success) {
         return;
       } else {
-        throw new Error((r && r.error) || '儲存回應不明');
+        const error=new Error((r && r.error) || '儲存回應不明');
+        error.conflict=!!r?.conflict;throw error;
       }
     } catch (e) {
-      showLoadError(new Error('無法確認儲存結果（' + e.message + '）'), true);
+      showLoadError(new Error((e.conflict?'未儲存：':'無法確認儲存結果：')+e.message), !e.conflict);
       if (isCurrent()) el('rd-save').textContent = '需重新讀取';
     }
   };
@@ -10421,7 +10433,7 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
         const arr = details[key];
         const row=rowsToHydrate.find(row=>row.row_index===rid);
         // Missing entries are errors, never synthesize a zero-student success.
-        _pickupRememberDetails(row,session,arr);
+        _pickupRememberDetails(row,session,arr,'validated-batch',r.revisions?.[key]);
         const names = [];
         if (Array.isArray(arr)) {
           arr.forEach(d => (d.student_names || []).forEach(n => names.push(n)));
@@ -10492,7 +10504,7 @@ async function renderPickupSchedule(el) {
           <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程 · ${PICKUP_TERM.id}</h2>
           <div style="color:#7a7974;font-size:0.85rem;margin-top:4px">
             僅顯示 ${PICKUP_TERM.start}～${PICKUP_TERM.end} · 歷史資料保留後台，不列入本學期
-            <span id="ps-ui-version" style="display:block;font-size:12px;margin-top:4px">介面版本：接送分段載入 20260924.3</span>
+            <span id="ps-ui-version" style="display:block;font-size:12px;margin-top:4px">介面版本：接送版本快取 20260924.4</span>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -10892,12 +10904,9 @@ async function renderPickupSchedule(el) {
         if (!r) return;
         openRouteDetailsModal(r, session, auth_payload, async (newTotal) => {
           const field = session === 'noon' ? 'noon_count' : 'pm_count';
-          try {
-            await api({action: 'save', row_index, field, value: String(newTotal)});
-            const local = allRows.find(x => x.row_index === row_index);
-            if (local) local[field] = newTotal;
-            renderTable();
-          } catch (err) { console.error(err); }
+          const local = allRows.find(x => x.row_index === row_index);
+          if (local) local[field] = newTotal;
+          renderTable();
         });
       };
     });
@@ -10911,31 +10920,20 @@ async function renderPickupSchedule(el) {
         const r = allRows.find(x => x.row_index === row_index);
         if (!r) return;
         openRouteDetailsModal(r, session, auth_payload, async (newTotal) => {
-          // 回填 count 並觸發 W14 save
+          // Gateway has already committed and read back the authoritative count.
+          // Do not send a second write or immediately refetch the same details.
           const field = session === 'noon' ? 'noon_count' : 'pm_count';
           const countInput = tr.querySelector(`input[data-field="${field}"]`);
           if (countInput) {
             countInput.value = newTotal;
-            countInput.style.background = '#fff8e1';
-          }
-          try {
-            const sr = await api({action: 'save', row_index, field, value: String(newTotal)});
-            if (sr.success) {
-              if (countInput) {
-                countInput.style.background = '#e8f5e9';
-                setTimeout(() => countInput.style.background = '', 1200);
-              }
-              const local = allRows.find(x => x.row_index === row_index);
-              if (local) local[field] = newTotal;
-            }
-          } catch (err) { console.error('人數回填失敗', err); }
-          // 名字快取變化：清該 row 該 session 快取、背景重讀名字、寫進快取、重繪 cell
-          if (window._routeNamesCache && window._routeNamesCache[row_index]) {
-            delete window._routeNamesCache[row_index][session];
+            countInput.style.background = '#e8f5e9';
           }
           const localRow = allRows.find(x => x.row_index === row_index);
           if (localRow) {
-            setTimeout(function(){ _hydrateRouteNames([localRow], auth_payload); }, 100);
+            localRow[field]=newTotal;
+            _rehydrateRouteCells([localRow]);
+            if(!Array.isArray(window._routeNamesCache?.[row_index]?.[session]))
+              _hydrateRouteNames([localRow],auth_payload);
           }
         });
       };
