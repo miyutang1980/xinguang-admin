@@ -4458,7 +4458,7 @@ async function gwCallJson(action, params, fresh = false) {
   const readLabels = {routes_list:'接送排程',routes_get_staff:'接送人員',routes_get_details:'本班次已排學生',
     routes_get_details_batch:'接送姓名摘要',semester_assignments_list:'115-1 學期名冊',student_master_list:'學生主檔姓名'};
   const started = performance.now();
-  const timeoutMs = ['routes_get_details','routes_get_details_batch'].includes(action) ? 60000 : readLabels[action] ? 20000 : 45000;
+  const timeoutMs = readLabels[action] ? 60000 : 45000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await gwCall(action, params, { cache:'no-store', signal:controller.signal });
@@ -10492,6 +10492,7 @@ async function renderPickupSchedule(el) {
           <h2 style="margin:0;font-size:1.5rem">🚐 接送路線排程 · ${PICKUP_TERM.id}</h2>
           <div style="color:#7a7974;font-size:0.85rem;margin-top:4px">
             僅顯示 ${PICKUP_TERM.start}～${PICKUP_TERM.end} · 歷史資料保留後台，不列入本學期
+            <span id="ps-ui-version" style="display:block;font-size:12px;margin-top:4px">介面版本：接送分段載入 20260924.3</span>
           </div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -10504,6 +10505,7 @@ async function renderPickupSchedule(el) {
         </div>
       </div>
       <div id="ps-status" style="margin-bottom:8px;font-size:0.85rem;color:#7a7974">載入中…</div>
+      <div id="ps-staff-note" role="status" style="margin-bottom:10px"></div>
       <div id="ps-table-wrap" style="background:#fff;border:1px solid #d4d1ca;border-radius:6px;overflow:auto;max-height:70vh"></div>
     </div>
   `;
@@ -10511,6 +10513,7 @@ async function renderPickupSchedule(el) {
   let staffList = [];
   let allRows = [];
   let loaded = false, appending = false, loading = false, rosterReady = false, loadVersion = 0;
+  let staffReady = false, staffLoading = false, staffError = '', rosterError = '';
   function setCreateEnabled(enabled) {
     ['ps-add-day','ps-add-route','ps-copy-week','ps-mark-rest','ps-copy-next','ps-copy-4w','ps-fill-names'].forEach(id => {
       const button = el.querySelector('#' + id);
@@ -10523,16 +10526,84 @@ async function renderPickupSchedule(el) {
     return _pickupCall(ROUTE_API, Object.assign({}, payload, auth_payload));
   }
 
+  function updateLoadStatus() {
+    if(!isCurrent()||!loaded)return;
+    document.getElementById('ps-status').textContent =
+      `共 ${allRows.length} 列 · ${staffReady?'員工 '+staffList.length+' 位':staffLoading?'人員讀取中':'人員尚未取得'} · `+
+      (rosterReady?'名冊已完成':rosterError?'名冊未完成：'+rosterError+'；學生編輯停用，請重新載入':'學期名冊讀取中；學生編輯暫停')+
+      ' · 最後同步 '+new Date().toLocaleTimeString('zh-TW');
+  }
+
+  function renderStaffNotice() {
+    if(!isCurrent())return;
+    const note=document.getElementById('ps-staff-note');note.replaceChildren();
+    if(staffReady)return;
+    const text=document.createElement('span');
+    text.style.cssText='color:#92400e;font-size:13px;line-height:1.6';
+    text.textContent=staffLoading?
+      '接送人員讀取中；既有司機姓名保留，人員選單暫停。班表與學生名冊獨立載入。':
+      '接送人員尚未取得：'+staffError+'。既有司機姓名保留，僅停用人員選單；班表與學生安排不因這項失敗而清空。';
+    note.append(text);
+    if(!staffLoading){
+      const retry=document.createElement('button');retry.id='ps-retry-staff';
+      retry.textContent='重試人員名單';retry.style.cssText='margin-left:8px;padding:6px 12px;border:1px solid #01696f;background:#fff;color:#01696f;border-radius:4px';
+      retry.onclick=()=>loadStaff(loadVersion);note.append(retry);
+    }
+  }
+
+  function applyStaffControls() {
+    if(!isCurrent()||!loaded)return;
+    document.querySelectorAll('#ps-table-wrap tr[data-row]').forEach(tr=>{
+      const row=allRows.find(r=>Number(r.row_index)===Number(tr.dataset.row));if(!row)return;
+      ['noon_driver','noon_driver2','pm_driver','pm_driver2'].forEach(field=>{
+        const select=tr.querySelector('select[data-field="'+field+'"]');if(!select)return;
+        const saved=String(row[field]||'');
+        select.replaceChildren(new Option('',''));
+        staffList.forEach(name=>select.add(new Option(name,name,false,name===saved)));
+        if(saved&&!staffList.includes(saved)){
+          const option=new Option(saved+'（既有值）',saved,true,true);option.disabled=true;select.add(option);
+        }
+        select.value=saved;
+        select.title=saved?'已排人員：'+saved+(!staffReady?'；人員名單尚未取得，暫停修改':''):'';
+        select.disabled=!staffReady||!rosterReady||row.status==='休';
+      });
+    });
+    if(rosterReady&&window.XGRoutePolicy)XGRoutePolicy.decorate(el,allRows);
+  }
+
+  async function loadStaff(version) {
+    if(!isCurrent()||version!==loadVersion||staffLoading)return;
+    staffLoading=true;staffReady=false;staffError='';renderStaffNotice();updateLoadStatus();
+    try{
+      const r=await api({action:'get_staff'});
+      if(!isCurrent()||version!==loadVersion)return;
+      if(!r||r.success!==true||!Array.isArray(r.staff)||r.staff.some(s=>!s||typeof s.name!=='string'))
+        throw new Error((r&&r.error)||'人員名單格式不完整');
+      staffList=[...new Set(r.staff.map(s=>s.name.trim()).filter(Boolean))];staffReady=true;
+    }catch(error){
+      if(!isCurrent()||version!==loadVersion)return;
+      staffList=[];staffReady=false;staffError=error.message||'人員名單讀取失敗';
+    }finally{
+      if(isCurrent()&&version===loadVersion){
+        staffLoading=false;renderStaffNotice();applyStaffControls();updateLoadStatus();
+      }
+    }
+  }
+
   async function loadAll() {
     if (!isCurrent() || loading) return false;
     loading = true;
     const version = ++loadVersion;
     loaded = false;
     rosterReady = false;
+    staffReady=false;staffLoading=false;staffError='';rosterError='';staffList=[];
     setCreateEnabled(false);
+    // A refresh must not leave controls from the previous snapshot editable.
+    el.querySelectorAll('#ps-table-wrap input, #ps-table-wrap select, #ps-table-wrap button')
+      .forEach(control=>{control.disabled=true;});
     const statusEl = document.getElementById('ps-status');
     const start = performance.now();
-    const stages = {人員:false,排程:false,名冊:false};
+    const stages = {排程:false,名冊:false};
     const paint = () => {
       if (isCurrent() && version === loadVersion && !loaded) statusEl.textContent =
         `讀取中 ${Math.floor((performance.now()-start)/1000)} 秒 · ` +
@@ -10542,40 +10613,35 @@ async function renderPickupSchedule(el) {
     const timer = setInterval(paint,1000);
     // 清 cache、讓名單重拉一次（避免舊 cache 狀態顯示不出名單）
     window._routeNamesCache = {};
+    // Optional staff lookup never gates the independently authenticated route list.
+    // Failures keep saved driver labels visible and lock only driver selectors.
+    loadStaff(version);
     const rosterTask = _loadAllStudentsOnce(auth_payload).then(() => {
       if (!isCurrent() || version !== loadVersion) return;
       rosterReady = true; stages.名冊 = true;
       if (loaded) {
         renderTable(); setCreateEnabled(!appending);
-        statusEl.textContent = `共 ${allRows.length} 列 · 員工 ${staffList.length} 位 · 名冊已完成 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
+        updateLoadStatus();
       }
     }).catch(error => {
       if (!isCurrent() || version !== loadVersion) return;
       stages.名冊 = error.message;
-      if (loaded) statusEl.textContent = '排程已取得，名冊未完成：'+error.message+'；編輯停用，請按重新載入。';
+      rosterError=error.message;updateLoadStatus();
     });
     try {
-      const [staffR, listR] = await Promise.all([
-        api({action: 'get_staff'}).then(r=>{stages.人員=true;paint();return r;}),
-        api({action: 'list'}).then(r=>{stages.排程=true;paint();return r;})
-      ]);
-      if (!isCurrent()) return false;
-      if (!staffR || !staffR.success || !Array.isArray(staffR.staff)) throw new Error((staffR && staffR.error) || '員工清單回應不完整');
+      const listR=await api({action:'list'}).then(r=>{stages.排程=true;paint();return r;});
+      if (!isCurrent()||version!==loadVersion) return false;
       if (!listR || !listR.success || !Array.isArray(listR.rows)) throw new Error((listR && listR.error) || '排程清單回應不完整');
       if (window.XGRoutePolicy) XGRoutePolicy.accept(listR);
-      staffList = (staffR.staff || []).map(s => s.name);
       allRows = listR.rows || [];
+      loaded = true;
       populateWeekFilter();
       renderTable();
-      statusEl.innerHTML =
-        `共 <b>${allRows.length}</b> 列 · 員工 <b>${staffList.length}</b> 位 · 最後同步 ${new Date().toLocaleTimeString('zh-TW')}`;
-      loaded = true;
-      if (!rosterReady) statusEl.textContent = typeof stages.名冊 === 'string' ?
-        '排程已取得，名冊未完成：'+stages.名冊+'；編輯停用，請按重新載入。' :
-        '排程已取得，正在讀取學期名冊；名冊完成前暫停編輯。';
+      updateLoadStatus();
       return true;
     } catch(e) {
-      if (!isCurrent()) return false;
+      if (!isCurrent()||version!==loadVersion) return false;
+      loaded=false;
       console.error('[接送排程] 載入失敗:', e);
       statusEl.textContent = '載入失敗：' + (e.name === 'AbortError' ? '連線逾時，請重新載入。' : e.message || e);
       document.getElementById('ps-table-wrap').innerHTML =
@@ -10758,6 +10824,7 @@ async function renderPickupSchedule(el) {
     if (!rosterReady) document.querySelectorAll('#ps-table-wrap input, #ps-table-wrap select, #ps-table-wrap button')
       .forEach(control => { control.disabled = true; });
     if (rosterReady && window.XGRoutePolicy) XGRoutePolicy.decorate(el, filtered);
+    applyStaffControls();
     console.log('[接送排程] renderTable', filtered.length, '列 ·', (performance.now()-t0).toFixed(1), 'ms');
 
     // 背景並行讀名字、idle 時段才跑 (不阻塞 UI)
