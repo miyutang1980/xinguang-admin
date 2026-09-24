@@ -10941,6 +10941,10 @@ async function renderPickupSchedule(el) {
       btn4.onclick = async () => {
         const srcMon = document.getElementById('ps-filter-week').value;
         if (!srcMon) { alert('請先選一個「該週有完整班表」的週次當來源'); return; }
+        const firstTarget = new Date(srcMon + 'T00:00:00'); firstTarget.setDate(firstTarget.getDate()+7);
+        if (window.XGRoutePolicy && !XGRoutePolicy.canCopy(_localDateStr(firstTarget))) {
+          alert('新規則期間請使用「建立固定班表」一次建立日期範圍，再用「補學生名單到下一週」；不複製舊時間或完成紀錄。'); return;
+        }
         if (!confirm('以 ' + srcMon + ' 週為範本、往後生成 4 週 (成 28 天、30 路線) 的接送排班？')) return;
         const srcD = new Date(srcMon + 'T00:00:00');
         for (let i = 1; i <= 4; i++) {
@@ -10974,13 +10978,20 @@ async function renderPickupSchedule(el) {
       const offset = (dstD.getTime() - srcD.getTime());
       const targetDate = _localDateStr(new Date(srcDate.getTime() + offset));
       const targetRoute = _routeNameForDate(srcR.route, targetDate);
+      if (srcR.status === '休') { skipped++; continue; }
+      if (window.XGRoutePolicy && XGRoutePolicy.isFixed(targetDate) && _rpDay(targetDate).closed) { skipped++; continue; }
       const targetRow = allRows.find(x => x.date === targetDate && x.route === targetRoute);
       if (!targetRow) {
         errs.push('找不到目標列: ' + targetDate + ' / ' + srcR.route);
         continue;
       }
+      if (targetRow.status === '休') { skipped++; continue; }
       // 兩個 session 各補
       for (const session of ['noon','pm']) {
+        if (window.XGRoutePolicy && XGRoutePolicy.isFixed(targetDate)) {
+          const rule = _rpRule(targetDate, targetRoute);
+          if (rule.closed || rule.retained || !rule[session]) { skipped++; continue; }
+        }
         attempted++;
         try {
           // 先查目標是否已有 details（避免覆蓋）
@@ -10990,6 +11001,8 @@ async function renderPickupSchedule(el) {
           const src = await _getRouteDetails(srcR.row_index, session, auth_payload);
           const details = (src && src.details) || [];
           if (details.length === 0) continue; // 來源也是空、跳過
+          if (window.XGRoutePolicy) XGRoutePolicy.checkDetails(targetRow, session,
+            details.reduce((n,d)=>n+(Array.isArray(d.student_ids)?d.student_ids.length:0),0));
           const sv = await _saveRouteDetails(targetRow.row_index, session, targetDate, targetRoute, details, auth_payload);
           if (sv && (sv.success || sv.ok)) {
             copied++;

@@ -22,6 +22,7 @@
     checkDetails(row,session,count){
       const rule=_rpRule(row.date,row.route);if(!rule.enforced)return;
       if(!ready)throw Error('固定規則尚未載入');
+      if(rule.retained)throw Error('此為保留的既有特殊安排，名單不自動搬動');
       if(rule.closed||row.status==='休'||!rule[session])throw Error(rule.reason||'本日沒有此班次');
       const errors=_rpRowErrors(row,true);if(errors.length)throw Error('固定欄位不符，請先核對：'+errors.join('；'));
       if(rule.capacity!=null&&count>rule.capacity)throw Error('本趟上限 '+rule.capacity+' 人，超載不得儲存');
@@ -34,11 +35,11 @@
         tr.querySelectorAll('[data-field]').forEach(control=>{
           const field=control.dataset.field,session=field.startsWith('noon_')?'noon':field.startsWith('pm_')?'pm':'';
           const fixed=['noon_vehicle','pm_vehicle','noon_time','pm_time','noon_count','pm_count'].includes(field);
-          if(fixed||rule.closed||(session&&!rule[session])||errors.length||row.noon_returned_at||row.pm_returned_at)control.disabled=true;
+          if(fixed||rule.closed||rule.retained||(session&&!rule[session])||errors.length||row.noon_returned_at||row.pm_returned_at)control.disabled=true;
           if(fixed)control.title='固定規則或系統依學生明細計算，不可直接修改';
         });
         tr.querySelectorAll('.btn-detail').forEach(b=>{
-          if(rule.closed||!rule[b.dataset.session]||errors.length||row.status==='休'||row.noon_returned_at||row.pm_returned_at)b.disabled=true;
+          if(rule.closed||rule.retained||!rule[b.dataset.session]||errors.length||row.status==='休'||row.noon_returned_at||row.pm_returned_at)b.disabled=true;
         });
         tr.querySelectorAll('.btn-route-del,.btn-day-del').forEach(b=>{b.disabled=true;b.title='固定班表保留紀錄，請改設休';});
         // A conflicting uncompleted row can only be made inactive, never scheduled.
@@ -49,7 +50,7 @@
         const routeCell=tr.children[3];
         if(routeCell&&!routeCell.querySelector('.rp-tag')){
           const tag=document.createElement('div');tag.className='rp-tag';tag.style.cssText='font-size:12px;color:'+(errors.length?'#b91c1c':'#176347');
-          tag.textContent=errors.length?'規則衝突：'+errors.join('；'):'固定班表'+(rule.extra?' · 14:45 獨立趟次':'');
+          tag.textContent=errors.length?'規則衝突：'+errors.join('；'):rule.retained?'保留既有特殊安排（非固定範本）':'固定班表'+(rule.extra?' · 14:45 獨立趟次':'');
           routeCell.appendChild(tag);
         }
         if(tr.children[4]&&rule.capacity===null&&!rule.closed)tr.children[4].textContent='無上限';
@@ -69,6 +70,8 @@
       const button=document.createElement('button');button.id='ps-fixed-create';button.textContent='建立固定班表（先預覽）';
       button.style.cssText='padding:8px 12px;background:#176347;color:white;border:0;border-radius:5px;cursor:pointer;margin-top:8px';
       box.appendChild(document.createElement('br'));box.appendChild(button);
+      const guide=document.createElement('a');guide.href='FIXED_PICKUP_POLICY.md';guide.target='_blank';guide.rel='noopener';
+      guide.textContent='固定規則與操作說明';guide.style.marginLeft='12px';box.appendChild(guide);
       let busy=false;
       button.onclick=async()=>{
         if(busy||!ready||!isCurrent())return;
@@ -80,14 +83,15 @@
           const plan=await api({action:'policy_plan',start,end});if(!isCurrent())return;
           if(!plan.success)throw Error(plan.error||'預覽失敗');
           if(plan.conflicts.length)throw Error('既有排程有衝突，未寫入：\n'+plan.conflicts.slice(0,12).join('\n'));
-          if(!plan.inserted){alert('固定班表已存在，未新增任何資料。');return;}
-          const summary='日期：'+start+'～'+end+'\n新增 '+plan.inserted+' 列固定趟次框架；保留 '+plan.existing+' 列既有資料。\n略過 '+plan.skippedDays.length+' 個週末／假日。\n\n不會自動加入學生、不複製完成狀態，不更改既有名單。\n確認建立？';
+          if(!plan.inserted&&!plan.updated){alert('固定班表已符合規則，未變更任何資料。');return;}
+          const changes=(plan.updates||[]).map(u=>u.date+' '+u.route+'：'+u.changes.map(c=>c.field+' '+(c.before||'空白')+' → '+(c.after||'空白')).join('、')).join('\n');
+          const summary='日期：'+start+'～'+end+'\n新增 '+plan.inserted+' 列固定框架；調整 '+(plan.updated||0)+' 列固定欄位；保留 '+(plan.retained||0)+' 筆特殊安排。\n略過 '+plan.skippedDays.length+' 個週末／假日。\n\n'+changes+'\n\n只調整時間、車型、上限等固定欄位。不搬學生、不改姓名、不複製完成狀態；半巴與 14:45 新趟次是空名單。\n確認套用？';
           if(!confirm(summary))return;
           wrote=true;button.textContent='建立中，請勿重複送出…';
           const r=await api({action:'policy_apply',start,end,fingerprint:plan.fingerprint});
           if(!r.success)throw Error(r.error||'建立結果不明');
           if(!isCurrent())return;
-          await loadAll();alert('已建立 '+r.inserted+' 列固定框架。請逐班次選學生及安排接送人員。');
+          await loadAll();alert('已新增 '+r.inserted+' 列固定框架，調整 '+(r.updated||0)+' 列固定欄位。既有學生未搬動；請為新趟次選學生及接送人員。');
         }catch(e){if(isCurrent())alert(e.message+(wrote?'\n請先重新載入核對，不要直接重複建立。':''));}
         finally{busy=false;if(isCurrent()){button.disabled=false;button.textContent='建立固定班表（先預覽）';}}
       };

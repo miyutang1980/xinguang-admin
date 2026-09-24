@@ -5,6 +5,11 @@ function _rpSpec() {
   return {
     version:'fixed-pickup-v1',effective:'2026-09-29',through:'2027-01-20',
     extraSuffix:'〔週五14:45加班〕',
+    // Preserve only these already-booked trips. They are not future templates.
+    retainedTrips:[
+      {date:'2026-09-29',route:'小巴(加)',capacity:4,pm_vehicle:'小巴6',pm_time:'15:25'},
+      {date:'2026-10-01',route:'A車加',capacity:6,pm_vehicle:'A6',pm_time:'15:55'}
+    ],
     routes:[
       {id:'A',name:'交通車A (RDW-5365)',capacity:6,vehicle:'A6'},
       {id:'B',name:'交通車B (RGE-2523)',capacity:4,vehicle:'B4'},
@@ -41,6 +46,10 @@ function _rpRule(date,route) {
   var day=_rpDay(date),p=_rpSpec();
   if(!day.enforced)return {enforced:false};
   if(day.closed)return {enforced:true,closed:true,reason:day.reason};
+  var retained=p.retainedTrips.filter(function(r){return r.date===date&&r.route===route;})[0];
+  if(retained)return {enforced:true,closed:false,retained:true,capacity:retained.capacity,id:'RETAINED',
+    noon:false,pm:true,noon_time:'',pm_time:retained.pm_time,noon_vehicle:'',pm_vehicle:retained.pm_vehicle,
+    weekday:['週日','週一','週二','週三','週四','週五','週六'][day.dow]};
   var extra=String(route).endsWith(p.extraSuffix),base=extra?String(route).slice(0,-p.extraSuffix.length):route;
   var vehicle=p.routes.filter(function(r){return r.name===base;})[0];
   if(!vehicle)return {enforced:true,closed:true,reason:'非固定六條路線；A車加不可當成半巴'};
