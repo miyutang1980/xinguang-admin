@@ -10799,7 +10799,21 @@ async function renderPickupSchedule(el) {
     const statusEl = el.querySelector('#ps-status');
     statusEl.textContent = '新增中…請勿重複送出';
     try {
-      const r = await api({action:'append', rows});
+      let r;
+      const fixedDate = rows[0] && rows[0].fields.date;
+      const fixedDay = window.XGRoutePolicy && XGRoutePolicy.isFixed(fixedDate) &&
+        rows.every(row => row.fields.date === fixedDate) &&
+        rows.length === _rpTemplates(fixedDate).length;
+      if (fixedDay) {
+        // Friday has twelve rows. Generate them server-side instead of putting
+        // a large JSON matrix into the legacy GET query transport.
+        const plan = await api({action:'policy_plan',start:fixedDate,end:fixedDate});
+        if (!plan.success || plan.conflicts.length || plan.updated || plan.inserted !== rows.length)
+          throw new Error(plan.error || '當日資料已變更，請重新載入後再建立固定班表');
+        r = await api({action:'policy_apply',start:fixedDate,end:fixedDate,fingerprint:plan.fingerprint});
+      } else {
+        r = await api({action:'append', rows});
+      }
       if (!isCurrent()) return;
       if (!r || !r.success) throw new Error((r && r.error) || '未取得新增確認');
       if (!await loadAll()) return;
