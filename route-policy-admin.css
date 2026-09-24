@@ -1,0 +1,15 @@
+#pickupPolicyMenu{display:none}
+.pickup-policy-mode .topbar-actions,.pickup-policy-mode #btnSaveSidebar,.pickup-policy-mode #saveBtnHint,
+.pickup-policy-mode .sidebar>div:has(#btnSheetsSync){display:none!important}
+.pickup-policy-mode #ps-table-wrap :disabled{opacity:.5;cursor:not-allowed}
+.pickup-policy-mode #ps-policy-info{overflow-wrap:anywhere}
+@media(max-width:768px){
+  .pickup-policy-mode #pickupPolicyMenu{display:block;margin:12px 16px;padding:10px 16px;border:1px solid #c6dfce;border-radius:6px;min-height:44px;background:#fff;color:#164d3c;font:inherit}
+  .pickup-policy-mode:not(.pickup-policy-menu-open) .sidebar-menu,
+  .pickup-policy-mode:not(.pickup-policy-menu-open) .sidebar-bottom{display:none}
+  .pickup-policy-mode .sidebar-logo{padding:12px 16px}
+  .pickup-policy-mode .content{padding:8px;min-width:0}
+  .pickup-policy-mode .content>div{padding:12px!important}
+  .pickup-policy-mode .topbar{position:relative;padding:16px}
+  .pickup-policy-mode #ps-table-wrap{max-width:100%;overflow:auto}
+}

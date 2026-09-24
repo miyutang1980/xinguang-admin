@@ -133,6 +133,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <link rel="stylesheet" href="operations-current.css?v=20260923">
 <link rel="stylesheet" href="announcement-review.css?v=20260923-1">
 <link rel="stylesheet" href="parent-binding-admin.css?v=20260923-5">
+<link rel="stylesheet" href="route-policy-admin.css?v=20260929-1">
 </head>
 <body>
 
@@ -851,6 +852,7 @@ function switchSection(sec) {
   if (window.XGParentBinding) window.XGParentBinding.reset();
   currentSection = sec;
   document.body.classList.toggle('binding-mode', sec === 'parentBinding');
+  document.body.classList.toggle('pickup-policy-mode', sec === 'pickup');
   document.body.classList.toggle('announcement-mode', sec === 'announce');
   // 帳號管理頁面
   if (sec === 'accounts') {
@@ -9564,6 +9566,11 @@ async function _pickupCallGateway(originalUrl, payload) {
   if (originalUrl.indexOf('/route-schedule') >= 0) {
     if (n8nAction === 'get_staff') gwBody._action = 'routes_get_staff';
     else if (n8nAction === 'list') { gwBody._action = 'routes_list'; gwBody.semester = payload.semester || PICKUP_TERM.id; }
+    else if (n8nAction === 'policy_plan' || n8nAction === 'policy_apply') {
+      gwBody._action = n8nAction === 'policy_plan' ? 'routes_policy_plan' : 'routes_policy_apply';
+      gwBody.start = payload.start; gwBody.end = payload.end;
+      if (payload.fingerprint) gwBody.fingerprint = payload.fingerprint;
+    }
     else if (n8nAction === 'save') {
       gwBody._action = 'routes_save';
       gwBody.row_index = payload.row_index;
@@ -9651,7 +9658,7 @@ Object.defineProperty(window, 'SCHOOLS_LIST', {
 
 // 車輛清單(車型+座數;步行 = 無車)
 const VEHICLES_LIST = [
-  '步行', 'A5', 'A6', 'B3', 'B4', 'C1', 'C4', '小巴6', '小巴8'
+  '步行', 'A5', 'A6', 'B3', 'B4', 'C1', 'C4', '小巴6', '小巴8', '半巴4'
 ];
 
 // Plate replacement applies to 115-1 onward; historical route labels stay intact.
@@ -10167,6 +10174,9 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       });
     });
     const total = details.reduce((s, d) => s + d.student_ids.length, 0);
+    try {
+      if (window.XGRoutePolicy) XGRoutePolicy.checkDetails(rowData, session, total);
+    } catch (error) { alert(error.message); return; }
     if (rowData.capacity && total > parseInt(rowData.capacity)) {
       if (!confirm(`合計 ${total} 人 已超過上限 ${rowData.capacity},仍要儲存?`)) return;
     }
@@ -10433,6 +10443,7 @@ async function renderPickupSchedule(el) {
       if (!isCurrent()) return false;
       if (!staffR || !staffR.success || !Array.isArray(staffR.staff)) throw new Error((staffR && staffR.error) || '員工清單回應不完整');
       if (!listR || !listR.success || !Array.isArray(listR.rows)) throw new Error((listR && listR.error) || '排程清單回應不完整');
+      if (window.XGRoutePolicy) XGRoutePolicy.accept(listR);
       staffList = (staffR.staff || []).map(s => s.name);
       allRows = listR.rows || [];
       populateWeekFilter();
@@ -10627,6 +10638,7 @@ async function renderPickupSchedule(el) {
     `;
     if (!rosterReady) document.querySelectorAll('#ps-table-wrap input, #ps-table-wrap select, #ps-table-wrap button')
       .forEach(control => { control.disabled = true; });
+    if (rosterReady && window.XGRoutePolicy) XGRoutePolicy.decorate(el, filtered);
     console.log('[接送排程] renderTable', filtered.length, '列 ·', (performance.now()-t0).toFixed(1), 'ms');
 
     // 背景並行讀名字、idle 時段才跑 (不阻塞 UI)
@@ -10815,6 +10827,11 @@ async function renderPickupSchedule(el) {
       alert('該日期已存在排班，請到表格重新編輯。');
       return;
     }
+    if (window.XGRoutePolicy && XGRoutePolicy.isFixed(dateStr)) {
+      try { await appendRoutes(XGRoutePolicy.templates(dateStr)); }
+      catch (error) { alert(error.message); }
+      return;
+    }
     const d = new Date(dateStr + 'T00:00:00');
     const dow = d.getDay();
     if (dow === 0 || dow === 6) {
@@ -10847,6 +10864,18 @@ async function renderPickupSchedule(el) {
     const dateStr = prompt('日期 (YYYY-MM-DD)?', new Date().toISOString().slice(0,10));
     if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return;
     if (!_pickupInTerm(dateStr)) { alert('日期不在 '+PICKUP_TERM.id+' 學期範圍內'); return; }
+    if (window.XGRoutePolicy && XGRoutePolicy.isFixed(dateStr)) {
+      try {
+        const options = XGRoutePolicy.templates(dateStr).filter(r => !allRows.some(s => s.date === dateStr && s.route === r.fields.route));
+        if (!options.length) { alert('當日固定趟次均已存在'); return; }
+        const choice = prompt('只能選擇固定趟次，請輸入編號：\n'+options.map((r,i)=>(i+1)+'. '+r.fields.route).join('\n'),'1');
+        if (choice === null) return;
+        const index = Number(choice)-1;
+        if (!Number.isInteger(index)||!options[index]) { alert('編號不正確'); return; }
+        await appendRoutes([options[index]]);
+      } catch (error) { alert(error.message); }
+      return;
+    }
     const routeName = prompt('路線名稱?例: 臨時交通車 / 越野車 / B車認加', '');
     if (!routeName || !routeName.trim()) return;
     const cap = prompt('載客上限 (可留空)', '');
@@ -10985,6 +11014,9 @@ async function renderPickupSchedule(el) {
   // 實際複製邏輯抽出來、供「複製整週」「複製下一週」「未來 4 週」共用
   // 同步複製接送明細（學生名單）
   async function _doCopyWeek(srcMon, dstMon) {
+    if (window.XGRoutePolicy && !XGRoutePolicy.canCopy(dstMon)) {
+      alert('新規則期間不使用舊式整週複製，避免複製錯誤時間或假日。請用「建立固定班表」建立趟次，再選學生。'); return;
+    }
     if (!_pickupWeekInTerm(srcMon) || !_pickupWeekInTerm(dstMon)) { alert('只允許複製本學期內的完整週間'); return; }
     const srcD = new Date(srcMon + 'T00:00:00');
     const offset = Math.round((new Date(dstMon + 'T00:00:00') - srcD) / 86400000);
@@ -11152,6 +11184,7 @@ async function renderPickupSchedule(el) {
     else alert('失敗: ' + ((r&&r.error)||'未知錯誤'));
   };
 
+  if (window.XGRoutePolicy) XGRoutePolicy.bind(el, api, loadAll, isCurrent);
   await loadAll();
   if (isCurrent()) _addCopyNextBtn();
 }
@@ -12807,6 +12840,8 @@ setInterval(_leadsPrefetchBadge, 180000);
 // ===== END 潛客名單模組 =====
 
 </script>
+<script src="route-policy.js?v=20260929-1"></script>
+<script src="route-policy-admin.js?v=20260929-1"></script>
 <script src="student-semesters.js?v=2.20.4-timeout"></script>
 <script src="operations-current.js?v=20260923"></script>
 <script src="announcement-review.js?v=20260923-2"></script>
