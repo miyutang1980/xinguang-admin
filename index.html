@@ -133,7 +133,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <link rel="stylesheet" href="operations-current.css?v=20260923">
 <link rel="stylesheet" href="announcement-review.css?v=20260923-1">
 <link rel="stylesheet" href="parent-binding-admin.css?v=20260923-5">
-<link rel="stylesheet" href="route-policy-admin.css?v=20260929-1">
+<link rel="stylesheet" href="route-policy-admin.css?v=20260924-multistop-1">
 </head>
 <body>
 
@@ -9832,8 +9832,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     <div style="background:#fff;border-radius:8px;width:680px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.3)">
       <div style="padding:16px 20px;background:#1B474D;color:#fff;display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:1.1rem;font-weight:700">📋 ${rowData.route} · ${sessionLabel}</div>
-          <div style="font-size:0.85rem;opacity:0.8;margin-top:2px">${rowData.date} (${rowData.weekday})</div>
+          <div style="font-size:1.1rem;font-weight:700">${_esc(rowData.route)} · ${sessionLabel} · 多校接送</div>
+          <div style="font-size:0.85rem;opacity:0.8;margin-top:2px">${_esc(rowData.date)} (${_esc(rowData.weekday)})</div>
         </div>
         <button id="rd-close" style="background:transparent;color:#fff;border:none;font-size:1.4rem;cursor:pointer">×</button>
       </div>
@@ -9968,7 +9968,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
   });
   // 如果表格中選了學校(noon_school/pm_school) 但明細裡還沒有 → 自動加入
   const presetSchool = session === 'noon' ? rowData.noon_school : rowData.pm_school;
-  if (presetSchool && !schoolMap.has(presetSchool)) {
+  if (presetSchool && !schoolMap.size && SCHOOLS_LIST.some(s => s.name === presetSchool)) {
     const sObj = SCHOOLS_LIST.find(s => s.name === presetSchool);
     schoolMap.set(presetSchool, {
       school_code: sObj?.code || '',
@@ -9981,7 +9981,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     if (!isCurrent()) return 0;
     let n = 0;
     schoolMap.forEach(v => { n += v.selected_ids.size; });
-    el('rd-summary').innerHTML = `合計 <span style="font-size:1.2rem">${n}</span> 人 · 上限 ${rowData.capacity || '-'} 人`;
+    const stops=[...schoolMap.values()].filter(v=>v.selected_ids.size).length;
+    el('rd-summary').textContent = `本車本趟合計 ${n} 人 · ${stops} 個接送點 · ${rowData.capacity ? '整車上限 '+rowData.capacity+' 人' : '無人數上限'}`;
     return n;
   }
 
@@ -10008,7 +10009,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     }
 
     // 每所學校一個區塊
-    let html = '';
+    let html = '<p class="rd-stops-note">同車可接多所國小，依下方順序停靠；所有學校共用整車容量。未勾選學生的學校不會儲存為接送點。不會自動搬移其他車次學生。</p>';
+    let stopIndex=0;
     for (const [name, val] of schoolMap.entries()) {
       const students = await _getSchoolStudents(name, authPayload, modalRoster);
       if (!isCurrent() || version !== renderVersion) return;
@@ -10022,12 +10024,14 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       val.students = students;
       const checkedAll = students.length > 0 && students.every(s => val.selected_ids.has(s.student_id));
       html += `
-        <div data-school="${name}" style="margin-bottom:14px;border:1px solid #d4d1ca;border-radius:6px;overflow:hidden">
-          <div style="background:#f0efea;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
-            <div style="font-weight:600;color:#1B474D">🏫 ${name} <span style="color:#7a7974;font-weight:400;font-size:0.85rem">(${val.selected_ids.size}/${students.length})</span></div>
-            <div style="display:flex;gap:6px">
-              <button class="rd-toggle-all" data-school="${name}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #01696F;color:#01696F;border-radius:4px;cursor:pointer">${checkedAll?'取消全選':'全選'}</button>
-              <button class="rd-remove-school" data-school="${name}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #c44569;color:#c44569;border-radius:4px;cursor:pointer">移除</button>
+        <div class="rd-stop" data-school="${_esc(name)}" style="margin-bottom:14px;border:1px solid #d4d1ca;border-radius:6px;overflow:hidden">
+          <div class="rd-stop-header" style="background:#f0efea;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+            <div style="font-weight:600;color:#1B474D">第 ${++stopIndex} 站 · ${_esc(name)} <span class="rd-school-count" style="color:#7a7974;font-weight:400;font-size:0.85rem">(${val.selected_ids.size}/${students.length})</span></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <button class="rd-move" data-school="${_esc(name)}" data-dir="-1" ${stopIndex===1?'disabled':''} aria-label="${_esc(name)}上移">上移</button>
+              <button class="rd-move" data-school="${_esc(name)}" data-dir="1" ${stopIndex===schoolMap.size?'disabled':''} aria-label="${_esc(name)}下移">下移</button>
+              <button class="rd-toggle-all" data-school="${_esc(name)}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #01696F;color:#01696F;border-radius:4px;cursor:pointer">${checkedAll?'取消全選':'全選'}</button>
+              <button class="rd-remove-school" data-school="${_esc(name)}" style="padding:3px 10px;font-size:0.8rem;background:#fff;border:1px solid #c44569;color:#c44569;border-radius:4px;cursor:pointer">移除</button>
             </div>
           </div>
           <div style="padding:10px 14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px">
@@ -10035,7 +10039,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
               students.map(s => `
                 <label style="display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid #e5e7eb;border-radius:4px;cursor:pointer;font-size:0.85rem">
                   <input type="checkbox" class="rd-stu" data-school="${_esc(name)}" data-sid="${_esc(s.student_id)}" data-sname="${_esc(s.chinese_name)}" ${val.selected_ids.has(s.student_id)?'checked':''}>
-                  <span style="min-width:0;overflow-wrap:anywhere">${_esc(s.display_name || s.chinese_name)}</span>
+                  <span style="min-width:0;overflow-wrap:anywhere">${_esc(s.display_name || s.chinese_name)}${s.class_code ? ' · '+_esc(s.class_code) : ''}</span>
                 </label>
               `).join('')
             }
@@ -10055,6 +10059,15 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
   }
 
   function bindBodyEvents() {
+    el('rd-body').querySelectorAll('.rd-move').forEach(btn=>{
+      btn.onclick=()=>{
+        const entries=[...schoolMap.entries()],i=entries.findIndex(([name])=>name===btn.dataset.school),j=i+Number(btn.dataset.dir);
+        if(i<0||j<0||j>=entries.length)return;
+        [entries[i],entries[j]]=[entries[j],entries[i]];
+        schoolMap.clear();entries.forEach(([name,value])=>schoolMap.set(name,value));
+        renderBody();
+      };
+    });
     document.getElementById('rd-add-school')?.addEventListener('click', openSchoolPicker);
     document.querySelectorAll('.rd-remove-school').forEach(btn => {
       btn.onclick = () => {
@@ -10080,7 +10093,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
           card.querySelectorAll('.rd-stu').forEach(cb => {
             cb.checked = val.selected_ids.has(cb.dataset.sid);
           });
-          const titleSpan = card.querySelector('div > div > div > span');
+          const titleSpan = card.querySelector('.rd-school-count');
           if (titleSpan) titleSpan.textContent = '(' + val.selected_ids.size + '/' + val.students.length + ')';
           btn.textContent = allChecked ? '全選' : '取消全選';
         }
@@ -10096,7 +10109,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
         // 只更新該校頭部計數與合計，不重架整個 modal（避免卡頓）
         const card = cb.closest('[data-school]');
         if (card) {
-          const titleSpan = card.querySelector('div > div > div > span');
+          const titleSpan = card.querySelector('.rd-school-count');
           if (titleSpan) titleSpan.textContent = '(' + val.selected_ids.size + '/' + (val.students||[]).length + ')';
           // 「全選/取消全選」按鈕文字也即時切換
           const toggleBtn = card.querySelector('.rd-toggle-all');
@@ -10121,15 +10134,15 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     }
     const pick = document.createElement('div');
     pick.id = 'rd-school-picker';
-    pick.style.cssText = 'position:absolute;background:#fff;border:1px solid #d4d1ca;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:8px;z-index:10001;max-height:300px;overflow:auto';
-    pick.innerHTML = available.map(s => `<div data-name="${s.name}" data-code="${s.code}" style="padding:6px 12px;cursor:pointer;border-radius:4px" onmouseover="this.style.background='#f0efea'" onmouseout="this.style.background='#fff'">${s.name}</div>`).join('');
+    pick.style.cssText = 'position:fixed;background:#fff;border:1px solid #d4d1ca;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,0.15);padding:8px;z-index:10001;max-height:300px;max-width:calc(100vw - 24px);overflow:auto';
+    pick.innerHTML = available.map(s => `<button type="button" data-name="${_esc(s.name)}" data-code="${_esc(s.code||'')}" style="display:block;width:100%;padding:10px 12px;text-align:left;border:0;background:#fff;cursor:pointer">${_esc(s.name)}</button>`).join('');
     document.body.appendChild(pick);
     // 定位在按鈕下方
     const btn = document.getElementById('rd-add-school') || document.getElementById('rd-add-school-empty');
     const rect = btn.getBoundingClientRect();
-    pick.style.left = rect.left + 'px';
-    pick.style.top = (rect.bottom + 4) + 'px';
-    pick.querySelectorAll('div[data-name]').forEach(d => {
+    pick.style.left = Math.max(12,Math.min(rect.left,innerWidth-pick.offsetWidth-12)) + 'px';
+    pick.style.top = Math.max(12,Math.min(rect.bottom+4,innerHeight-pick.offsetHeight-12)) + 'px';
+    pick.querySelectorAll('[data-name]').forEach(d => {
       d.onclick = () => {
         schoolMap.set(d.dataset.name, {
           school_code: d.dataset.code,
@@ -10211,6 +10224,14 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
     try {
       const r = await _saveRouteDetails(rowData.row_index, session, rowData.date, rowData.route, details, authPayload);
       if (r && r.success && isCurrent()) {
+        rowData[session+'_school']=r.school_summary || '';
+        rowData[session+'_count']=total;
+        if(window._routeNamesCache?.[rowData.row_index]){
+          delete window._routeNamesCache[rowData.row_index][session];
+          delete window._routeNamesCache[rowData.row_index]['stops_'+session];
+        }
+        const stopSummary=document.querySelector(`#ps-table-wrap tr[data-row="${Number(rowData.row_index)}"] [data-stop-summary="${session}"]`);
+        if(stopSummary)stopSummary.textContent=rowData[session+'_school'] || '尚未安排';
         if (typeof onSaved === 'function') onSaved(total);
         close();
       } else if (r && r.success) {
@@ -10322,6 +10343,7 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
         if (!window._routeNamesCache[rid]) window._routeNamesCache[rid] = {};
         // 沒資料也寫 [],不要重複 fetch
         window._routeNamesCache[rid][session] = names;
+        window._routeNamesCache[rid]['stops_'+session] = Array.isArray(arr) ? arr.filter(d=>(d.student_ids||d.student_names||[]).length).map(d=>d.school_name) : null;
         delete window._routeNamesErrors[rid + ':' + session];
       });
     });
@@ -10341,6 +10363,12 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
 function _rehydrateRouteCells(rowsToHydrate) {
   rowsToHydrate.forEach(r => {
     ['noon', 'pm'].forEach(session => {
+      const stops=window._routeNamesCache?.[r.row_index]?.['stops_'+session];
+      if(Array.isArray(stops)){
+        r[session+'_school']=stops.join(' → ');
+        const summary=document.querySelector(`#ps-table-wrap tr[data-row="${Number(r.row_index)}"] [data-stop-summary="${session}"]`);
+        if(summary)summary.textContent=r[session+'_school']||'尚未安排';
+      }
       const cellAttr = session === 'noon' ? 'data-noon-cell' : 'data-pm-cell';
       const td = document.querySelector('#ps-table-wrap td[' + cellAttr + '="' + r.row_index + '"]');
       if (!td) return;
@@ -10590,13 +10618,13 @@ async function renderPickupSchedule(el) {
 <td style="padding:6px"><select data-field="noon_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.noon_vehicle)}</select></td>
 <td style="padding:6px"><select data-field="noon_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver)}</select></td>
 <td style="padding:6px"><select data-field="noon_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.noon_driver2)}</select></td>
-<td style="padding:6px"><select data-field="noon_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${schoolOptions(r.noon_school)}</select></td>
+<td style="padding:6px"><button class="btn-detail rp-stops" data-session="noon" title="安排同車多校與停靠順序"${dis}>安排多校</button><div class="rp-stop-summary" data-stop-summary="noon">${_esc2(r.noon_school)||'尚未安排'}</div></td>
 <td data-noon-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="noon_count" type="number" min="0" max="20" value="${r.noon_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="noon" title="選學校 + 學生" style="padding:3px 8px;background:#01696F;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'noon')}</td>
 <td style="padding:6px"><input data-field="noon_time" type="time" lang="en-GB" step="60" value="${r.noon_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
 <td style="padding:6px"><select data-field="pm_vehicle" style="width:75px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(vehicleOpts, r.pm_vehicle)}</select></td>
 <td style="padding:6px"><select data-field="pm_driver" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver)}</select></td>
 <td style="padding:6px"><select data-field="pm_driver2" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${_sel(driverOpts, r.pm_driver2)}</select></td>
-<td style="padding:6px"><select data-field="pm_school" style="width:100px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem"${dis}>${schoolOptions(r.pm_school)}</select></td>
+<td style="padding:6px"><button class="btn-detail rp-stops" data-session="pm" title="安排同車多校與停靠順序"${dis}>安排多校</button><div class="rp-stop-summary" data-stop-summary="pm">${_esc2(r.pm_school)||'尚未安排'}</div></td>
 <td data-pm-cell="${r.row_index}" style="padding:6px;vertical-align:top;width:180px;max-width:200px"><div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><input data-field="pm_count" type="number" min="0" max="20" value="${r.pm_count||''}" style="width:42px;border:1px solid #d4d1ca;padding:3px;font-size:0.85rem;text-align:center;border-radius:3px"${dis}><button class="btn-detail" data-session="pm" title="選學校 + 學生" style="padding:3px 8px;background:#7c3aed;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:0.78rem;font-weight:600"${dis}>📋 選</button></div>${isHoliday ? '' : _renderSessionNames(r, 'pm')}</td>
 <td style="padding:6px"><input data-field="pm_time" type="time" lang="en-GB" step="60" value="${r.pm_time||''}" style="width:90px;border:1px solid #d4d1ca;padding:2px;font-size:0.85rem;font-family:monospace"${dis}></td>
 <td style="padding:6px;text-align:center"><button class="btn-route-del" data-row="${r.row_index}" data-date="${_esc(r.date||'')}" data-route="${_esc(r.route||'')}" title="硬刪除整列" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem;padding:2px 6px">❌</button></td>
@@ -12868,7 +12896,7 @@ setInterval(_leadsPrefetchBadge, 180000);
 
 </script>
 <script src="route-policy.js?v=20260929-1"></script>
-<script src="route-policy-admin.js?v=20260929-1"></script>
+<script src="route-policy-admin.js?v=20260924-multistop-1"></script>
 <script src="student-semesters.js?v=2.20.4-timeout"></script>
 <script src="operations-current.js?v=20260923"></script>
 <script src="announcement-review.js?v=20260923-2"></script>

@@ -5,8 +5,8 @@
   const escape=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   window.XGRoutePolicy={
     accept(result){
-      ready=!!result.fixedPolicy&&result.fixedPolicy.version===_rpSpec().version&&result.fixedPolicy.effective===_rpSpec().effective;
-      if(!ready)throw Error('固定接送規則後端尚未更新，已停止編輯；請先部署 Gateway');
+      ready=result.multiStopVersion==='multi-stop-v1'&&!!result.fixedPolicy&&result.fixedPolicy.version===_rpSpec().version&&result.fixedPolicy.effective===_rpSpec().effective;
+      if(!ready)throw Error('單車多校接送後端尚未更新，已停止編輯；請先部署新版 Gateway');
     },
     isFixed:date=>_rpApplies(date),
     templates(date){
@@ -20,6 +20,7 @@
       return d.toISOString().slice(0,10)<_rpSpec().effective;
     },
     checkDetails(row,session,count){
+      if(row[session+'_returned_at'])throw Error('本班次已接回，學生及接送點保留唯讀');
       const rule=_rpRule(row.date,row.route);if(!rule.enforced)return;
       if(!ready)throw Error('固定規則尚未載入');
       if(rule.retained)throw Error('此為保留的既有特殊安排，名單不自動搬動');
@@ -35,11 +36,11 @@
         tr.querySelectorAll('[data-field]').forEach(control=>{
           const field=control.dataset.field,session=field.startsWith('noon_')?'noon':field.startsWith('pm_')?'pm':'';
           const fixed=['noon_vehicle','pm_vehicle','noon_time','pm_time','noon_count','pm_count'].includes(field);
-          if(fixed||rule.closed||rule.retained||(session&&!rule[session])||errors.length||row.noon_returned_at||row.pm_returned_at)control.disabled=true;
+          if(fixed||rule.closed||rule.retained||(session&&!rule[session])||errors.length||(session?row[session+'_returned_at']:(row.noon_returned_at||row.pm_returned_at)))control.disabled=true;
           if(fixed)control.title='固定規則或系統依學生明細計算，不可直接修改';
         });
         tr.querySelectorAll('.btn-detail').forEach(b=>{
-          if(rule.closed||rule.retained||!rule[b.dataset.session]||errors.length||row.status==='休'||row.noon_returned_at||row.pm_returned_at)b.disabled=true;
+          if(rule.closed||rule.retained||!rule[b.dataset.session]||errors.length||row.status==='休'||row[b.dataset.session+'_returned_at'])b.disabled=true;
         });
         tr.querySelectorAll('.btn-route-del,.btn-day-del').forEach(b=>{b.disabled=true;b.title='固定班表保留紀錄，請改設休';});
         // A conflicting uncompleted row can only be made inactive, never scheduled.
