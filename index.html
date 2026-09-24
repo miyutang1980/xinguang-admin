@@ -4458,13 +4458,14 @@ async function gwCallJson(action, params, fresh = false) {
   const readLabels = {routes_list:'接送排程',routes_get_staff:'接送人員',routes_get_details:'本班次已排學生',
     routes_get_details_batch:'接送姓名摘要',semester_assignments_list:'115-1 學期名冊',student_master_list:'學生主檔姓名'};
   const started = performance.now();
-  const timer = setTimeout(() => controller.abort(), readLabels[action] ? 20000 : 45000);
+  const timeoutMs = ['routes_get_details','routes_get_details_batch'].includes(action) ? 60000 : readLabels[action] ? 20000 : 45000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await gwCall(action, params, { cache:'no-store', signal:controller.signal });
     if (!response.ok) throw new Error('HTTP ' + response.status);
     return await response.json();
   } catch (error) {
-    if (error.name === 'AbortError' && readLabels[action]) throw new Error(readLabels[action] + '讀取超過 20 秒，已停止等待；請重新讀取，未更動資料');
+    if (error.name === 'AbortError' && readLabels[action]) throw new Error(readLabels[action] + '讀取超過 '+(timeoutMs/1000)+' 秒，已停止等待；請重新讀取，未更動資料');
     throw error;
   } finally {
     clearTimeout(timer);
@@ -9495,11 +9496,55 @@ function _pickupWeekInTerm(monday) {
 var _pickupReadCache = new Map();
 var _pickupReadPending = new Map();
 var _pickupReadGeneration = 0;
+var _pickupDetailsSnapshots = new Map();
+var _pickupDetailsPending = new Map();
+var _pickupBatchDetailsPending = new Map();
 window.invalidatePickupScheduleReads = function () {
   _pickupReadGeneration++;
   _pickupReadCache.clear();
   _pickupReadPending.clear();
+  _pickupDetailsSnapshots.clear();
+  _pickupDetailsPending.clear();
+  _pickupBatchDetailsPending.clear();
 };
+function _pickupDetailsKey(row,session) {
+  return JSON.stringify([_authEpoch,String((_currentUser||{}).username||''),_pickupRosterVersion,
+    _pickupReadGeneration,PICKUP_TERM.id,Number(row.row_index),row.date,row.route,session]);
+}
+function _pickupValidateDetails(details,row,session) {
+  if(!Array.isArray(details))throw new Error('接送明細不完整，不能視為零人');
+  const seen=new Set(),schools=new Set();
+  details.forEach(d=>{
+    if(!d||!d.school_name||schools.has(d.school_name)||!Array.isArray(d.student_ids)||
+      !Array.isArray(d.student_names)||d.student_ids.length!==d.student_names.length)
+      throw new Error('接送明細缺少可核對的學生編號或學校');
+    schools.add(d.school_name);
+    d.student_ids.forEach(id=>{
+      if(!id||seen.has(String(id)))throw new Error('接送學生編號缺漏或重複');
+      seen.add(String(id));
+    });
+  });
+  const expected=String(row[session+'_count']??'').trim();
+  if(expected!==''&&(!/^\d+$/.test(expected)||Number(expected)!==seen.size))
+    throw new Error('排程人數與已排學生不同，請重新載入班表');
+}
+function _pickupRememberDetails(row,session,details,source='validated-batch') {
+  _pickupValidateDetails(details,row,session);
+  const key=_pickupDetailsKey(row,session);
+  // Complete IDs only, current login only, short lived, never persistent storage.
+  if(_pickupDetailsSnapshots.size>=400)_pickupDetailsSnapshots.delete(_pickupDetailsSnapshots.keys().next().value);
+  _pickupDetailsSnapshots.set(key,{at:Date.now(),count:String(row[session+'_count']??''),
+    result:{success:true,details:structuredClone(details),readerVersion:'pickup-identity-v1',readSource:source}});
+}
+function _pickupCachedDetails(row,session) {
+  const key=_pickupDetailsKey(row,session),value=_pickupDetailsSnapshots.get(key);
+  if(!value)return null;
+  if(Date.now()-value.at>=30000||value.count!==String(row[session+'_count']??'')){
+    _pickupDetailsSnapshots.delete(key);return null;
+  }
+  _pickupValidateDetails(value.result.details,row,session);
+  return structuredClone(value.result);
+}
 async function _pickupScheduleRead(url, payload) {
   var epoch = _authEpoch, generation = _pickupReadGeneration;
   var key = epoch + ':' + generation + ':' + String((_currentUser || {}).username || '') + ':' + PICKUP_TERM.id + ':' + payload.action;
@@ -9695,6 +9740,9 @@ window.invalidatePickupRoster = function() {
   _pickupSemesterSnapshot = null;
   window._routeNamesCache = {};
   window._routeNamesErrors = {};
+  _pickupDetailsSnapshots.clear();
+  _pickupDetailsPending.clear();
+  _pickupBatchDetailsPending.clear();
 };
 async function _loadAllStudentsOnce(authPayload) {
   const key = String(_authEpoch) + ':' + String((_currentUser || {}).username || '') + ':' + _pickupRosterVersion;
@@ -9798,13 +9846,36 @@ async function _getSchoolStudents(schoolName, authPayload, roster) {
   return list;
 }
 
-async function _getRouteDetails(scheduleRow, session, authPayload) {
-  const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
-    action: 'get_route_details', schedule_row: scheduleRow, session
-  }, authPayload));
-  if (!r || r.success !== true) throw new Error((r && r.error) || '接送明細讀取未成功');
-  if (!Array.isArray(r.details)) throw new Error('接送明細回應格式錯誤，不能視為零人');
-  return r;
+async function _getRouteDetails(scheduleRow, session, authPayload, rowData, fresh=false) {
+  const key=rowData?_pickupDetailsKey(rowData,session):null;
+  if(key&&!fresh){
+    const cached=_pickupCachedDetails(rowData,session);
+    if(cached)return cached;
+    const batch=_pickupBatchDetailsPending.get(key);
+    if(batch){
+      await batch.promise;
+      if(key!==_pickupDetailsKey(rowData,session))throw new Error('名單讀取已失效，請重新載入');
+      const shared=_pickupCachedDetails(rowData,session);
+      if(shared)return shared;
+      throw new Error('共用明細讀取未完成，請按「重新取得資料」；未更動名單');
+    }
+  }
+  if(key&&_pickupDetailsPending.has(key))return structuredClone(await _pickupDetailsPending.get(key));
+  const promise=(async()=>{
+    const r = await _pickupCall(PICKUP_DETAILS_API, Object.assign({
+      action: 'get_route_details', schedule_row: scheduleRow, session
+    }, authPayload));
+    if(key&&key!==_pickupDetailsKey(rowData,session))throw new Error('名單讀取已失效，請重新載入');
+    if (!r || r.success !== true) throw new Error((r && r.error) || '接送明細讀取未成功');
+    if (!Array.isArray(r.details)) throw new Error('接送明細回應格式錯誤，不能視為零人');
+    if(rowData&&r.readerVersion==='pickup-identity-v1'){
+      _pickupRememberDetails(rowData,session,r.details,'validated-detail-cache');
+    }
+    return r;
+  })();
+  if(key)_pickupDetailsPending.set(key,promise);
+  try{return structuredClone(await promise);}
+  finally{if(key&&_pickupDetailsPending.get(key)===promise)_pickupDetailsPending.delete(key);}
 }
 
 async function _saveRouteDetails(scheduleRow, session, date, route, details, authPayload) {
@@ -9898,7 +9969,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       // A roster outage must not discard a successful detail read (or vice versa).
       // Uncertain writes and malformed details always require a new detail read.
       openRouteDetailsModal(rowData, session, authPayload, onSaved,
-        !uncertainWrite && !rosterDone ? successfulRead : null);
+        !uncertainWrite && !rosterDone ? {...successfulRead,force:true} : {force:true});
     };
     body.append(message, retry);
   }
@@ -9922,7 +9993,7 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       (retryRead && retryRead.epoch === modalEpoch && retryRead.version === modalRosterVersion &&
         retryRead.row === rowData.row_index && retryRead.session === session &&
         retryRead.details && Date.now()-retryRead.at < 30000 ?
-        Promise.resolve(retryRead.details) : _getRouteDetails(rowData.row_index, session, authPayload))
+        Promise.resolve(retryRead.details) : _getRouteDetails(rowData.row_index, session, authPayload, rowData, !!retryRead?.force))
         .then(value => {
           successfulRead.details=value;successfulRead.at=retryRead && retryRead.details === value ? retryRead.at : Date.now();
           detailsDone=true;paintRead();return value;
@@ -9933,7 +10004,8 @@ async function openRouteDetailsModal(rowData, session, authPayload, onSaved, ret
       (_allStudentsCache.displayNameSource === '學期班級指派!W' ? 'W 欄「學生中英文姓名」。' :
         '主檔相容模式（Gateway 未回傳 W 欄，需核對部署）。') +
       ' 名冊取得 ' + new Date(modalRosterAt).toLocaleTimeString('zh-TW') +
-      '（5 分鐘內共用，重新載入可立即更新）。排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。';
+      '（5 分鐘內共用，重新載入可立即更新）。排程列 ' + rowData.row_index + ' / ' + session + '；候選名冊不等於已加入本班次。' +
+      (['validated-batch','validated-detail-cache'].includes(results[1].readSource)?' 已排學生共用 30 秒內取得的完整明細（含學生編號）。':' 已排學生已向 Gateway 重新讀取。');
     existing = results[1];
     if (!isCurrent()) return;
     if (existing.details.some(d => !d || !d.school_name ||
@@ -10297,6 +10369,7 @@ function _renderRouteStudentNames(r){
 // 3. 失敗明確標示，不快取為零人
 async function _hydrateRouteNames(rowsToHydrate, authPayload) {
   const epoch = _authEpoch, version = _pickupRosterVersion;
+  const generation = _pickupReadGeneration;
   window._routeNamesPending = window._routeNamesPending || new Set();
   window._routeNamesErrors = window._routeNamesErrors || {};
 
@@ -10313,20 +10386,30 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
     if (needNoon || needPm) ridsToFetch.push(rid);
   }
   if (ridsToFetch.length === 0) return;
-  const key = epoch + ':' + version + ':' + ridsToFetch.slice().sort().join(',');
+  const key = epoch + ':' + version + ':' + generation + ':' + ridsToFetch.slice().sort().join(',');
   if (window._routeNamesPending.has(key)) return;
   window._routeNamesPending.add(key);
+  const batch={};
+  batch.promise=new Promise(resolve=>{batch.resolve=resolve;});
+  const batchKeys=[];
+  rowsToHydrate.filter(row=>ridsToFetch.includes(row.row_index)).forEach(row=>{
+    ['noon','pm'].forEach(session=>{
+      const k=_pickupDetailsKey(row,session);
+      batchKeys.push(k);_pickupBatchDetailsPending.set(k,batch);
+    });
+  });
 
   // 2. 一次 batch call
   try {
     var u = (typeof _currentUser === 'object' && _currentUser) ? _currentUser : {};
-    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd') || 'Xgp0p2TEh5';
+    var pwd = sessionStorage.getItem('xg_session_pwd') || localStorage.getItem('xg_admin_pwd');
+    if(!u.username||!pwd)throw new Error('登入已失效，請重新登入');
     const r = await gwCallJson('routes_get_details_batch', {
       adminUser: u.username || 'admin',
       adminPass: pwd,
       schedule_rows: ridsToFetch
     });
-    if (epoch !== _authEpoch || version !== _pickupRosterVersion) return;
+    if (epoch !== _authEpoch || version !== _pickupRosterVersion || generation !== _pickupReadGeneration) return;
     if (!r || r.success !== true || !r.details || typeof r.details !== 'object' || Array.isArray(r.details)) {
       throw new Error('批次姓名摘要未成功取得');
     }
@@ -10336,6 +10419,9 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
       ['noon', 'pm'].forEach(session => {
         const key = rid + ':' + session;
         const arr = details[key];
+        const row=rowsToHydrate.find(row=>row.row_index===rid);
+        // Missing entries are errors, never synthesize a zero-student success.
+        _pickupRememberDetails(row,session,arr);
         const names = [];
         if (Array.isArray(arr)) {
           arr.forEach(d => (d.student_names || []).forEach(n => names.push(n)));
@@ -10348,12 +10434,17 @@ async function _hydrateRouteNames(rowsToHydrate, authPayload) {
       });
     });
   } catch(e) {
-    if (epoch !== _authEpoch || version !== _pickupRosterVersion) return;
+    if (epoch !== _authEpoch || version !== _pickupRosterVersion || generation !== _pickupReadGeneration) return;
+    batchKeys.forEach(k=>_pickupDetailsSnapshots.delete(k));
     // No per-row fanout after an outage. A failed read must never be cached as [].
     ridsToFetch.forEach(rid => ['noon','pm'].forEach(session => {
       window._routeNamesErrors[rid + ':' + session] = true;
     }));
-  } finally { window._routeNamesPending.delete(key); }
+  } finally {
+    window._routeNamesPending.delete(key);
+    batchKeys.forEach(k=>{if(_pickupBatchDetailsPending.get(k)===batch)_pickupBatchDetailsPending.delete(k);});
+    batch.resolve();
+  }
 
   // 4. 一次重繪所有 cells
   requestAnimationFrame(() => _rehydrateRouteCells(rowsToHydrate));
