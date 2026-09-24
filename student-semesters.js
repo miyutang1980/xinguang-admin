@@ -30,6 +30,10 @@
   const timings = [];
   const viewCache = new Map();
   const VIEW_TTL = 5 * 60 * 1000;
+  // A read can exceed the former 20s cutoff during slow Gateway responses.
+  // This is a bounded tolerance improvement, not a claim that the backend is faster.
+  const READ_TIMEOUT_MS = 45000;
+  const WRITE_TIMEOUT_MS = 45000;
   let viewEpoch = -1, viewOwner = null, viewGeneration = 0;
   let viewSnapshotAt = 0;
   function clearViews() { viewGeneration++; viewCache.clear(); }
@@ -78,19 +82,41 @@
     const query = new URLSearchParams({ _action: action });
     Object.keys(params).forEach(key => query.set(typeof params[key] === 'object' ? key + '_json' : key,
       typeof params[key] === 'object' ? JSON.stringify(params[key]) : String(params[key])));
+    const reading = action.endsWith('_list');
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), action.endsWith('_list') ? 20000 : 45000);
+    let timer;
+    // Bound the whole response, including JSON parsing, even if a fetch wrapper
+    // ignores AbortSignal. Never replay writes or automatically retry reads.
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error('Gateway deadline exceeded');
+        error.name = 'AbortError';
+        reject(error);
+        controller.abort();
+      }, reading ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS);
+    });
     try {
-      const response = await fetch(GW_URL + '?' + query, { cache: 'no-store', signal: controller.signal });
-      if (!response.ok) throw new Error('服務連線失敗（HTTP ' + response.status + '）。');
-      const result = await response.json();
-      if (!result || Array.isArray(result) || result.success !== true) {
-        throw new Error(result && result.error ? String(result.error) : '後端尚未升級或回應格式不符，已停止操作。');
-      }
+      const operation = (async () => {
+        const response = await fetch(GW_URL + '?' + query, { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) throw new Error('服務連線失敗（HTTP ' + response.status + '）。');
+        const result = await response.json();
+        if (!result || Array.isArray(result) || result.success !== true) {
+          throw new Error(result && result.error ? String(result.error) : '後端尚未升級或回應格式不符，已停止操作。');
+        }
+        return result;
+      })();
+      const result = await Promise.race([operation, deadline]);
       ok = true;
       return result;
     } catch (error) {
-      if (error.name === 'AbortError') throw new Error('連線逾時；若剛才正在儲存，結果尚未確認，請重新整理核對後再操作。');
+      if (error.name === 'AbortError') {
+        const message = reading ?
+          '名冊讀取超過 45 秒，尚未取得完整資料；這不是空名冊。請重新讀取。若剛完成儲存，請先核對結果，勿重複送出。' :
+          '儲存回應超過 45 秒，結果尚未確認。請關閉視窗並重新讀取核對，勿直接重送。';
+        const timeout = new Error(message);
+        timeout.code = reading ? 'READ_TIMEOUT' : 'WRITE_TIMEOUT';
+        throw timeout;
+      }
       if (error instanceof SyntaxError) throw new Error('後端回傳的不是有效資料，請管理員確認 Gateway 部署版本。');
       if (error instanceof TypeError) throw new Error('無法連線；若剛才正在儲存，請重新整理核對結果，勿重複送出。');
       throw error;
@@ -251,7 +277,12 @@
     state.master = []; state.assignments = [];
     el.classList.add('ss-host');
     el.innerHTML = banner(kind === 'master' ? '學生主檔' : '學期班級指派', '正在讀取正式資料，請稍候…', kind !== 'master');
-    const status = progress(el.querySelector('.ss-banner p'), '正在讀取正式資料');
+    const status = progress(el.querySelector('.ss-banner p'), '正在讀取正式資料（最多等待 45 秒）');
+    const slowNotice = setTimeout(() => {
+      if (request === state.request && owner === session() && visible() && !state.ready) {
+        status.stage('服務回應較慢，仍在讀取；尚未開放寫入（最多 45 秒）');
+      }
+    }, 15000);
     try {
       // Use the just-verified server response; do not issue a fourth round trip.
       const result = verified || await readList(kind, semester, true);
@@ -296,10 +327,12 @@
     } catch (error) {
       if (request !== state.request || owner !== session() || !visible()) return;
       el.innerHTML = banner('無法載入｜已停用寫入', '這不是空名冊。未取得完整資料前，不提供新增、修改或整班升級。', true) +
-        `<div class="ss-error" role="alert">${esc(error.message)}<p>請確認登入與網路；若後端尚未升級，請管理員完成 Gateway 部署。不要改用舊名冊覆寫。</p></div>` +
+        `<div class="ss-error" role="alert">${esc(error.message)}<p>${error.code === 'READ_TIMEOUT' ?
+          '可按下方重新讀取。若持續逾時，請提供時間與畫面供查核；不要重建名冊或改用舊資料覆寫。' :
+          '請確認登入與網路；若後端尚未升級，請管理員完成 Gateway 部署。不要改用舊名冊覆寫。'}</p></div>` +
         button('重新讀取', 'ssRetry');
       el.querySelector('#ssRetry').onclick = () => { clearViews(); return render(el, kind); };
-    } finally { status.stop(); }
+    } finally { clearTimeout(slowNotice); status.stop(); }
   }
 
   function showDialog(title, html) {
