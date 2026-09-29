@@ -1,10 +1,11 @@
 /* Fixed schedule UI. Backend is authoritative; no writes during load. */
 (function(){
   'use strict';
-  let ready=false;
+  let ready=false,retainedEditReady=false;
   const escape=s=>String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   window.XGRoutePolicy={
     accept(result){
+      retainedEditReady=result.retainedEditVersion==='retained-trip-edit-v1';
       ready=result.multiStopVersion==='multi-stop-v1'&&!!result.fixedPolicy&&result.fixedPolicy.version===_rpSpec().version&&result.fixedPolicy.effective===_rpSpec().effective;
       if(!ready)throw Error('單車多校接送後端尚未更新，已停止編輯；請先部署新版 Gateway');
     },
@@ -23,7 +24,7 @@
       if(row[session+'_returned_at'])throw Error('本班次已接回，學生及接送點保留唯讀');
       const rule=_rpRule(row.date,row.route);if(!rule.enforced)return;
       if(!ready)throw Error('固定規則尚未載入');
-      if(rule.retained)throw Error('此為保留的既有特殊安排，名單不自動搬動');
+      if(rule.retained&&(!rule.editable||!retainedEditReady))throw Error(rule.editable?'這筆加班趟需先更新 Gateway 才能編輯':'此特殊安排尚未開放編輯');
       if(rule.closed||row.status==='休'||!rule[session])throw Error(rule.reason||'本日沒有此班次');
       const errors=_rpRowErrors(row,true);if(errors.length)throw Error('固定欄位不符，請先核對：'+errors.join('；'));
       if(rule.capacity!=null&&count>rule.capacity)throw Error('本趟上限 '+rule.capacity+' 人，超載不得儲存');
@@ -36,11 +37,12 @@
         tr.querySelectorAll('[data-field]').forEach(control=>{
           const field=control.dataset.field,session=field.startsWith('noon_')?'noon':field.startsWith('pm_')?'pm':'';
           const fixed=['noon_vehicle','pm_vehicle','noon_time','pm_time','noon_count','pm_count'].includes(field);
-          if(fixed||rule.closed||rule.retained||(session&&!rule[session])||errors.length||(session?row[session+'_returned_at']:(row.noon_returned_at||row.pm_returned_at)))control.disabled=true;
+          if(fixed||rule.closed||(rule.retained&&(!rule.editable||!retainedEditReady))||(session&&!rule[session])||errors.length||(session?row[session+'_returned_at']:(row.noon_returned_at||row.pm_returned_at)))control.disabled=true;
           if(fixed)control.title='固定規則或系統依學生明細計算，不可直接修改';
         });
         tr.querySelectorAll('.btn-detail').forEach(b=>{
-          if(rule.closed||rule.retained||!rule[b.dataset.session]||errors.length||row.status==='休'||row[b.dataset.session+'_returned_at'])b.disabled=true;
+          if(rule.closed||(rule.retained&&(!rule.editable||!retainedEditReady))||!rule[b.dataset.session]||errors.length||row.status==='休'||row[b.dataset.session+'_returned_at'])b.disabled=true;
+          if(rule.retained&&rule.editable&&!retainedEditReady)b.title='需更新 Gateway，才可編輯此筆加班趟';
         });
         tr.querySelectorAll('.btn-route-del,.btn-day-del').forEach(b=>{b.disabled=true;b.title='固定班表保留紀錄，請改設休';});
         // A conflicting uncompleted row can only be made inactive, never scheduled.
@@ -51,7 +53,9 @@
         const routeCell=tr.children[3];
         if(routeCell&&!routeCell.querySelector('.rp-tag')){
           const tag=document.createElement('div');tag.className='rp-tag';tag.style.cssText='font-size:12px;color:'+(errors.length?'#b91c1c':'#176347');
-          tag.textContent=errors.length?'規則衝突：'+errors.join('；'):rule.retained?'保留既有特殊安排（非固定範本）':'固定班表'+(rule.extra?' · 14:45 獨立趟次':'');
+          tag.textContent=errors.length?'規則衝突：'+errors.join('；'):rule.retained?
+            (rule.editable?(retainedEditReady?'保留加班趟 · 可編輯學生／人員':'加班趟編輯待 Gateway 更新'):'保留特殊安排 · 目前唯讀'):
+            '固定班表'+(rule.extra?' · 14:45 獨立趟次':'');
           routeCell.appendChild(tag);
         }
         if(tr.children[4]&&rule.capacity===null&&!rule.closed)tr.children[4].textContent='無上限';
