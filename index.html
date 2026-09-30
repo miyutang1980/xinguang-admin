@@ -437,12 +437,9 @@ function emptyData() {
 // ── 登入 ──────────────────────────────────────────────────
 var _loggedIn = false;
   _currentUser = null;
-// ── Google Sheets 雲端帳號 API ───────────────────────────────────
-// AUTH_API_URL: n8n Cloud webhook (Google Sheets 雲端帳號驗證)
-var AUTH_API_URL = 'https://miyutang.app.n8n.cloud/webhook/auth-login';
+// Login uses one Gateway request; the unavailable n8n fallback is disabled.
 var AUTH_GATEWAY_URL = 'https://script.google.com/macros/s/AKfycbw-7_a_OfUVlgegcLxkux_9dr9UlYSVKhi3uQjV-0sr2X2TpRRmCXtSM7jbIqMHK4hNww/exec';
-var AUTH_GATEWAY_TIMEOUT_MS = window.__XG_AUTH_GATEWAY_TIMEOUT_MS || 5000;
-var AUTH_FALLBACK_TIMEOUT_MS = window.__XG_AUTH_FALLBACK_TIMEOUT_MS || 10000;
+var AUTH_GATEWAY_TIMEOUT_MS = 15000;
 
 async function _authFetch(url, options, timeoutMs) {
   const controller = new AbortController();
@@ -520,7 +517,13 @@ async function _performLogin(attempt) {
     }, AUTH_GATEWAY_TIMEOUT_MS);
     if (attempt.epoch !== _authEpoch) return;
     if (Array.isArray(gwResult)) gwResult = gwResult[0] || {};
-    if (gwResult.success) {
+    if (!gwResult || typeof gwResult !== 'object') throw new Error('AUTH_RESPONSE_INVALID');
+    if (gwResult.success === true) {
+      if (!gwResult.user || typeof gwResult.user.username !== 'string' ||
+          gwResult.user.username.trim().toLowerCase() !== u.toLowerCase() ||
+          typeof gwResult.user.role !== 'string' || !gwResult.user.role.trim()) {
+        throw new Error('AUTH_RESPONSE_INVALID');
+      }
       _loggedIn = true;
       var rawPerms = gwResult.user.permissions;
       var perms = [];
@@ -558,96 +561,22 @@ async function _performLogin(attempt) {
       initApp();
       return;
     } else if (gwResult.error) {
-      // v2.18.18b: 辨識 Gateway 是否未部署新版 _authLogin
-      var errStr = String(gwResult.error || '');
-      if (errStr.indexOf('invalid type') >= 0 || errStr.indexOf('Unknown') >= 0 || errStr.indexOf('not found') >= 0) {
-        console.warn('Gateway 未部署新版 _authLogin · 下轉 n8n fallback');
-        // 不 return,繼續走下面的 n8n 路線
-      } else {
-        // 「帳號或密碼錯誤」·「此帳號已停用」等 · 顯示不轉
-        errEl.textContent = gwResult.error;
-        errEl.style.color = '#dc2626';
-        errEl.style.display = 'block';
-        return;
-      }
+      // Wrong password/disabled-account responses remain authoritative.
+      errEl.textContent = String(gwResult.error);
+      errEl.style.color = '#dc2626';
+      errEl.style.display = 'block';
+      return;
     }
   } catch (err) {
     if (attempt.epoch !== _authEpoch) return;
-    console.warn('Gateway 驗證未完成 · 轉 n8n fallback:', err);
+    // Log only the error class, never request URLs or credentials.
+    console.warn('Gateway 驗證未完成:', err && err.name || 'Error');
     errEl.textContent = err && err.name === 'AbortError' ?
-      '主要驗證超過 5 秒，切換備援驗證…' : '主要驗證未完成，切換備援驗證…';
-  }
-  
-  // 先試 Google Sheets 雲端 API（主要驗證方式）
-  if (AUTH_API_URL && !AUTH_API_URL.includes('__PLACEHOLDER__')) {
-    try {
-      attempt.stage = '備援驗證';
-      errEl.textContent = '備援驗證中…';
-      errEl.style.display = 'block';
-      errEl.style.color = '#6b7280';
-      
-      let result = await _authFetch(AUTH_API_URL, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ username: u, password: p })
-      }, AUTH_FALLBACK_TIMEOUT_MS);
-      if (attempt.epoch !== _authEpoch) return;
-      // n8n 回傳可能是陣列，取第一個
-      if (Array.isArray(result)) result = result[0] || {};
-      
-      if (result.success) {
-        _loggedIn = true;
-        // v2.18.17: permissions 可能是 JSON 字串 (從 Sheet col K 來) 或已是陣列
-        var rawPerms = result.user.permissions;
-        var perms = [];
-        if (Array.isArray(rawPerms)) {
-          perms = rawPerms;
-        } else if (typeof rawPerms === 'string' && rawPerms.trim()) {
-          try { perms = JSON.parse(rawPerms) || []; } catch(e) { perms = []; }
-        }
-        // 空 perms → 依角色預設 (applyPermissions 會再補一次,這裡先設好避免闃闃 token)
-        if (!perms.length && typeof ROLE_PERMS === 'object') {
-          perms = ROLE_PERMS[(result.user.role||'').toLowerCase()] || [];
-        }
-        _currentUser = {
-          username: result.user.username,
-          name: result.user.name || u,
-          role: result.user.role,
-          title: result.user.title || '',
-          permissions: perms
-        };
-        // 暫存密碼到 sessionStorage（帳號管理頁面需要驗證 admin 身份）
-        // sessionStorage 關掛瀏覽器就清除，比 localStorage 安全
-        try { sessionStorage.setItem('xg_session_pwd', p); localStorage.setItem('xg_admin_pwd', p); } catch(e){}
-        // 「記住我」：勾了就存一個 24 小時內有效的自動登入 token
-        try {
-          var rememberCb = document.getElementById('loginRemember');
-          if (rememberCb && rememberCb.checked){
-            localStorage.setItem('xg_remember', JSON.stringify({
-              username: u, password: p,
-              user: _currentUser,
-              expires: Date.now() + 24*60*60*1000
-            }));
-          } else {
-            localStorage.removeItem('xg_remember');
-          }
-        } catch(e){}
-        errEl.style.display = 'none';
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('appScreen').style.display = 'flex';
-        applyPermissions();
-        initApp();
-        return;
-      } else {
-        errEl.textContent = result.error || '帳號或密碼錯誤';
-        errEl.style.color = '#dc2626';
-        errEl.style.display = 'block';
-        return;
-      }
-    } catch (err) {
-      if (attempt.epoch !== _authEpoch) return;
-      console.warn('雲端驗證未完成：', err);
-    }
+      '驗證超過 15 秒，尚未登入。請稍後按「登入」重試；不會自動重送。' :
+      '驗證服務暫時無法回應，尚未登入。請稍後按「登入」重試。';
+    errEl.style.color = '#dc2626';
+    errEl.style.display = 'block';
+    return;
   }
   
   // Network failure is not permission to authenticate from hardcoded/browser data.
@@ -764,7 +693,7 @@ function checkSession() {
     if (userInput) userInput.value = saved.username || '';
     if (passInput) passInput.value = saved.password || '';
     if (cbInput) cbInput.checked = true;
-    // 延遲一下讓頁面載完、AUTH_API_URL 設好後再跳登入
+    // Wait for the page and Gateway transport to finish initializing.
     var sessionEpoch = _authEpoch;
     setTimeout(function(){
       if (sessionEpoch === _authEpoch && !_loggedIn && !_loginFlight && typeof doLogin === 'function') doLogin();
