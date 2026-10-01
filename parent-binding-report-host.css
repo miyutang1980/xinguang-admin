@@ -1,0 +1,4 @@
+.binding-report-mode .topbar-actions,.binding-report-mode #btnSaveSidebar,.binding-report-mode #saveBtnHint,
+.binding-report-mode .sidebar>div:has(#btnSheetsSync){display:none!important}
+#nav-parentBindingReport.active{background:rgba(255,255,255,.15)!important;color:#fff!important}
+#nav-parentBindingReport:focus-visible{outline:3px solid #a6cfb5;outline-offset:-3px}

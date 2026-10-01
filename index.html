@@ -133,6 +133,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 <link rel="stylesheet" href="operations-current.css?v=20260923">
 <link rel="stylesheet" href="announcement-review.css?v=20260923-1">
 <link rel="stylesheet" href="parent-binding-admin.css?v=20260923-5">
+<link rel="stylesheet" href="parent-binding-report-host.css?v=20261001-1">
 <link rel="stylesheet" href="route-policy-admin.css?v=20260924-multistop-1">
 <link rel="stylesheet" href="pickup-exceptions.css?v=20260929-1">
 </head>
@@ -208,6 +209,9 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
       </div>
     <button type="button" class="sidebar-item" onclick="switchSection('parentBinding')" id="nav-parentBinding" style="display:none">
         家長綁定審核
+      </button>
+    <button type="button" class="sidebar-item" onclick="switchSection('parentBindingReport')" id="nav-parentBindingReport" style="display:none;border:0;background:transparent;width:100%;text-align:left;font:inherit;color:inherit">
+        學生家長綁定對照
       </button>
     <div class="sidebar-item" onclick="switchSection('docs')" id="nav-docs">
         📖 文件中心
@@ -294,7 +298,7 @@ body:not(.is-admin) [onclick*="remove"] { display: none !important; }
 // v2.18.17: 后台全部 23 個功能頁 (與 sidebar / switchSection 完全對齊)
 var ALL_PERMS = [
   'dashboard','inquiry','booking','camp','assess','register','trial','trialBookings',
-  'leads','documents','students','classAssign','leaves','parentBinding','docs','announce','links','classes','webcal',
+  'leads','documents','students','classAssign','leaves','parentBinding','parentBindingReport','docs','announce','links','classes','webcal',
   'pickup','assignments','transfer','lineSrc','stats','accounts','health'
 ];
 var PERM_LABELS = {
@@ -302,7 +306,7 @@ var PERM_LABELS = {
   camp:'夏令營報名', assess:'分級檢測', register:'正式報名',
   trial:'體驗課排班', trialBookings:'體驗預約一覽',
   leads:'潛客名單', documents:'說明會簡報', students:'學生管理',
-  classAssign:'班級指派', leaves:'請假紀錄', parentBinding:'家長綁定審核',
+  classAssign:'班級指派', leaves:'請假紀錄', parentBinding:'家長綁定審核', parentBindingReport:'學生家長綁定對照',
   docs:'文件中心', announce:'公告', links:'連結中心', classes:'開班資訊',
   webcal:'參訪/檢測日曆', pickup:'接送排程',
   assignments:'今日接送', transfer:'強制轉交',
@@ -595,8 +599,8 @@ function effectivePermissions(user) {
   perms = perms.slice();
   // Binding Gateway authorizes admin/staff roles, not teacher/sales.
   // Preserve existing account settings; derive this role-based access in memory.
-  perms = perms.filter(function(p) { return p !== 'parentBinding'; });
-  if (role === 'admin' || role === 'staff') perms.push('parentBinding');
+  perms = perms.filter(function(p) { return p !== 'parentBinding' && p !== 'parentBindingReport'; });
+  if (role === 'admin' || role === 'staff') perms.push('parentBinding','parentBindingReport');
   // v2.20.3: Class assignment was split out of student management.
   // Existing student managers retain this workflow after login/reload. Derive
   // access in memory only; do not rewrite stored/custom account permissions.
@@ -643,6 +647,7 @@ function applyPermissions() {
 }
 function doLogout() {
   if (window.XGParentBinding) window.XGParentBinding.reset();
+  if (window.XGParentBindingReport) window.XGParentBindingReport.reset();
   _authEpoch++;
   _sectionVersion++;
   _loginFlight = null;
@@ -765,6 +770,10 @@ function updateBadges(data) {
 }
 
 function switchSection(sec) {
+  if (sec === 'parentBindingReport' && (!window.XGParentBindingReport || !window.XGParentBindingReport.allowed())) {
+    showToast('請使用管理員或行政帳號查閱。');
+    return;
+  }
   if (sec === 'parentBinding' && (!window.XGParentBinding || !window.XGParentBinding.allowed())) {
     showToast('請使用管理員或行政帳號登入。');
     return;
@@ -780,8 +789,10 @@ function switchSection(sec) {
   }
   var sectionVersion = ++_sectionVersion;
   if (window.XGParentBinding) window.XGParentBinding.reset();
+  if (window.XGParentBindingReport) window.XGParentBindingReport.reset();
   currentSection = sec;
   document.body.classList.toggle('binding-mode', sec === 'parentBinding');
+  document.body.classList.toggle('binding-report-mode', sec === 'parentBindingReport');
   document.body.classList.toggle('pickup-policy-mode', sec === 'pickup');
   document.body.classList.toggle('announcement-mode', sec === 'announce');
   // 帳號管理頁面
@@ -811,7 +822,7 @@ function switchSection(sec) {
     trial:'🗓️ 體驗課排班', trialBookings:'📅 體驗預約一覽', documents:'📎 說明會簡報',
     students:'學生管理 · 主檔',
     classAssign:'學期班級指派',
-    leaves:'📝 請假紀錄', parentBinding:'家長綁定審核',
+    leaves:'📝 請假紀錄', parentBinding:'家長綁定審核', parentBindingReport:'115-1 學生與家長綁定對照',
     docs:'📖 文件中心',
     links:'🔗 連結中心',
     classes:'📅 開班資訊',
@@ -841,6 +852,7 @@ function switchSection(sec) {
   else if(sec === 'classAssign') { _lazyRender(content, 'renderClassAssign', '班級指派模組'); }
   else if(sec === 'leaves') { _lazyRender(content, 'renderLeaves', '請假紀錄模組'); }
   else if(sec === 'parentBinding') { _lazyRender(content, 'renderParentBinding', '家長綁定審核模組'); }
+  else if(sec === 'parentBindingReport') { _lazyRender(content, 'renderParentBindingReport', '學生家長綁定唯讀對照'); }
   else if(sec === 'docs') { _lazyRender(content, 'renderDocs', '文件中心模組'); }
   else if(sec === 'announce') { _lazyRender(content, 'renderAnnounce', '公告模組'); }
   else if(sec === 'links') { _lazyRender(content, 'renderLinks', '連結中心模組'); }
@@ -12993,5 +13005,6 @@ setInterval(_leadsPrefetchBadge, 180000);
 <script src="operations-current.js?v=20260923"></script>
 <script src="announcement-review.js?v=20260923-2"></script>
 <script src="parent-binding-admin.js?v=20260923-5"></script>
+<script src="parent-binding-report-admin.js?v=20261001-1"></script>
 </body>
 </html>
