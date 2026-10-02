@@ -11286,7 +11286,8 @@ async function renderPickupSchedule(el) {
     const plan = await api({action:'fixed_week_copy_plan',src_monday:srcMon,dst_monday:dstMon});
     if (!isCurrent()) return;
     if (!plan || !plan.success) throw Error('預覽失敗：' + ((plan && plan.error) || '未知錯誤'));
-    if (plan.version !== 'fixed-week-copy-v1' || !Array.isArray(plan.summary) ||
+    if (plan.version !== 'fixed-week-copy-v2-rest1009' || !Array.isArray(plan.summary) ||
+        !Array.isArray(plan.warnings) ||
         !Array.isArray(plan.conflicts) || !Array.isArray(plan.skipped) || !Array.isArray(plan.paused) ||
         !/^[a-f0-9]{64}$/.test(plan.fingerprint || '') ||
         ![plan.added,plan.filled,plan.students].every(n=>Number.isInteger(n)&&n>=0)) {
@@ -12990,7 +12991,7 @@ setInterval(_leadsPrefetchBadge, 180000);
 </script>
 <script src="route-policy.js?v=20260928-retained-1"></script>
 <script src="route-policy-admin.js?v=20260928-retained-1"></script>
-<script src="week-copy.js?v=20261002-1"></script>
+<script src="week-copy.js?v=20261002-rest1009-2"></script>
 <script src="pickup-exceptions-shared.js?v=20260929-1"></script>
 <script src="pickup-exceptions-admin.js?v=20260929-1"></script>
 <script src="student-semesters.js?v=2.20.4-timeout"></script>
