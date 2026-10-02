@@ -9584,6 +9584,13 @@ async function _pickupCallGateway(originalUrl, payload) {
       gwBody.dst_monday = payload.dst_monday;
       gwBody.mode = payload.mode || 'skip';
     }
+    else if (n8nAction === 'fixed_week_copy_plan' || n8nAction === 'fixed_week_copy_apply') {
+      gwBody._action = n8nAction === 'fixed_week_copy_plan' ?
+        'routes_fixed_week_copy_plan' : 'routes_fixed_week_copy_apply';
+      gwBody.src_monday = payload.src_monday;
+      gwBody.dst_monday = payload.dst_monday;
+      if (payload.fingerprint) gwBody.fingerprint = payload.fingerprint;
+    }
     else throw new Error('unknown route-schedule action: ' + n8nAction);
   }
   // 接送明細 /admin/pickup-details
@@ -11259,8 +11266,10 @@ async function renderPickupSchedule(el) {
     await loadAll();  // 再重讀、讓名單重新顯示
   }
 
-  // ─── A3: 複製整週 (v2.18.7: 改用 Gateway routes_copy_week + 覆蓋選項) ───
+  // ─── A3: 固定班表安全複製整週（先預覽、不覆蓋） ───
+  let weekCopyBusy = false;
   document.getElementById('ps-copy-week').onclick = async () => {
+    if (weekCopyBusy || !isCurrent()) return;
     const srcMon = prompt('來源週次(週一日期, YYYY-MM-DD)?', document.getElementById('ps-filter-week').value || '');
     if (!srcMon || !/^\d{4}-\d{2}-\d{2}$/.test(srcMon)) return;
     if (!_pickupWeekInTerm(srcMon)) { alert('來源週不在本學期內，歷史排程不載入'); return; }
@@ -11268,57 +11277,39 @@ async function renderPickupSchedule(el) {
     if (!dstMon || !/^\d{4}-\d{2}-\d{2}$/.test(dstMon)) return;
     if (!_pickupWeekInTerm(dstMon)) { alert('目標週不在本學期內'); return; }
     if (srcMon === dstMon) { alert('來源與目標同週'); return; }
-
-    // Legacy server copy uses exact route names. Use the normalized client copy
-    // (skip existing rows) when an old-plate source is copied into the new semester.
-    const sourceEnd = new Date(srcMon + 'T00:00:00'); sourceEnd.setDate(sourceEnd.getDate() + 4);
-    const needsPlateUpdate = allRows.some(r => r.date >= srcMon && r.date <= _localDateStr(sourceEnd) &&
-      _routeNameForDate(r.route, dstMon) !== r.route);
-    if (needsPlateUpdate) {
-      if (!confirm('來源週含歷史車牌。將以本學期新車牌複製到 ' + dstMon + '，只補缺少的路線，不覆蓋目標週已有資料。是否繼續？')) return;
-      await _doCopyWeek(srcMon, dstMon);
-      return;
+    weekCopyBusy = true;
+    const copyButton = document.getElementById('ps-copy-week');
+    copyButton.disabled = true;
+    let submitted = false;
+    try {
+    document.getElementById('ps-status').textContent = '整週複製預覽中，不會寫入…';
+    const plan = await api({action:'fixed_week_copy_plan',src_monday:srcMon,dst_monday:dstMon});
+    if (!isCurrent()) return;
+    if (!plan || !plan.success) throw Error('預覽失敗：' + ((plan && plan.error) || '未知錯誤'));
+    if (plan.version !== 'fixed-week-copy-v1' || !Array.isArray(plan.summary) ||
+        !Array.isArray(plan.conflicts) || !Array.isArray(plan.skipped) || !Array.isArray(plan.paused) ||
+        !/^[a-f0-9]{64}$/.test(plan.fingerprint || '') ||
+        ![plan.added,plan.filled,plan.students].every(n=>Number.isInteger(n)&&n>=0)) {
+      throw Error('整週複製 Gateway 版本或回應不符，未執行');
     }
-
-    // 檢查目標週是否已有資料
-    const dstD = new Date(dstMon + 'T00:00:00');
-    const existingDst = allRows.filter(r => {
-      const rd = new Date(r.date + 'T00:00:00');
-      return rd >= dstD && rd <= new Date(dstD.getTime() + 4*86400000);
-    });
-
-    let mode = 'skip';
-    if (existingDst.length > 0) {
-      const choice = prompt(
-        '⚠️ 目標週 ' + dstMon + ' 已有 ' + existingDst.length + ' 條資料。\n\n' +
-        '請選擇如何處理:\n' +
-        '  輸入 1 = 強制覆蓋 (先刪目標週再複)\n' +
-        '  輸入 2 = 只補上沒的 (保留舊資料)\n' +
-        '  輸入 3 或取消 = 取消',
-        '1'
-      );
-      if (!choice || choice === '3') return;
-      if (choice === '1') mode = 'overwrite';
-      else if (choice === '2') mode = 'skip';
-      else { alert('取消'); return; }
-    }
-
-    if (mode === 'overwrite') {
-      if (!confirm('即將刪除目標週 ' + dstMon + ' 的 ' + existingDst.length + ' 條舊資料, 並從 ' + srcMon + ' 複製一份, 確定?')) return;
-    } else {
-      if (!confirm('將複製 ' + srcMon + ' 週 → ' + dstMon + ' 週 (mode=' + mode + '), 確定?')) return;
-    }
-
-    document.getElementById('ps-status').textContent = '複製中…';
-    const r = await api({ action: 'copy_week', src_monday: srcMon, dst_monday: dstMon, mode: mode });
-    if (r && r.success) {
-      var msg = '✅ 複製完成 · 新增 ' + r.inserted + ' 筆';
-      if (r.deleted > 0) msg += ' · 刪舊 ' + r.deleted + ' 筆';
-      if (r.skipped > 0) msg += ' · 跳過 ' + r.skipped + ' 筆(已存在)';
-      showToast(msg);
-      await loadAll();
-    } else {
-      alert('複製失敗: ' + ((r && r.error) || '未知錯誤'));
+    if (!window.XGWeekCopy) throw Error('整週複製預覽模組未載入，未執行');
+    if (!await XGWeekCopy.confirm(plan,srcMon,dstMon,isCurrent,el)) return;
+    if (!isCurrent()) return;
+    document.getElementById('ps-status').textContent = '整週複製中，請勿重複送出…';
+    submitted = true;
+    const r = await api({action:'fixed_week_copy_apply',src_monday:srcMon,dst_monday:dstMon,fingerprint:plan.fingerprint});
+    if (!isCurrent()) return;
+    if (!r || !r.success) throw Error((r && r.error) || '回應不明');
+    showToast('✅ 整週複製完成 · 新增 ' + r.added + ' 列 · 填入 ' + r.filled + ' 列 · 學生 ' + r.students + ' 筆');
+    } catch(e) {
+      if(isCurrent()) alert(String(e.message||e)+(submitted?'\n請先重新載入核對，不要直接重送；系統不自動重試。':'\n未執行複製。'));
+    } finally {
+      weekCopyBusy=false;
+      if(isCurrent()){
+        copyButton.disabled=false;
+        document.getElementById('ps-status').textContent=submitted?'操作已結束；正在重新讀取排程…':'預覽已結束，未複製。';
+        if(submitted) await loadAll();
+      }
     }
   };
 
@@ -12999,6 +12990,7 @@ setInterval(_leadsPrefetchBadge, 180000);
 </script>
 <script src="route-policy.js?v=20260928-retained-1"></script>
 <script src="route-policy-admin.js?v=20260928-retained-1"></script>
+<script src="week-copy.js?v=20261002-1"></script>
 <script src="pickup-exceptions-shared.js?v=20260929-1"></script>
 <script src="pickup-exceptions-admin.js?v=20260929-1"></script>
 <script src="student-semesters.js?v=2.20.4-timeout"></script>
